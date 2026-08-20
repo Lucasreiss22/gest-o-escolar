@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Perfil do Professor - Sistema Escolar</title>
+    
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
+        
+        /* Menu Lateral */
+        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
+        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
+        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
+        .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
+        
+        /* Área de Conteúdo */
+        .content { margin-left: 240px; padding: 35px; }
+        .header-action { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+        h2 { font-weight: 600; color: #2c3e50; }
+        
+        /* Botões e Alertas */
+        .btn { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; transition: 0.2s; }
+        .btn-primary { background-color: #3498db; color: white; }
+        .btn-primary:hover { background-color: #2980b9; }
+        .btn-secondary { background-color: #7f8c8d; color: white; }
+        .alert { padding: 15px; margin-bottom: 20px; border-radius: 6px; font-weight: 500; }
+        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+        /* Container de Cartões */
+        .card-box { background: white; border-radius: 8px; padding: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 30px; }
+        .card-title { font-size: 1.1rem; color: #2c3e50; margin-bottom: 20px; border-bottom: 2px solid #ecf0f1; padding-bottom: 8px; }
+        
+        /* Form Grid */
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 15px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
+        .form-group input { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
+        .form-group input:focus { border-color: #3498db; }
+        
+        /* Tabela */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { text-align: left; padding: 12px 15px; border-bottom: 1px solid #eee; font-size: 0.95rem; }
+        th { background-color: #f8f9fa; color: #2c3e50; font-weight: 600; }
+        tr:hover { background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h4>🏫 Gestão Escolar</h4>
+        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
+        <a href="{{ url_for('pagina_alunos') }}">👨‍🎓 Gestão de Alunos</a>
+        <a href="{{ url_for('pagina_professores') }}" class="active">👨‍🏫 Professores</a>
+        <a href="{{ url_for('pagina_pedagogico') }}">📚 Pedagógico</a>
+        <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
+        <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
+    </div>
+
+    <!-- Conteúdo Principal -->
+    <div class="content">
+        
+        <div class="header-action">
+            <h2>Perfil do Professor: {{ professor.nome_completo }}</h2>
+            <a href="{{ url_for('pagina_professores') }}" class="btn btn-secondary">← Voltar para Lista</a>
+        </div>
+
+        <!-- Mensagens de Feedback -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- FORMULÁRIO DE EDIÇÃO DO PROFESSOR -->
+        <div class="card-box">
+            <h3 class="card-title">Editar Dados e Faixa Salarial</h3>
+            
+            <form action="{{ url_for('detalhes_professor', professor_id=professor.id) }}" method="POST">
+                <input type="hidden" name="acao" value="editar_professor">
+                
+                <div class="form-grid">
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Nome Completo</label>
+                        <input type="text" name="nome_completo" value="{{ professor.nome_completo }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>CPF</label>
+                        <input type="text" name="cpf" value="{{ professor.cpf if professor.cpf else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Disciplina / Especialidade</label>
+                        <input type="text" name="especialidade" value="{{ professor.especialidade if professor.especialidade else '' }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Telefone</label>
+                        <input type="text" name="telefone" value="{{ professor.telefone if professor.telefone else '' }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Salário (R$)</label>
+                        <input type="text" name="salario" value="{{ professor.salario if professor.salario else '0.00' }}">
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>E-mail</label>
+                        <input type="email" name="email" value="{{ professor.email if professor.email else '' }}">
+                    </div>
+                </div>
+
+                <div style="margin-top: 15px;">
+                    <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- TURMAS MINISTRADAS -->
+        <div class="card-box">
+            <h3 class="card-title">Turmas Sob Responsabilidade deste Professor</h3>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID da Turma</th>
+                        <th>Nome da Turma</th>
+                        <th>Ano Letivo</th>
+                        <th>Turno</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for turma in turmas %}
+                    <tr>
+                        <td><strong>#{{ turma.id }}</strong>[cite: 8]</td>
+                        <td>{{ turma.nome }}[cite: 8]</td>
+                        <td>{{ turma.ano_letivo }}[cite: 8]</td>
+                        <td>{{ turma.turno }}[cite: 8]</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" style="text-align: center; color: #888; padding: 20px;">
+                            Este professor não está vinculado como responsável a nenhuma turma no momento.[cite: 8]
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+</body>
+</html>

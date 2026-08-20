@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detalhes do Aluno</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+</head>
+<body class="bg-light">
+
+    <div class="container-fluid py-4 px-4">
+        <!-- CABEÇALHO -->
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+            <a href="{{ url_for('pagina_alunos') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> Voltar para Alunos
+            </a>
+            <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalEditarAluno">
+                    <i class="bi bi-pencil-square"></i> Editar Aluno
+                </button>
+                <span class="badge {% if aluno.status in ['ativo', 'ATIVO'] %}bg-success{% else %}bg-secondary{% endif %} fs-6 text-uppercase">
+                    {{ aluno.status or 'Inativo' }}
+                </span>
+            </div>
+        </div>
+
+        <!-- MENSAGENS FLASH -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- CARD PRINCIPAL DO ALUNO -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body p-4">
+                <div class="d-flex align-items-center mb-3">
+                    <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-3 fs-2 shadow-sm" style="width: 60px; height: 60px;">
+                        <i class="bi bi-mortarboard-fill"></i>
+                    </div>
+                    <div>
+                        <h2 class="mb-0 fw-bold">{{ aluno.nome_completo or aluno.nome }}</h2>
+                        <small class="text-muted fs-6">
+                            Matrícula: <strong>{{ aluno.matricula or 'Não gerada' }}</strong> |
+                            Mensalidade Base: <strong>R$ {{ "%.2f"|format(aluno.valor_mensalidade or aluno.mensalidade_base or 0.0) }}</strong>
+                        </small>
+                    </div>
+                </div>
+
+                <hr>
+
+                <!-- DADOS DE CONTATO E ENDEREÇO -->
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <small class="text-muted d-block">CPF / RG</small>
+                        <strong>{{ aluno.cpf or 'Não informado' }} / {{ aluno.rg or '-' }}</strong>
+                    </div>
+                    <div class="col-md-3">
+                        <small class="text-muted d-block">Data de Nascimento</small>
+                        <strong>
+                            {% if aluno.data_nascimento or aluno.data_nasc %}
+                                {% set dt = aluno.data_nascimento or aluno.data_nasc %}
+                                {% if dt.strftime %}
+                                    {{ dt.strftime('%d/%m/%Y') }}
+                                {% else %}
+                                    {{ dt }}
+                                {% endif %}
+                            {% else %}
+                                Não informada
+                            {% endif %}
+                        </strong>
+                    </div>
+                    <div class="col-md-3">
+                        <small class="text-muted d-block">Telefone Principal</small>
+                        <strong>{{ aluno.telefone_principal or aluno.telefone or 'Não informado' }}</strong>
+                    </div>
+                    <div class="col-md-3">
+                        <small class="text-muted d-block">E-mail</small>
+                        <strong>{{ aluno.email or 'Não informado' }}</strong>
+                    </div>
+                    <div class="col-md-12">
+                        <small class="text-muted d-block">Endereço</small>
+                        <strong>
+                            {% if aluno.rua or aluno.logradouro %}
+                                {{ aluno.rua or aluno.logradouro }}{% if aluno.numero %}, {{ aluno.numero }}{% endif %}{% if aluno.bairro %} - {{ aluno.bairro }}{% endif %}{% if aluno.cidade %}, {{ aluno.cidade }}{% endif %}{% if aluno.estado %}/{{ aluno.estado }}{% endif %}
+                            {% else %}
+                                Não informado
+                            {% endif %}
+                        </strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- RESPONSÁVEIS LEGAIS -->
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-people-fill text-primary"></i> Responsáveis Legais</span>
+                        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalAddResponsavel">
+                            <i class="bi bi-plus-lg"></i> Adicionar
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        {% if responsaveis %}
+                            <ul class="list-group list-group-flush">
+                                {% for resp in responsaveis %}
+                                    {% set resp_id = resp.id or resp[0] %}
+                                    <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <div class="fw-bold">
+                                                {{ resp.nome_completo or resp.nome or resp[1] }}
+                                                <span class="badge bg-light text-dark border">{{ resp.grau_parentesco or resp.parentesco or 'Responsável' }}</span>
+                                            </div>
+                                            <small class="text-muted d-block"><i class="bi bi-telephone"></i> Telefone: {{ resp.telefone or 'Sem fone' }} | <i class="bi bi-envelope"></i> {{ resp.email or 'Sem email' }}</small>
+                                            <small class="text-muted d-block"><i class="bi bi-briefcase"></i> Trabalho: {{ resp.local_trabalho or 'N/A' }} ({{ resp.telefone_trabalho or '-' }})</small>
+                                        </div>
+                                        <div>
+                                            <button class="btn btn-sm btn-light border me-1" data-bs-toggle="modal" data-bs-target="#modalEditResp{{ resp_id }}" title="Editar Contato">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        </div>
+                                    </li>
+
+                                    <!-- MODAL EDITAR RESPONSÁVEL -->
+                                    <div class="modal fade" id="modalEditResp{{ resp_id }}" tabindex="-1" aria-hidden="true">
+                                        <div class="modal-dialog modal-dialog-centered">
+                                            <div class="modal-content">
+                                                <div class="modal-header">
+                                                    <h5 class="modal-title fw-bold">Editar Responsável Legal</h5>
+                                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                </div>
+                                                <form action="{{ url_for('pagina_alunos') }}" method="POST">
+                                                    <input type="hidden" name="acao" value="editar_responsavel">
+                                                    <input type="hidden" name="responsavel_id" value="{{ resp_id }}">
+                                                    <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
+
+                                                    <div class="modal-body">
+                                                        <div class="mb-3">
+                                                            <label class="form-label small fw-bold">Nome Completo</label>
+                                                            <input type="text" name="nome_completo" class="form-control" value="{{ resp.nome_completo or resp.nome or '' }}" required>
+                                                        </div>
+
+                                                        <div class="mb-3">
+                                                            <label class="form-label small fw-bold">CPF</label>
+                                                            <input type="text" name="cpf" class="form-control" value="{{ resp.cpf or '' }}" placeholder="000.000.000-00" required>
+                                                        </div>
+
+                                                        <div class="row g-2 mb-3">
+                                                            <div class="col-6">
+                                                                <label class="form-label small fw-bold">Parentesco</label>
+                                                                <input type="text" name="grau_parentesco" class="form-control" value="{{ resp.grau_parentesco or resp.parentesco or '' }}" placeholder="Ex: Mãe, Pai" required>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <label class="form-label small fw-bold">Telefone Principal</label>
+                                                                <input type="text" name="telefone" class="form-control" value="{{ resp.telefone or '' }}" required>
+                                                            </div>
+                                                        </div>
+                                                        <div class="mb-3">
+                                                            <label class="form-label small fw-bold">E-mail</label>
+                                                            <input type="email" name="email" class="form-control" value="{{ resp.email or '' }}">
+                                                        </div>
+                                                        <div class="row g-2 mb-3">
+                                                            <div class="col-6">
+                                                                <label class="form-label small fw-bold">Local de Trabalho</label>
+                                                                <input type="text" name="local_trabalho" class="form-control" value="{{ resp.local_trabalho or '' }}">
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <label class="form-label small fw-bold">Tel. Trabalho</label>
+                                                                <input type="text" name="telefone_trabalho" class="form-control" value="{{ resp.telefone_trabalho or '' }}">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="modal-footer justify-content-between">
+                                                        <button type="submit" name="acao" value="deletar_responsavel" class="btn btn-outline-danger btn-sm" onclick="return confirm('Deseja realmente remover este responsável?')">Excluir</button>
+                                                        <div>
+                                                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                                                            <button type="submit" class="btn btn-primary btn-sm">Salvar Alterações</button>
+                                                        </div>
+                                                    </div>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted my-2 small">Nenhum responsável cadastrado.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- TURMAS ATUAIS -->
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-header bg-white fw-bold py-3">
+                        <i class="bi bi-journal-bookmark-fill text-success"></i> Turmas Enturmadas
+                    </div>
+                    <div class="card-body">
+                        {% if turmas %}
+                            <ul class="list-group list-group-flush">
+                                {% for t in turmas %}
+                                    <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <div class="fw-bold">{{ t.nome or t[0] }}</div>
+                                            <small class="text-muted">Prof(a): {{ t.professor or t[3] or 'Não atribuído' }}</small>
+                                        </div>
+                                        <span class="badge bg-info text-dark">{{ t.ano_letivo or t[1] }} - {{ t.turno or t[2] }}</span>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted my-2 small">Aluno ainda não foi enturmado.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PESSOAS AUTORIZADAS A BUSCAR A CRIANÇA -->
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-shield-check text-success"></i> Pessoas Autorizadas a Buscar a Criança</span>
+                <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalAddAutorizado">
+                    <i class="bi bi-plus-lg"></i> Adicionar Autorizado
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Nome Completo</th>
+                                <th>CPF</th>
+                                <th>Telefone</th>
+                                <th>Vínculo / Parentesco</th>
+                                <th>Endereço</th>
+                                <th class="text-end">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if pessoas_autorizadas %}
+                                {% for aut in pessoas_autorizadas %}
+                                    {% set aut_id = aut.id or aut[0] %}
+                                    <tr>
+                                        <td class="fw-bold">{{ aut.nome_completo or aut.nome or aut[1] }}</td>
+                                        <td>{{ aut.cpf or aut[2] or '-' }}</td>
+                                        <td>{{ aut.telefone or aut[3] or '-' }}</td>
+                                        <td><span class="badge bg-secondary">{{ aut.vinculo or aut.parentesco or aut[4] or 'Autorizado' }}</span></td>
+                                        <td><small class="text-muted">{{ aut.endereco or aut[5] or 'Não informado' }}</small></td>
+                                        <td class="text-end">
+                                            <button class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#modalEditAutorizado{{ aut_id }}">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+
+                                            <!-- MODAL EDITAR AUTORIZADO -->
+                                            <div class="modal fade text-start" id="modalEditAutorizado{{ aut_id }}" tabindex="-1" aria-hidden="true">
+                                                <div class="modal-dialog modal-dialog-centered">
+                                                    <div class="modal-content">
+                                                        <div class="modal-header">
+                                                            <h5 class="modal-title fw-bold">Editar Pessoa Autorizada</h5>
+                                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                        </div>
+                                                        <form action="{{ url_for('pagina_alunos') }}" method="POST">
+                                                            <input type="hidden" name="acao" value="editar_autorizado">
+                                                            <input type="hidden" name="autorizado_id" value="{{ aut_id }}">
+                                                            <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
+
+                                                            <div class="modal-body">
+                                                                <div class="mb-3">
+                                                                    <label class="form-label small fw-bold">Nome Completo</label>
+                                                                    <input type="text" name="nome_completo" class="form-control" value="{{ aut.nome_completo or aut.nome or '' }}" required>
+                                                                </div>
+                                                                <div class="row g-2 mb-3">
+                                                                    <div class="col-6">
+                                                                        <label class="form-label small fw-bold">CPF</label>
+                                                                        <input type="text" name="cpf" class="form-control" value="{{ aut.cpf or '' }}" required>
+                                                                    </div>
+                                                                    <div class="col-6">
+                                                                        <label class="form-label small fw-bold">Telefone</label>
+                                                                        <input type="text" name="telefone" class="form-control" value="{{ aut.telefone or '' }}" required>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="mb-3">
+                                                                    <label class="form-label small fw-bold">Vínculo / Grau de Parentesco</label>
+                                                                    <input type="text" name="vinculo" class="form-control" value="{{ aut.vinculo or aut.parentesco or '' }}" placeholder="Ex: Avó, Tio">
+                                                                </div>
+                                                                <div class="mb-3">
+                                                                    <label class="form-label small fw-bold">Endereço Completo</label>
+                                                                    <input type="text" name="endereco" class="form-control" value="{{ aut.endereco or '' }}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="modal-footer justify-content-between">
+                                                                <button type="submit" name="acao" value="deletar_autorizado" class="btn btn-outline-danger btn-sm" onclick="return confirm('Remover esta autorização?')">Excluir</button>
+                                                                <div>
+                                                                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                                                                    <button type="submit" class="btn btn-primary btn-sm">Salvar Alterações</button>
+                                                                </div>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="6" class="text-center py-3 text-muted">Nenhuma pessoa externa autorizada a buscar este aluno.</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- HISTÓRICO FINANCEIRO DO ALUNO -->
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-wallet2 text-warning"></i> Extrato Financeiro / Mensalidades</span>
+                <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#modalNovaCobranca">
+                    <i class="bi bi-plus-lg"></i> Nova Cobrança
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>#ID</th>
+                                <th>Descrição</th>
+                                <th>Valor</th>
+                                <th>Vencimento</th>
+                                <th>Pagamento</th>
+                                <th>Status</th>
+                                <th class="text-end">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if financeiro %}
+                                {% for cobranca in financeiro %}
+                                    {% set cobranca_id = cobranca.id or cobranca[0] %}
+                                    {% set cobranca_status = cobranca.status or cobranca[5] %}
+                                    <tr>
+                                        <td>#{{ cobranca_id }}</td>
+                                        <td>{{ cobranca.descricao or cobranca[1] }}</td>
+                                        <td>R$ {{ "%.2f"|format(cobranca.valor or cobranca[2] or 0.0) }}</td>
+                                        <td>{{ cobranca.data_vencimento or cobranca[3] }}</td>
+                                        <td>{{ cobranca.data_pagamento or cobranca[4] or '-' }}</td>
+                                        <td>
+                                            {% if cobranca_status == 'Pago' %}
+                                                <span class="badge bg-success">Pago</span>
+                                            {% elif cobranca_status == 'Atrasado' %}
+                                                <span class="badge bg-danger">Atrasado</span>
+                                            {% else %}
+                                                <span class="badge bg-warning text-dark">Pendente</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end">
+                                            {% if cobranca_status != 'Pago' %}
+                                                <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#modalBaixa{{ cobranca_id }}">
+                                                    Dar Baixa
+                                                </button>
+
+                                                <!-- MODAL DE BAIXA RÁPIDA -->
+                                                <div class="modal fade text-start" id="modalBaixa{{ cobranca_id }}" tabindex="-1" aria-hidden="true">
+                                                    <div class="modal-dialog modal-dialog-centered">
+                                                        <div class="modal-content">
+                                                            <div class="modal-header">
+                                                                <h5 class="modal-title fw-bold">Registrar Pagamento #{{ cobranca_id }}</h5>
+                                                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                            </div>
+                                                            <form action="{{ url_for('pagina_financeiro') }}" method="POST">
+                                                                <input type="hidden" name="acao" value="dar_baixa">
+                                                                <input type="hidden" name="cobranca_id" value="{{ cobranca_id }}">
+                                                                <input type="hidden" name="origem_aluno_id" value="{{ aluno.id or aluno[0] }}">
+
+                                                                <div class="modal-body">
+                                                                    <div class="mb-3 text-start">
+                                                                        <label class="form-label small fw-bold">Forma de Pagamento</label>
+                                                                        <select name="forma_pagamento" class="form-select" required>
+                                                                            <option value="Pix">Pix</option>
+                                                                            <option value="Dinheiro">Dinheiro</option>
+                                                                            <option value="Cartão de Crédito">Cartão de Crédito</option>
+                                                                            <option value="Cartão de Débito">Cartão de Débito</option>
+                                                                            <option value="Boleto">Boleto</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div class="mb-3 text-start">
+                                                                        <label class="form-label small fw-bold">Data de Pagamento</label>
+                                                                        <input type="date" name="data_pagamento" class="form-control" required>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="modal-footer">
+                                                                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                                                                    <button type="submit" class="btn btn-success btn-sm">Confirmar Baixa</button>
+                                                                </div>
+                                                            </form>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            {% else %}
+                                                <small class="text-muted">{{ cobranca.forma_pagamento or cobranca[6] or 'Quitado' }}</small>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="7" class="text-center py-3 text-muted">Nenhuma cobrança registrada para este aluno.</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- BOLETIM E AVALIAÇÕES POR TRIMESTRE -->
+        <div class="card border-0 shadow-sm mt-4 p-4 bg-white">
+            <h3 class="card-title mb-4 fs-5 text-dark fw-bold"><i class="bi bi-journal-text text-secondary"></i> Boletim e Avaliações por Trimestre</h3>
+            
+            <!-- Formulário Rápido para Lançar Nota/Prova -->
+            <form action="{{ url_for('adicionar_nota', aluno_id=aluno.id) }}" method="POST" enctype="multipart/form-data" class="mb-4 p-4 bg-light rounded border">
+                <h4 class="mb-3 fs-6 text-secondary fw-bold">Lançar Nova Avaliação / Prova</h4>
+                
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Matéria</label>
+                        <select name="materia" required class="form-select">
+                            <option value="">Selecione a Matéria</option>
+                            <option value="História">História</option>
+                            <option value="Matemática">Matemática</option>
+                            <option value="Filosofia">Filosofia</option>
+                            <option value="Inglês">Inglês</option>
+                            <option value="Educação Física">Educação Física</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted">Trimestre</label>
+                        <select name="trimestre" required class="form-select">
+                            <option value="1">1º Trimestre</option>
+                            <option value="2">2º Trimestre</option>
+                            <option value="3">3º Trimestre</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold text-muted">Título da Avaliação</label>
+                        <input type="text" name="titulo_avaliacao" placeholder="Ex: Prova Mensal" required class="form-control">
+                    </div>
+
+                    <div class="col-md-2">
+                        <label class="form-label small fw-bold text-muted">Nota</label>
+                        <input type="text" name="nota" placeholder="Ex: 8.5" required class="form-control">
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-muted">Anexar Prova (PDF)</label>
+                    <input type="file" name="arquivo_pdf" accept="application/pdf" class="form-control">
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-sm">Salvar Nota e Prova</button>
+            </form>
+
+            <!-- Exibição das Notas cadastradas -->
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Trimestre</th>
+                            <th>Matéria</th>
+                            <th>Avaliação</th>
+                            <th>Nota</th>
+                            <th>Prova em PDF</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if provas_notas %}
+                            {% for p in provas_notas %}
+                            <tr>
+                                <td>{{ p.trimestre }}º Trimestre</td>
+                                <td class="fw-medium">{{ p.materia }}</td>
+                                <td>{{ p.titulo_avaliacao }}</td>
+                                <td><strong class="text-success">{{ p.nota }}</strong></td>
+                                <td>
+                                    {% if p.arquivo_pdf %}
+                                        <a href="{{ url_for('static', filename='uploads/provas/' + p.arquivo_pdf) }}" target="_blank" class="text-primary text-decoration-none fw-medium"><i class="bi bi-file-earmark-pdf"></i> Ver PDF</a>
+                                    {% else %}
+                                        <span class="text-muted fst-italic">Nenhum anexo</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-3 text-muted fst-italic">Nenhuma nota ou prova lançada para este aluno ainda.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= MODAIS DE ADIÇÃO ================= -->
+
+    <!-- 1. MODAL ADICIONAR RESPONSÁVEL -->
+    <div class="modal fade" id="modalAddResponsavel" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Adicionar Responsável Legal</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('pagina_alunos') }}" method="POST">
+                    <input type="hidden" name="acao" value="adicionar_responsavel">
+                    <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
+
+                    <div class="modal-body text-start">
+                        <div class="row g-3">
+                            <div class="col-md-12">
+                                <label class="form-label small fw-bold">Nome Completo</label>
+                                <input type="text" name="nome_completo" class="form-control" required>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">CPF</label>
+                                <input type="text" name="cpf" class="form-control" placeholder="000.000.000-00" required>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Parentesco</label>
+                                <input type="text" name="grau_parentesco" class="form-control" placeholder="Ex: Mãe, Pai, Tutor" required>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Telefone Principal</label>
+                                <input type="text" name="telefone" class="form-control" required>
+                            </div>
+
+                            <div class="col-md-12">
+                                <label class="form-label small fw-bold">E-mail</label>
+                                <input type="email" name="email" class="form-control">
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Local de Trabalho</label>
+                                <input type="text" name="local_trabalho" class="form-control">
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Tel. Trabalho</label>
+                                <input type="text" name="telefone_trabalho" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Adicionar Responsável</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. MODAL ADICIONAR PESSOA AUTORIZADA -->
+    <div class="modal fade" id="modalAddAutorizado" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Adicionar Pessoa Autorizada</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('adicionar_autorizado', aluno_id=aluno.id) }}" method="POST">
+                    <div class="modal-body text-start">
+                        <div class="row g-3">
+                            <div class="col-md-12">
+                                <label class="form-label small fw-bold">Nome Completo</label>
+                                <input type="text" name="nome_completo" class="form-control" required>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">CPF</label>
+                                <input type="text" name="cpf" class="form-control" placeholder="000.000.000-00" required>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Telefone</label>
+                                <input type="text" name="telefone" class="form-control" required>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Vínculo / Grau de Parentesco</label>
+                                <input type="text" name="vinculo" class="form-control" placeholder="Ex: Avó, Tio, Transporte" required>
+                            </div>
+
+                            <div class="col-md-12">
+                                <label class="form-label small fw-bold">Endereço Completo</label>
+                                <input type="text" name="endereco" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Adicionar Autorizado</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. MODAL NOVA COBRANÇA -->
+    <div class="modal fade" id="modalNovaCobranca" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Gerar Nova Cobrança</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('pagina_financeiro') }}" method="POST">
+                    <input type="hidden" name="acao" value="criar_cobranca">
+                    <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
+
+                    <div class="modal-body text-start">
+                        <div class="row g-3">
+                            <div class="col-md-12">
+                                <label class="form-label small fw-bold">Descrição</label>
+                                <input type="text" name="descricao" class="form-control" value="Mensalidade Escolar" required>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Valor (R$)</label>
+                                <input type="number" step="0.01" name="valor" class="form-control" value="{{ aluno.valor_mensalidade or aluno.mensalidade_base or '' }}" required>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Vencimento</label>
+                                <input type="date" name="data_vencimento" class="form-control" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-success btn-sm">Gerar Cobrança</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE EDIÇÃO DO ALUNO -->
+    <div class="modal fade" id="modalEditarAluno" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Editar Dados do Aluno</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('pagina_alunos') }}" method="POST">
+                    <input type="hidden" name="acao" value="editar_aluno">
+                    <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
+
+                    <div class="modal-body text-start">
+                        <div class="row g-3">
+                            <div class="col-md-8">
+                                <label class="form-label small fw-bold">Nome Completo</label>
+                                <input type="text" name="nome_completo" class="form-control" value="{{ aluno.nome_completo or aluno.nome }}" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Status</label>
+                                <select name="status" class="form-select">
+                                    <option value="ATIVO" {% if aluno.status in ['ativo', 'ATIVO'] %}selected{% endif %}>Ativo</option>
+                                    <option value="INATIVO" {% if aluno.status in ['inativo', 'INATIVO'] %}selected{% endif %}>Inativo</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">CPF</label>
+                                <input type="text" name="cpf" class="form-control" value="{{ aluno.cpf or '' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">RG</label>
+                                <input type="text" name="rg" class="form-control" value="{{ aluno.rg or '' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Data de Nascimento</label>
+                                <input type="date" name="data_nascimento" class="form-control" value="{{ aluno.data_nascimento or aluno.data_nasc or '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Telefone Principal</label>
+                                <input type="text" name="telefone" class="form-control" value="{{ aluno.telefone_principal or aluno.telefone or '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">E-mail</label>
+                                <input type="email" name="email" class="form-control" value="{{ aluno.email or '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Logradouro / Rua</label>
+                                <input type="text" name="rua" class="form-control" value="{{ aluno.rua or aluno.logradouro or '' }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small fw-bold">Número</label>
+                                <input type="text" name="numero" class="form-control" value="{{ aluno.numero or '' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Bairro</label>
+                                <input type="text" name="bairro" class="form-control" value="{{ aluno.bairro or '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Cidade</label>
+                                <input type="text" name="cidade" class="form-control" value="{{ aluno.cidade or '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Estado (UF)</label>
+                                <input type="text" name="estado" class="form-control" value="{{ aluno.estado or '' }}" maxlength="2">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Salvar Alterações</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

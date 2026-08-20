@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Gestão Escolar</title>
+    
+    <!-- Estilos Embutidos Globais -->
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
+        
+        /* Menu Lateral Escuro */
+        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
+        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
+        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
+        .sidebar a:hover { background-color: #34495e; border-left-color: #3498db; }
+        
+        /* Área de Conteúdo */
+        .content { margin-left: 240px; padding: 35px; }
+        h2 { margin-bottom: 25px; font-weight: 600; color: #2c3e50; }
+        
+        /* Grid dos Cards */
+        .row { display: flex; gap: 20px; flex-wrap: wrap; }
+        .col-md-4 { flex: 1; min-width: 250px; }
+        
+        /* Cards Coloridos */
+        .card { padding: 25px; border-radius: 10px; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+        .card h5 { font-size: 1rem; opacity: 0.9; margin-bottom: 15px; font-weight: 500; }
+        .card .display-5 { font-size: 2.8rem; font-weight: bold; }
+        
+        .bg-primary { background-color: #3498db; }
+        .bg-success { background-color: #2ecc71; }
+        .bg-warning { background-color: #f39c12; color: white; }
+    </style>
+</head>
+<body>
+
+    <!-- Menu Lateral Padronizado (Fixo em todas as telas) -->
+    <div class="sidebar">
+        <h4>🏫 Gestão Escolar</h4>
+        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
+        <a href="{{ url_for('pagina_alunos') }}">👨‍🎓 Gestão de Alunos</a>
+        <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
+        <a href="{{ url_for('pagina_pedagogico') }}">📚 Pedagógico</a>
+        <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
+        <a href="{{ url_for('calendario_escolar') }}">📅 Calendário Escolar</a>
+        <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
+    </div>
+
+    <!-- Conteúdo Dinâmico que muda de página para página -->
+    <div class="content">
+        {% block content %}
+        {% endblock %}
+    </div>
+
+</body>
+</html>

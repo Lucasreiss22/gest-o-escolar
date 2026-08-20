@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Módulo Pedagógico - Sistema Escolar</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
+        
+        /* Menu Lateral */
+        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
+        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
+        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
+        .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
+        
+        /* Conteúdo Principal */
+        .content { margin-left: 240px; padding: 35px; }
+        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+        h2 { font-weight: 600; color: #2c3e50; }
+        
+        /* Cards e Tabelas */
+        .card-box { background: white; border-radius: 8px; padding: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        .table-responsive { width: 100%; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: #f8fafc; color: #475569; font-weight: 600; }
+        tr:hover { background-color: #f8fafc; }
+        
+        /* Botões */
+        .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; transition: 0.2s; font-size: 0.85rem; }
+        .btn-primary { background-color: #3498db; color: white; }
+        .btn-primary:hover { background-color: #2980b9; }
+        .btn-danger { background-color: #e74c3c; color: white; padding: 6px 10px; font-size: 0.8rem; }
+        .btn-danger:hover { background-color: #c0392b; }
+        
+        /* Formulário de Cadastro Rápido */
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
+        .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
+        
+        /* Alertas */
+        .alert { padding: 15px; margin-bottom: 20px; border-radius: 6px; font-weight: 500; }
+        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    </style>
+</head>
+<body>
+
+    <!-- Menu Lateral Padronizado -->
+    <div class="sidebar">
+        <h4>🏫 Gestão Escolar</h4>
+        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
+        <a href="{{ url_for('pagina_alunos') }}">👨‍🎓 Gestão de Alunos</a>
+        <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
+        <a href="{{ url_for('pagina_pedagogico') }}" class="active">📚 Pedagógico</a>
+        <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
+        <a href="{{ url_for('calendario_escolar') }}">📅 Calendário Escolar</a>
+        <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
+    </div>
+
+    <!-- Conteúdo Principal -->
+    <div class="content">
+        <div class="header-flex">
+            <h2>📚 Módulo Pedagógico (Turmas e Matérias)</h2>
+        </div>
+
+        <!-- Mensagens Flash do Flask -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Formulário para Cadastrar Nova Turma -->
+        <div class="card-box">
+            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Cadastrar Nova Turma</h3>
+            <form action="{{ url_for('cadastrar_turma') }}" method="POST">
+                <div class="form-grid">
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Nome da Turma / Série</label>
+                        <input type="text" name="nome" placeholder="Ex: 1º Ano do Ensino Médio" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Turno</label>
+                        <select name="turno" required>
+                            <option value="">Selecione...</option>
+                            <option value="Manhã">Manhã</option>
+                            <option value="Tarde">Tarde</option>
+                            <option value="Noite">Noite</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Cadastrar Turma</button>
+            </form>
+        </div>
+
+        <!-- Tabela de Turmas Cadastradas -->
+        <div class="card-box">
+            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Turmas Ativas</h3>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Nome da Turma</th>
+                            <th>Turno</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if turmas %}
+                            {% for turma in turmas %}
+                            <tr>
+                                <td>{{ turma.nome }}</td>
+                                <td>{{ turma.turno }}</td>
+                                <td>
+                                    <form action="{{ url_for('excluir_turma', id=turma.id) }}" method="POST" style="display:inline;">
+                                        <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja realmente excluir esta turma?');">Excluir</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="3" style="text-align: center; color: #777;">Nenhuma turma cadastrada no momento.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

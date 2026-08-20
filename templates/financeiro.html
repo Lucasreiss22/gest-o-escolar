@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Módulo Financeiro - Gestão Escolar</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
+        
+        /* Menu Lateral */
+        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
+        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
+        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
+        .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
+        
+        /* Conteúdo Principal */
+        .content { margin-left: 240px; padding: 35px; }
+        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+        h2 { font-weight: 600; color: #2c3e50; }
+        
+        /* Cards de Resumo */
+        .resumo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 25px; }
+        .card-resumo { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-left: 5px solid #3498db; }
+        .card-resumo.recebido { border-left-color: #2ecc71; }
+        .card-resumo.pendente { border-left-color: #f39c12; }
+        .card-resumo.atrasado { border-left-color: #e74c3c; }
+        .card-resumo h4 { font-size: 0.85rem; color: #7f8c8d; text-transform: uppercase; margin-bottom: 8px; }
+        .card-resumo .valor { font-size: 1.5rem; font-weight: 700; color: #2c3e50; }
+
+        /* Cards e Tabelas */
+        .card-box { background: white; border-radius: 8px; padding: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        .table-responsive { width: 100%; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: #f8fafc; color: #475569; font-weight: 600; }
+        tr:hover { background-color: #f8fafc; }
+        
+        /* Botões e Badges */
+        .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; transition: 0.2s; font-size: 0.85rem; }
+        .btn-primary { background-color: #3498db; color: white; }
+        .btn-primary:hover { background-color: #2980b9; }
+        .btn-success { background-color: #2ecc71; color: white; }
+        .btn-success:hover { background-color: #27ae60; }
+        .btn-danger { background-color: #e74c3c; color: white; padding: 6px 10px; font-size: 0.8rem; }
+        .btn-danger:hover { background-color: #c0392b; }
+
+        .badge { padding: 5px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
+        .badge-pago { background-color: #d4edda; color: #155724; }
+        .badge-pendente { background-color: #fff3cd; color: #856404; }
+        .badge-atrasado { background-color: #f8d7da; color: #721c24; }
+        
+        /* Formulários */
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
+        .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
+        
+        /* Alertas */
+        .alert { padding: 15px; margin-bottom: 20px; border-radius: 6px; font-weight: 500; }
+        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    </style>
+</head>
+<body>
+
+    <!-- Menu Lateral Padronizado -->
+    <div class="sidebar">
+        <h4>🏫 Gestão Escolar</h4>
+        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
+        <a href="{{ url_for('pagina_alunos') }}">👨‍🎓 Gestão de Alunos</a>
+        <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
+        <a href="{{ url_for('pagina_pedagogico') }}">📚 Pedagógico</a>
+        <a href="{{ url_for('pagina_financeiro') }}" class="active">💰 Financeiro</a>
+        <a href="{{ url_for('calendario_escolar') }}">📅 Calendário Escolar</a>
+        <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
+    </div>
+
+    <!-- Conteúdo Principal -->
+    <div class="content">
+        <div class="header-flex">
+            <h2>💰 Módulo Financeiro</h2>
+        </div>
+
+        <!-- Mensagens Flash -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Cards de Resumo Financeiro -->
+        <div class="resumo-grid">
+            <div class="card-resumo recebido">
+                <h4>Total Recebido</h4>
+                <div class="valor">R$ {{ "%.2f"|format(totais.recebido) }}</div>
+            </div>
+            <div class="card-resumo pendente">
+                <h4>Total Pendente</h4>
+                <div class="valor">R$ {{ "%.2f"|format(totais.pendente) }}</div>
+            </div>
+            <div class="card-resumo atrasado">
+                <h4>Total Atrasado</h4>
+                <div class="valor">R$ {{ "%.2f"|format(totais.atrasado) }}</div>
+            </div>
+        </div>
+
+        <!-- Formulário para Gerar Nova Cobrança Individual -->
+        <div class="card-box">
+            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Gerar Nova Cobrança</h3>
+            <form action="{{ url_for('pagina_financeiro') }}" method="POST">
+                <input type="hidden" name="acao" value="criar_cobranca">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Aluno</label>
+                        <select name="aluno_id" required>
+                            <option value="">Selecione o aluno...</option>
+                            {% for aluno in alunos %}
+                                <option value="{{ aluno.id }}">{{ aluno.nome_completo or aluno.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Descrição</label>
+                        <input type="text" name="descricao" placeholder="Ex: Mensalidade Referente a Março" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Valor (R$)</label>
+                        <input type="text" name="valor" placeholder="0.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Data de Vencimento</label>
+                        <input type="date" name="data_vencimento" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Registrar Cobrança</button>
+            </form>
+        </div>
+
+        <!-- Tabela / Histórico de Mensalidades -->
+        <div class="card-box">
+            <div class="header-flex" style="margin-bottom: 15px;">
+                <h3 style="font-size: 1.1rem; color: #2c3e50;">Histórico de Mensalidades e Cobranças</h3>
+                <!-- Filtros -->
+                <form method="GET" action="{{ url_for('pagina_financeiro') }}" style="display: flex; gap: 10px;">
+                    <input type="text" name="busca" placeholder="Buscar aluno..." value="{{ busca }}" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.85rem;">
+                    <select name="status" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.85rem;">
+                        <option value="">Todos os status</option>
+                        <option value="Pago" {% if status == 'Pago' %}selected{% endif %}>Pago</option>
+                        <option value="Pendente" {% if status == 'Pendente' %}selected{% endif %}>Pendente</option>
+                        <option value="Atrasado" {% if status == 'Atrasado' %}selected{% endif %}>Atrasado</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.85rem;">Filtrar</button>
+                </form>
+            </div>
+
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Aluno</th>
+                            <th>Descrição</th>
+                            <th>Valor</th>
+                            <th>Vencimento</th>
+                            <th>Status</th>
+                            <th>Forma / Pagamento</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if lancamentos %}
+                            {% for item in lancamentos %}
+                            <tr>
+                                <td><strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong></td>
+                                <td>{{ item.descricao or '-' }}</td>
+                                <td>R$ {{ "%.2f"|format(item.valor|float if item.valor else 0) }}</td>
+                                <td>{{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}</td>
+                                <td>
+                                    {% if item.status == 'Pago' %}
+                                        <span class="badge badge-pago">Pago</span>
+                                    {% elif item.status == 'Pendente' %}
+                                        <span class="badge badge-pendente">Pendente</span>
+                                    {% else %}
+                                        <span class="badge badge-atrasado">Atrasado</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if item.status == 'Pago' %}
+                                        {{ item.forma_pagamento or 'Dinheiro' }}<br>
+                                        <small style="color: #777;">{{ item.data_pagamento.strftime('%d/%m/%Y') if item.data_pagamento else '' }}</small>
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div style="display: flex; gap: 5px; align-items: center;">
+                                        {% if item.status != 'Pago' %}
+                                        <!-- Formulário Rápido para Dar Baixa -->
+                                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center;">
+                                            <input type="hidden" name="acao" value="dar_baixa">
+                                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                            <input type="hidden" name="forma_pagamento" value="Dinheiro">
+                                            <input type="hidden" name="data_pagamento" value="{{ data_hoje }}">
+                                            <button type="submit" class="btn btn-success" style="padding: 5px 10px; font-size: 0.75rem;">Dar Baixa</button>
+                                        </form>
+                                        {% endif %}
+                                        <form action="{{ url_for('excluir_financeiro', id=item.id) }}" method="POST" style="display:inline;">
+                                            <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: #777;">Nenhum registro financeiro encontrado.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
