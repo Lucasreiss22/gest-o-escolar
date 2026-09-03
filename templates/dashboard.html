@@ -11,7 +11,7 @@
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
         
         /* Menu Lateral Escuro */
-        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
+        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; overflow-y: auto; }
         .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
         .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
         .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
@@ -21,7 +21,7 @@
         h2 { margin-bottom: 25px; font-weight: 600; color: #2c3e50; }
         
         /* Grid dos Cards */
-        .row { display: flex; gap: 20px; flex-wrap: wrap; }
+        .row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 30px; }
         .col-md-4 { flex: 1; min-width: 250px; }
         
         /* Cards Coloridos */
@@ -32,11 +32,18 @@
         .bg-primary { background-color: #3498db; }
         .bg-success { background-color: #2ecc71; }
         .bg-warning { background-color: #f39c12; color: white; }
+        .bg-info { background-color: #8e44ad; color: white; }
+
+        /* Barra de boas-vindas / topo interna */
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; background: white; padding: 15px 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .user-info { font-size: 0.95rem; color: #555; }
+        .btn-logout { background-color: #e74c3c; color: white; padding: 8px 15px; border-radius: 5px; text-decoration: none; font-size: 0.9rem; transition: 0.2s; }
+        .btn-logout:hover { background-color: #c0392b; }
     </style>
 </head>
 <body>
 
-    <!-- Menu Lateral Padronizado -->
+    <!-- Menu Lateral Atualizado com Controle de Perfil -->
     <div class="sidebar">
         <h4>🏫 Gestão Escolar</h4>
         <a href="{{ url_for('dashboard') }}" class="active">📊 Dashboard</a>
@@ -44,13 +51,31 @@
         <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
         <a href="{{ url_for('pagina_pedagogico') }}">📚 Pedagógico</a>
         <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
+        
+        {% if session.get('usuario_papel') == 'admin' %}
+        <a href="{{ url_for('gerenciar_usuarios') }}">👥 Gerenciar Usuários</a>
+        {% endif %}
+        
         <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
     </div>
 
     <!-- Conteúdo do Dashboard -->
     <div class="content">
+        
+        <!-- Barra Superior com Informações do Usuário Logado -->
+        <div class="top-bar">
+            <div class="user-info">
+                Logado como: <strong>{{ session.get('usuario_nome', 'Usuário') }}</strong> 
+                (<span style="text-transform: uppercase; font-size: 0.8rem; color: #3498db; font-weight: bold;">{{ session.get('usuario_papel', 'comum') }}</span>)
+            </div>
+            <div>
+                <a href="{{ url_for('logout') }}" class="btn-logout">🚪 Sair</a>
+            </div>
+        </div>
+
         <h2>Painel Principal (Dashboard)</h2>
 
+        <!-- Cards de Métricas Principais -->
         <div class="row">
             <div class="col-md-4">
                 <div class="card bg-primary">
@@ -73,6 +98,19 @@
                 </div>
             </div>
         </div>
+
+        {% if session.get('usuario_papel') == 'admin' %}
+        <!-- Cards Adicionais Exclusivos para Administradores -->
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card bg-info">
+                    <h5>Usuários do Sistema</h5>
+                    <div class="display-5">{{ metrics.total_usuarios | default(1) }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
     </div>
 
 </body>

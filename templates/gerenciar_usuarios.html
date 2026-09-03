@@ -1,0 +1,85 @@
+<!-- templates/gerenciar_usuarios.html -->
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Gerenciamento de Usuários</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container mt-4">
+        <h2>Gerenciamento de Usuários e Permissões</h2>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary mb-3">Voltar ao Dashboard</a>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <!-- Formulário de Cadastro -->
+        <div class="card p-4 mb-4">
+            <h4>Cadastrar Novo Usuário</h4>
+            <form method="POST">
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <label>Nome Completo:</label>
+                        <input type="text" name="nome" class="form-control" required>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label>E-mail:</label>
+                        <input type="email" name="email" class="form-control" required>
+                    </div>
+                    <div class="col-md-2 mb-3">
+                        <label>Senha:</label>
+                        <input type="password" name="senha" class="form-control" required>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label>Função / Perfil:</label>
+                        <select name="papel" class="form-control" required>
+                            <option value="admin">Administrador (Acesso Total)</option>
+                            <option value="professor">Professor (Lançar Notas/Frequência)</option>
+                            <option value="pai_mae">Pai ou Mãe (Visualizar Aluno)</option>
+                            <option value="aluno">Aluno (Visualizar Notas/Boletim)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-1 d-flex align-items-end mb-3">
+                        <button type="submit" class="btn btn-success w-100">Salvar</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Tabela de Usuários Existentes -->
+        <h4>Usuários Cadastrados no Sistema</h4>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>E-mail</th>
+                    <th>Função</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in usuarios %}
+                <tr>
+                    <td>{{ u.nome }}</td>
+                    <td>{{ u.email }}</td>
+                    <td>
+                        <span class="badge 
+                            {% if u.papel == 'admin' %}bg-danger
+                            {% elif u.papel == 'professor' %}bg-primary
+                            {% elif u.papel == 'pai_mae' %}bg-warning
+                            {% else %}bg-info{% endif %}">
+                            {{ u.papel | upper }}
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

@@ -30,6 +30,13 @@
         .btn { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; transition: 0.2s; font-size: 0.9rem; }
         .btn-primary { background-color: #3498db; color: white; }
         .btn-primary:hover { background-color: #2980b9; }
+        .btn-danger { background-color: #e74c3c; color: white; padding: 6px 12px; font-size: 0.8rem; }
+        .btn-danger:hover { background-color: #c0392b; }
+
+        /* Tabela */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        th { background-color: #f8f9fa; color: #2c3e50; font-weight: 600; }
         
         /* Alertas */
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 6px; font-weight: 500; }
@@ -53,7 +60,7 @@
 
     <!-- Conteúdo Principal -->
     <div class="content">
-        <h2>⚙️ Configurações do Sistema</h2>
+        <h2>⚙️ Configurações e Usuários</h2>
 
         <!-- Mensagens Flash do Flask -->
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -68,6 +75,7 @@
         <div class="card-box">
             <h3 class="card-title">Parâmetros Gerais da Instituição</h3>
             <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
+                <input type="hidden" name="acao" value="salvar_parametros">
                 <div class="form-grid">
                     <div class="form-group" style="grid-column: span 2;">
                         <label>Nome da Escola</label>
@@ -86,10 +94,67 @@
             </form>
         </div>
 
-        <!-- Informações Adicionais -->
+        <!-- Cadastro de Usuários e Permissões -->
         <div class="card-box">
-            <h3 class="card-title">Gerenciamento e Permissões</h3>
-            <p style="font-size: 0.95rem; color: #666;">Parâmetros gerais do sistema, cadastro de usuários e permissões[cite: 4]. Utilize os módulos específicos para gerenciar turmas, professores e dados financeiros diretamente pelas abas laterais.</p>
+            <h3 class="card-title">Cadastro de Usuários e Funções</h3>
+            <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
+                <input type="hidden" name="acao" value="cadastrar_usuario">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Nome Completo</label>
+                        <input type="text" name="nome_usuario" required placeholder="Ex: João Silva">
+                    </div>
+                    <div class="form-group">
+                        <label>E-mail de Acesso</label>
+                        <input type="email" name="email_usuario" required placeholder="joao@escola.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Senha</label>
+                        <input type="password" name="senha_usuario" required placeholder="******">
+                    </div>
+                    <div class="form-group">
+                        <label>Função / Permissão</label>
+                        <select name="funcao_usuario" required>
+                            <option value="">Selecione...</option>
+                            <option value="Administrador">Administrador</option>
+                            <option value="Secretaria">Secretaria</option>
+                            <option value="Financeiro">Financeiro</option>
+                            <option value="Professor">Professor</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Cadastrar Usuário</button>
+            </form>
+
+            <h3 class="card-title" style="margin-top: 30px;">Usuários Cadastrados</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>E-mail</th>
+                        <th>Função</th>
+                        <th style="text-align: center;">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in usuarios %}
+                    <tr>
+                        <td>{{ u.nome }}</td>
+                        <td>{{ u.email }}</td>
+                        <td>{{ u.funcao }}</td>
+                        <td style="text-align: center;">
+                            <form action="{{ url_for('excluir_usuario_sistema', id=u.id) }}" method="POST" style="display:inline;">
+                                <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja realmente excluir este usuário?');">Excluir</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" style="text-align: center; color: #777;">Nenhum usuário cadastrado além do padrão.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 

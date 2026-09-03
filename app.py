@@ -1,5 +1,5 @@
 import os
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, url_for, session
 from werkzeug.utils import secure_filename
 from psycopg2.extras import RealDictCursor
 from alunos import cadastrar_aluno, listar_alunos, atualizar_responsavel, deletar_responsavel
@@ -15,8 +15,8 @@ PASTA_UPLOADS_PROVAS = "static/uploads/provas"
 os.makedirs(PASTA_UPLOADS_PROVAS, exist_ok=True)
 
 
-# Função auxiliar para limpar e sanitizar dados do formulário
-def limpar_campo(campo_nome):
+# Função auxiliar para limpar e sanitizar dados do formulário (aceita argumentos extras para evitar erros de TypeError)
+def limpar_campo(campo_nome, *args, **kwargs):
     valor = request.form.get(campo_nome)
     if valor is not None:
         valor = valor.strip()
@@ -24,9 +24,97 @@ def limpar_campo(campo_nome):
     return None
 
 
+# --- ROTA DE AUTENTICAÇÃO: LOGIN ---
+@app.route("/", methods=["GET", "POST"])
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email")
+        senha = request.form.get("senha")
+        
+        conexao = obter_conexao()
+        if conexao:
+            try:
+                with conexao.cursor() as cursor:
+                    # Ajustado para buscar também a coluna 'papel'
+                    cursor.execute("SELECT id, nome, senha, papel FROM usuarios WHERE email = %s;", (email,))
+                    usuario = cursor.fetchone()
+                    
+                    if usuario and usuario[2] == senha: 
+                        session["usuario_id"] = usuario[0]
+                        session["usuario_nome"] = usuario[1]
+                        session["usuario_papel"] = usuario[3] or 'admin'
+                        return redirect(url_for("dashboard"))
+                    else:
+                        flash("E-mail ou senha incorretos.", "danger")
+            finally:
+                conexao.close()
+                
+    return render_template("login.html")
+
+
+# --- ROTA DE AUTENTICAÇÃO: LOGOUT ---
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash("Você saiu da sua conta com sucesso.", "success")
+    return redirect(url_for("login"))
+
+
+# --- ROTA DE GERENCIAMENTO DE USUÁRIOS (RESTRITA A ADMIN) ---
+@app.route("/usuarios/gerenciar", methods=["GET", "POST"])
+def gerenciar_usuarios():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    
+    # Restrição estrita para administradores
+    if session.get("usuario_papel") != "admin":
+        flash("❌ Acesso negado. Área restrita para administradores.", "danger")
+        return redirect(url_for("dashboard"))
+
+    conexao = obter_conexao()
+    if request.method == "POST":
+        nome = limpar_campo("nome")
+        email = limpar_campo("email")
+        senha = limpar_campo("senha")
+        papel = limpar_campo("papel")  # admin, professor, pai_mae, aluno
+
+        if conexao:
+            try:
+                with conexao.cursor() as cursor:
+                    cursor.execute("""
+                        INSERT INTO usuarios (nome, email, senha, papel)
+                        VALUES (%s, %s, %s, %s);
+                    """, (nome, email, senha, papel))
+                    conexao.commit()
+                    flash("✅ Usuário cadastrado com sucesso!", "success")
+            except Exception as e:
+                conexao.rollback()
+                flash(f"❌ Erro ao cadastrar usuário: {e}", "danger")
+            finally:
+                conexao.close()
+        return redirect(url_for("gerenciar_usuarios"))
+
+    usuarios_cadastrados = []
+    if conexao:
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("SELECT id, nome, email, papel FROM usuarios ORDER BY nome ASC;")
+                usuarios_cadastrados = cursor.fetchall()
+        except Exception as e:
+            print(f"Erro ao listar usuários: {e}")
+        finally:
+            conexao.close()
+
+    return render_template("gerenciar_usuarios.html", usuarios=usuarios_cadastrados)
+
+
 # --- ROTA 1: DASHBOARD ---
-@app.route("/")
+@app.route("/dashboard")
 def dashboard():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     metrics = {"total_alunos": 0, "total_professores": 0, "total_turmas": 0}
 
     conexao = obter_conexao()
@@ -54,6 +142,9 @@ def dashboard():
 # --- ROTA GERAL: CALENDÁRIO ESCOLAR ---
 @app.route('/calendario_escolar', methods=['GET', 'POST'])
 def calendario_escolar():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     if request.method == 'POST':
         titulo = limpar_campo('titulo')
         descricao = limpar_campo('descricao')
@@ -163,6 +254,9 @@ def calendario_escolar():
 # --- ROTA ADICIONAL: CADASTRAR EVENTO ---
 @app.route("/cadastrar_evento", methods=["POST"])
 def cadastrar_evento():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     conexao = obter_conexao()
     if conexao:
         try:
@@ -186,6 +280,9 @@ def cadastrar_evento():
 
 @app.route("/excluir_aluno/<int:id>", methods=["POST"])
 def excluir_aluno_rota(id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     conexao = obter_conexao()
     if conexao:
         try:
@@ -204,6 +301,9 @@ def excluir_aluno_rota(id):
 # --- ROTA 2: GESTÃO DE ALUNOS ---
 @app.route("/alunos", methods=["GET", "POST"])
 def pagina_alunos():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     if request.method == "POST":
         acao = request.form.get("acao", "cadastrar_aluno")
         
@@ -317,12 +417,17 @@ def pagina_alunos():
 
 @app.route("/cadastrar_aluno", methods=["POST"])
 def cadastrar_aluno_rota():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
     return pagina_alunos()
 
 
 # --- ROTA 2.1: PERFIL DO ALUNO ---
 @app.route("/alunos/<int:aluno_id>")
 def detalhes_aluno(aluno_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     conexao = obter_conexao()
     aluno, responsaveis, turmas_aluno, financeiro_aluno, pessoas_autorizadas, provas_notas = None, [], [], [], [], []
 
@@ -388,6 +493,9 @@ def detalhes_aluno(aluno_id):
 
 @app.route("/alunos/<int:aluno_id>/adicionar_responsavel", methods=["POST"])
 def adicionar_responsavel(aluno_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     conexao = obter_conexao()
     if conexao:
         try:
@@ -417,6 +525,9 @@ def adicionar_responsavel(aluno_id):
 
 @app.route("/alunos/<int:aluno_id>/adicionar_autorizado", methods=["POST"])
 def adicionar_autorizado(aluno_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     conexao = obter_conexao()
     if conexao:
         try:
@@ -439,6 +550,9 @@ def adicionar_autorizado(aluno_id):
 
 @app.route("/alunos/<int:aluno_id>/adicionar_nota", methods=["POST"])
 def adicionar_nota(aluno_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     conexao = obter_conexao()
     if conexao:
         try:
@@ -475,12 +589,18 @@ def adicionar_nota(aluno_id):
 # --- ROTA 3: PROFESSORES ---
 @app.route("/professores", methods=["GET", "POST"])
 def pagina_professores():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     if request.method == "POST":
         salario_raw = request.form.get("salario", "").strip()
         try:
             salario = float(salario_raw.replace(",", ".")) if salario_raw else 0.0
         except ValueError:
             salario = 0.0
+
+        # Garantir um valor padrão caso o telefone não venha do formulário
+        telefone = limpar_campo("telefone") or "(00) 00000-0000"
 
         conexao = obter_conexao()
         if conexao:
@@ -497,7 +617,7 @@ def pagina_professores():
                             limpar_campo("cpf"),
                             limpar_campo("data_nascimento") or "2000-01-01",
                             limpar_campo("especialidade"),
-                            limpar_campo("telefone"),
+                            telefone,
                             limpar_campo("email"),
                             salario,
                         ),
@@ -512,112 +632,36 @@ def pagina_professores():
 
         return redirect(url_for("pagina_professores"))
 
-    professores = []
+    # Correção aplicada: Adicionado o retorno do template GET para quando a página for carregada normalmente
+    professores_cadastrados = []
     conexao = obter_conexao()
     if conexao:
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("""
-                    SELECT id, nome_completo, especialidade, telefone, email, salario, ativo 
-                    FROM funcionarios 
-                    WHERE cargo = 'Professor'
-                    ORDER BY nome_completo ASC;
-                """)
-                professores = cursor.fetchall()
+                cursor.execute("SELECT id, nome_completo, especialidade, email FROM funcionarios WHERE cargo = 'Professor' AND ativo = TRUE ORDER BY nome_completo ASC;")
+                professores_cadastrados = cursor.fetchall()
         except Exception as e:
-            print(f"Erro ao buscar professores: {e}")
+            print(f"❌ Erro ao listar professores: {e}")
         finally:
             conexao.close()
 
-    return render_template("professores.html", professores=professores)
+    return render_template("professores.html", professores=professores_cadastrados)
 
 
+# --- ROTA DE ALIAS: CADASTRAR PROFESSOR (Corrige o Werkzeug BuildError) ---
 @app.route("/cadastrar_professor", methods=["POST"])
 def cadastrar_professor():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
     return pagina_professores()
-
-@app.route("/excluir_professor/<int:id>", methods=["POST"])
-def excluir_professor(id):
-    conexao = obter_conexao()
-    if conexao:
-        try:
-            with conexao.cursor() as cursor:
-                cursor.execute("UPDATE funcionarios SET ativo = FALSE WHERE id = %s;", (id,))
-                conexao.commit()
-                flash("✅ Professor desativado com sucesso!", "success")
-        except Exception as e:
-            conexao.rollback()
-            flash(f"❌ Erro ao excluir professor: {e}", "danger")
-        finally:
-            conexao.close()
-    return redirect(url_for("pagina_professores"))
-
-
-@app.route("/professores/<int:professor_id>", methods=["GET", "POST"])
-def detalhes_professor(professor_id):
-    conexao = obter_conexao()
-    if request.method == "POST":
-        salario_raw = request.form.get("salario", "").strip()
-        try:
-            salario = float(salario_raw.replace(",", ".")) if salario_raw else 0.0
-        except ValueError:
-            salario = 0.0
-
-        if conexao:
-            try:
-                with conexao.cursor() as cur:
-                    cur.execute("""
-                        UPDATE funcionarios 
-                        SET nome_completo = %s, cpf = %s, especialidade = %s, 
-                            telefone = %s, email = %s, salario = %s
-                        WHERE id = %s;
-                    """, (
-                        limpar_campo("nome_completo"), limpar_campo("cpf"), limpar_campo("especialidade"),
-                        limpar_campo("telefone"), limpar_campo("email"), salario, professor_id
-                    ))
-                    conexao.commit()
-                    flash("✅ Dados do professor atualizados com sucesso!", "success")
-            except Exception as e:
-                conexao.rollback()
-                flash(f"❌ Erro ao atualizar professor: {e}", "danger")
-            finally:
-                conexao.close()
-        return redirect(url_for("detalhes_professor", professor_id=professor_id))
-
-    professor = None
-    turmas_ministradas = []
-
-    if conexao:
-        try:
-            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("SELECT * FROM funcionarios WHERE id = %s AND cargo = 'Professor'", (professor_id,))
-                professor = cursor.fetchone()
-
-                cursor.execute("""
-                    SELECT id, nome, ano_letivo, turno 
-                    FROM turmas 
-                    WHERE professor_responsavel_id = %s
-                """, (professor_id,))
-                turmas_ministradas = cursor.fetchall()
-        except Exception as e:
-            print(f"❌ Erro ao carregar detalhes do professor: {e}")
-        finally:
-            conexao.close()
-
-    if not professor:
-        flash("❌ Professor não encontrado.", "danger")
-        return redirect(url_for("pagina_professores"))
-
-    return render_template(
-        "professor_detalhes.html",
-        professor=professor,
-        turmas=turmas_ministradas
-    )
 
 
 # --- ROTA 4: PEDAGÓGICO ---
 @app.route("/pedagogico", methods=["GET", "POST"])
 def pagina_pedagogico():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     if request.method == "POST":
         acao = request.form.get("acao", "criar_turma")
         conexao = obter_conexao()
@@ -712,12 +756,10 @@ def pagina_pedagogico():
     )
 
 
-@app.route("/cadastrar_turma", methods=["POST"])
-def cadastrar_turma():
-    return pagina_pedagogico()
-
 @app.route("/excluir_turma/<int:id>", methods=["POST"])
 def excluir_turma(id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
     conexao = obter_conexao()
     if conexao:
         try:
@@ -733,56 +775,30 @@ def excluir_turma(id):
     return redirect(url_for("pagina_pedagogico"))
 
 
-@app.route("/turmas/<int:turma_id>/frequencia", methods=["POST"])
-def registrar_frequencia(turma_id):
-    conexao = obter_conexao()
-    if conexao:
-        try:
-            data_aula = request.form.get("data_aula")
-            materia = request.form.get("materia")
-            alunos_presentes = request.form.getlist("alunos_presentes")
-            
-            with conexao.cursor() as cursor:
-                cursor.execute("SELECT aluno_id FROM turma_alunos WHERE turma_id = %s", (turma_id,))
-                todos_alunos = [row[0] if isinstance(row, tuple) else row['aluno_id'] for row in cursor.fetchall()]
-
-                for a_id in todos_alunos:
-                    presente = str(a_id) in alunos_presentes
-                    cursor.execute("""
-                        INSERT INTO frequencia_aulas (aluno_id, turma_id, data_aula, materia, presente)
-                        VALUES (%s, %s, %s, %s, %s);
-                    """, (a_id, turma_id, data_aula, materia, presente))
-                
-                conexao.commit()
-                flash("✅ Chamada registrada com sucesso!", "success")
-        except Exception as e:
-            conexao.rollback()
-            flash(f"❌ Erro ao registrar frequência: {e}", "danger")
-        finally:
-            conexao.close()
-    return redirect(url_for("pagina_pedagogico"))
-
-
-@app.route("/pedagogico/remover_aluno/<int:turma_id>/<int:aluno_id>", methods=["POST"])
+@app.route("/remover_aluno_turma/<int:turma_id>/<int:aluno_id>", methods=["POST"])
 def remover_aluno_turma(turma_id, aluno_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
     conexao = obter_conexao()
     if conexao:
         try:
             with conexao.cursor() as cursor:
                 cursor.execute("DELETE FROM turma_alunos WHERE turma_id = %s AND aluno_id = %s;", (turma_id, aluno_id))
                 conexao.commit()
-                flash("🗑️ Aluno removido da turma.", "warning")
+                flash("✅ Aluno removido da turma com sucesso!", "success")
         except Exception as e:
             conexao.rollback()
-            flash("❌ Erro ao remover aluno.", "danger")
+            flash(f"❌ Erro ao remover aluno da turma: {e}", "danger")
         finally:
             conexao.close()
     return redirect(url_for("pagina_pedagogico"))
 
-
 # --- ROTA 5: FINANCEIRO ---
 @app.route("/financeiro", methods=["GET", "POST"])
 def pagina_financeiro():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     if request.method == "POST":
         acao = request.form.get("acao", "criar_cobranca")
         conexao = obter_conexao()
@@ -870,9 +886,7 @@ def pagina_financeiro():
     conexao = obter_conexao()
     if conexao:
         try:
-            # Usando RealDictCursor para retornar dicionários compatíveis com o HTML
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-                # Atualiza mensalidades vencidas automaticamente
                 cursor.execute(
                     """
                     UPDATE financeiro_mensalidades 
@@ -882,7 +896,6 @@ def pagina_financeiro():
                 )
                 conexao.commit()
 
-                # Busca os lançamentos com LEFT JOIN para garantir exibição
                 query_lancamentos = """
                     SELECT f.id, f.aluno_id, a.nome_completo, f.descricao, f.valor, f.data_vencimento, 
                            f.data_pagamento, f.status, f.forma_pagamento
@@ -905,7 +918,6 @@ def pagina_financeiro():
                 cursor.execute(query_lancamentos, params)
                 lancamentos = cursor.fetchall()
 
-                # Soma dos Totais usando CAST/COALESCE
                 cursor.execute(
                     """
                     SELECT 
@@ -921,7 +933,6 @@ def pagina_financeiro():
                     totais["pendente"] = float(resumo["pendente"])
                     totais["atrasado"] = float(resumo["atrasado"])
 
-                # Lista de alunos para o Select de Cobrança
                 cursor.execute("SELECT id, nome_completo, valor_mensalidade FROM alunos ORDER BY nome_completo ASC;")
                 alunos = cursor.fetchall()
 
@@ -944,6 +955,9 @@ def pagina_financeiro():
 # --- ROTA: EXCLUIR COBRANÇA FINANCEIRA ---
 @app.route("/financeiro/excluir/<int:id>", methods=["POST"])
 def excluir_financeiro(id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
     conexao = obter_conexao()
     if conexao:
         try:
@@ -958,10 +972,105 @@ def excluir_financeiro(id):
             conexao.close()
     return redirect(url_for("pagina_financeiro"))
 
-# --- ROTA 6: CONFIGURAÇÕES ---
-@app.route("/configuracoes")
+# --- ROTA: CONFIGURAÇÕES E USUÁRIOS ---
+@app.route("/configuracoes", methods=["GET", "POST"])
 def pagina_configuracoes():
-    return render_template("configuracoes.html")
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+
+    conexao = obter_conexao()
+    if request.method == "POST":
+        acao = request.form.get("acao")
+        
+        if acao == "salvar_parametros":
+            nome_escola = request.form.get("nome_escola")
+            ano_letivo = request.form.get("ano_letivo")
+            email_contato = request.form.get("email_contato")
+            if conexao:
+                try:
+                    with conexao.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            INSERT INTO configuracoes (id, nome_escola, ano_letivo, email_contato)
+                            VALUES (1, %s, %s, %s)
+                            ON CONFLICT (id) DO UPDATE 
+                            SET nome_escola = EXCLUDED.nome_escola,
+                                ano_letivo = EXCLUDED.ano_letivo,
+                                email_contato = EXCLUDED.email_contato;
+                            """,
+                            (nome_escola, ano_letivo, email_contato),
+                        )
+                        conexao.commit()
+                        flash("✅ Parâmetros salvos com sucesso!", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"❌ Erro ao salvar parâmetros: {e}", "danger")
+                finally:
+                    conexao.close()
+
+        elif acao == "cadastrar_usuario":
+            nome = request.form.get("nome_usuario")
+            email = request.form.get("email_usuario")
+            senha = request.form.get("senha_usuario")
+            papel = request.form.get("funcao_usuario") or request.form.get("papel_usuario") or "admin"
+            if conexao:
+                try:
+                    with conexao.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            INSERT INTO usuarios (nome, email, senha, papel)
+                            VALUES (%s, %s, %s, %s);
+                            """,
+                            (nome, email, senha, papel),
+                        )
+                        conexao.commit()
+                        flash("✅ Usuário cadastrado com sucesso!", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"❌ Erro ao cadastrar usuário: {e}", "danger")
+                finally:
+                    conexao.close()
+
+        return redirect(url_for("pagina_configuracoes"))
+
+    config = {}
+    usuarios = []
+    if conexao:
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                try:
+                    cursor.execute("SELECT * FROM configuracoes WHERE id = 1;")
+                    config = cursor.fetchone() or {}
+                except Exception:
+                    conexao.rollback()
+
+                cursor.execute("SELECT id, nome, email, papel FROM usuarios ORDER BY nome ASC;")
+                usuarios = cursor.fetchall()
+        except Exception as e:
+            print(f"Erro ao carregar dados de configurações: {e}")
+        finally:
+            conexao.close()
+
+    return render_template("configuracoes.html", config=config, usuarios=usuarios)
+
+
+@app.route("/excluir_usuario_sistema/<int:id>", methods=["POST"])
+def excluir_usuario_sistema(id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    conexao = obter_conexao()
+    if conexao:
+        try:
+            with conexao.cursor() as cursor:
+                cursor.execute("DELETE FROM usuarios WHERE id = %s;", (id,))
+                conexao.commit()
+                flash("✅ Usuário excluído com sucesso!", "success")
+        except Exception as e:
+            conexao.rollback()
+            flash(f"❌ Erro ao excluir usuário: {e}", "danger")
+        finally:
+            conexao.close()
+    return redirect(url_for("pagina_configuracoes"))
 
 
 if __name__ == "__main__":
