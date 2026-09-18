@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Plataforma — escolas</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        .wrap { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        .card-box { background:#fff; border-radius:12px; padding:22px; box-shadow:0 8px 24px rgba(15,23,42,.08); margin-bottom:20px; }
+        .form-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
+        .form-group { display:flex; flex-direction:column; }
+        .form-group label { font-size:.82rem; font-weight:600; margin-bottom:5px; }
+        .form-group input { padding:9px 12px; border:1px solid #ccc; border-radius:6px; }
+        .alert { padding:12px; border-radius:8px; margin-bottom:16px; }
+        .alert-danger { background:#f8d7da; color:#721c24; }
+        .alert-success { background:#d4edda; color:#155724; }
+        .hint { color:#64748b; font-size:.85rem; line-height:1.45; }
+        .top { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+        .escola { border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-top:14px; }
+        .escola h4 { margin:0 0 8px; }
+        .meta { font-size:.88rem; color:#334155; line-height:1.5; }
+        .acoes { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; align-items:center; }
+        .btn-sm { padding:8px 12px; font-size:.82rem; border-radius:6px; border:0; cursor:pointer; }
+        .btn-azul { background:#2563eb; color:#fff; }
+        .btn-cinza { background:#475569; color:#fff; }
+        .btn-ambar { background:#d97706; color:#fff; }
+        .btn-verde { background:#15803d; color:#fff; }
+        .btn-vermelho { background:#b91c1c; color:#fff; }
+        .check { display:flex; gap:8px; align-items:flex-start; margin-top:12px; font-size:.85rem; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="top">
+            <div>
+                <h2 style="margin:0;">Cadastro de escolas</h2>
+                <p class="hint">Logado como administrador da plataforma: {{ session.get('usuario_nome') or session.get('usuario_email') }}</p>
+            </div>
+            <a class="btn" href="{{ url_for('logout') }}">Sair</a>
+        </div>
+        {% if google_login %}
+        <p class="hint" style="margin-bottom:16px;">Para o e-mail sair de verdade: <a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Permitir envio de e-mail</a> (abre o Google; não cria senha neste sistema).</p>
+        {% endif %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+
+        <div class="card-box">
+            <h3>Nova escola</h3>
+            <p class="hint">O admin da escola recebe um e-mail com o código e escolhe a senha. Marque recadastrar só se quiser apagar a escola que já usa o mesmo e-mail.</p>
+            <form method="POST">
+                <input type="hidden" name="acao" value="criar_escola">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Nome da escola</label>
+                        <input name="nome" required placeholder="Colégio Exemplo">
+                    </div>
+                    <div class="form-group">
+                        <label>E-mail que recebe o código</label>
+                        <input type="email" name="email_admin" required placeholder="lucaslagoasreis222@gmail.com">
+                    </div>
+                </div>
+                <label class="check">
+                    <input type="checkbox" name="recadastrar" value="1">
+                    <span>Recadastrar: apagar a escola já existente neste e-mail (banco e dados) e criar de novo.</span>
+                </label>
+                <p style="margin-top:14px;"><button class="btn" type="submit">Cadastrar e enviar e-mail</button></p>
+            </form>
+        </div>
+
+        <div class="card-box">
+            <h3>Escolas cadastradas</h3>
+            {% for e in escolas %}
+            <div class="escola">
+                <h4>{{ e.nome }}</h4>
+                <div class="meta">
+                    E-mail admin: {{ e.email_admin }}<br>
+                    Banco: <code>{{ e.db_nome }}</code><br>
+                    Status:
+                    {% if not e.ativo %}Pausada
+                    {% elif e.senha_definida %}Ativa
+                    {% else %}Aguardando senha{% endif %}
+                    {% if e.convite_codigo and e.ativo %}
+                    <br>Código atual: <strong>{{ e.convite_codigo }}</strong>
+                    {% endif %}
+                </div>
+                <div class="acoes">
+                    <form method="POST">
+                        <input type="hidden" name="acao" value="acessar_escola">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-azul" type="submit">Acessar dados</button>
+                    </form>
+                    <form method="POST">
+                        <input type="hidden" name="acao" value="redefinir_senha">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-ambar" type="submit">Redefinir senha</button>
+                    </form>
+                    {% if not e.senha_definida and e.convite_token and e.ativo %}
+                    <form method="POST">
+                        <input type="hidden" name="acao" value="reenviar_convite">
+                        <input type="hidden" name="token" value="{{ e.convite_token }}">
+                        <button class="btn-sm btn-cinza" type="submit">Reenviar e-mail</button>
+                    </form>
+                    {% endif %}
+                    {% if e.ativo %}
+                    <form method="POST" onsubmit="return confirm('Pausar {{ e.nome }}? Ninguém dessa escola entra até retomar.');">
+                        <input type="hidden" name="acao" value="pausar_escola">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-cinza" type="submit">Pausar</button>
+                    </form>
+                    {% else %}
+                    <form method="POST">
+                        <input type="hidden" name="acao" value="retomar_escola">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-verde" type="submit">Retomar</button>
+                    </form>
+                    {% endif %}
+                    <form method="POST" onsubmit="return confirm('Excluir {{ e.nome }}? O banco e todos os dados dessa escola serão apagados.');">
+                        <input type="hidden" name="acao" value="excluir_escola">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-vermelho" type="submit">Excluir</button>
+                    </form>
+                </div>
+                {% if not e.senha_definida and e.convite_token and e.ativo %}
+                <form method="POST" class="acoes">
+                    <input type="hidden" name="acao" value="alterar_email">
+                    <input type="hidden" name="token" value="{{ e.convite_token }}">
+                    <input type="email" name="email_admin" required value="{{ e.email_admin }}" style="padding:8px;border:1px solid #ccc;border-radius:6px;">
+                    <button class="btn-sm btn-cinza" type="submit">Trocar e-mail e enviar</button>
+                </form>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="hint">Nenhuma escola ainda.</p>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>

@@ -1,15 +1,50 @@
-<!-- templates/gerenciar_usuarios.html -->
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Gerenciamento de Usuários</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Gerenciar Usuários</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        h2 { font-weight: 600; color: #2c3e50; }
+        .card-box { background: white; border-radius: 12px; padding: 22px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 22px; }
+        .card-title { font-size: 1.05rem; color: #2c3e50; margin-bottom: 16px; border-bottom: 2px solid #ecf0f1; padding-bottom: 8px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group.span2 { grid-column: span 2; }
+        .form-group label { font-size: 0.82rem; font-weight: 600; margin-bottom: 5px; color: #555; }
+        .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; }
+        .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; font-size: 0.85rem; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-success { background: #2ecc71; color: #fff; }
+        .btn-secondary { background: #7f8c8d; color: #fff; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-sm { padding: 6px 10px; font-size: 0.8rem; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #f8fafc; }
+        .alert { padding: 12px; margin-bottom: 16px; border-radius: 6px; }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-danger { background: #f8d7da; color: #721c24; }
+        .user-pick { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow: auto; margin-top: 10px; }
+        .user-pick a { display: block; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; text-decoration: none; color: #1f2937; background: #fff; }
+        .user-pick a.sel, .user-pick a:hover { border-color: #3498db; background: #eef6fc; }
+        .hint { font-size: 0.82rem; color: #64748b; }
+        .header-flex { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+        .acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+        .regra-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; font-size: 0.82rem; color: #334155; grid-column: 1 / -1; line-height: 1.45; }
+        .fin-linha-mini { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 0.85rem; }
+        [hidden] { display: none !important; }
+    </style>
 </head>
 <body>
-    <div class="container mt-4">
-        <h2>Gerenciamento de Usuários e Permissões</h2>
-        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary mb-3">Voltar ao Dashboard</a>
+    {% set nav_active = 'usuarios' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        <div class="header-flex">
+            <h2>Gerenciar usuários</h2>
+            <a class="btn btn-secondary" href="{{ url_for('gerenciar_usuarios') }}">Novo cadastro</a>
+        </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
@@ -19,67 +54,247 @@
           {% endif %}
         {% endwith %}
 
-        <!-- Formulário de Cadastro -->
-        <div class="card p-4 mb-4">
-            <h4>Cadastrar Novo Usuário</h4>
-            <form method="POST">
-                <div class="row">
-                    <div class="col-md-3 mb-3">
-                        <label>Nome Completo:</label>
-                        <input type="text" name="nome" class="form-control" required>
-                    </div>
-                    <div class="col-md-3 mb-3">
-                        <label>E-mail:</label>
-                        <input type="email" name="email" class="form-control" required>
-                    </div>
-                    <div class="col-md-2 mb-3">
-                        <label>Senha:</label>
-                        <input type="password" name="senha" class="form-control" required>
-                    </div>
-                    <div class="col-md-3 mb-3">
-                        <label>Função / Perfil:</label>
-                        <select name="papel" class="form-control" required>
-                            <option value="admin">Administrador (Acesso Total)</option>
-                            <option value="professor">Professor (Lançar Notas/Frequência)</option>
-                            <option value="pai_mae">Pai ou Mãe (Visualizar Aluno)</option>
-                            <option value="aluno">Aluno (Visualizar Notas/Boletim)</option>
-                        </select>
-                    </div>
-                    <div class="col-md-1 d-flex align-items-end mb-3">
-                        <button type="submit" class="btn btn-success w-100">Salvar</button>
-                    </div>
+        <div class="card-box">
+            <h3 class="card-title">Pesquisar e selecionar</h3>
+            <form method="GET" class="form-grid">
+                <div class="form-group span2">
+                    <label>Nome, e-mail ou cargo</label>
+                    <input type="search" name="q" value="{{ busca_u or '' }}" placeholder="Ex.: Angela, professor...">
+                </div>
+                <div class="form-group" style="justify-content:end;">
+                    <button class="btn btn-primary" type="submit">Pesquisar</button>
                 </div>
             </form>
+            <div class="user-pick">
+                {% for u in usuarios %}
+                <a class="{% if cadastro.usuario_id == u.id %}sel{% endif %}" href="{{ url_for('gerenciar_usuarios', uid=u.id, q=busca_u) }}">
+                    <strong>{{ u.nome }}</strong> · {{ u.email }}
+                    <div class="hint">{{ nome_do_papel(u.papel) }} {% if u.cargo %}· {{ u.cargo }}{% endif %} {% if u.tipo_contrato %}· {{ rotulo_contrato(u.tipo_contrato) }}{% endif %}</div>
+                </a>
+                {% else %}
+                <p class="hint">Nenhum usuário de acesso encontrado.</p>
+                {% endfor %}
+            </div>
+            {% if sem_login %}
+            <p class="hint" style="margin-top:14px;">Equipe na folha sem login — clique para completar o acesso:</p>
+            <div class="user-pick">
+                {% for u in sem_login %}
+                <a class="{% if cadastro.funcionario_id == u.funcionario_id %}sel{% endif %}" href="{{ url_for('gerenciar_usuarios', fid=u.funcionario_id, q=busca_u) }}">
+                    <strong>{{ u.nome }}</strong> · {{ u.email or 'sem e-mail' }}
+                    <div class="hint">{{ u.cargo or 'Equipe' }} · sem usuário de sistema</div>
+                </a>
+                {% endfor %}
+            </div>
+            {% endif %}
         </div>
 
-        <!-- Tabela de Usuários Existentes -->
-        <h4>Usuários Cadastrados no Sistema</h4>
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Nome</th>
-                    <th>E-mail</th>
-                    <th>Função</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for u in usuarios %}
-                <tr>
-                    <td>{{ u.nome }}</td>
-                    <td>{{ u.email }}</td>
-                    <td>
-                        <span class="badge 
-                            {% if u.papel == 'admin' %}bg-danger
-                            {% elif u.papel == 'professor' %}bg-primary
-                            {% elif u.papel == 'pai_mae' %}bg-warning
-                            {% else %}bg-info{% endif %}">
-                            {{ u.papel | upper }}
-                        </span>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="card-box">
+            <h3 class="card-title">{% if cadastro.usuario_id or cadastro.funcionario_id %}Editar cadastro{% else %}Novo cadastro completo{% endif %}</h3>
+            <form method="POST">
+                <input type="hidden" name="acao" value="salvar">
+                <input type="hidden" name="usuario_id" value="{{ cadastro.usuario_id or '' }}">
+                <input type="hidden" name="funcionario_id" value="{{ cadastro.funcionario_id or '' }}">
+
+                <h4 class="card-title">Acesso ao sistema</h4>
+                <div class="form-grid">
+                    <div class="form-group span2">
+                        <label>Nome completo</label>
+                        <input name="nome" value="{{ cadastro.nome or '' }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>E-mail de login (Google ou senha)</label>
+                        <input type="email" name="email" value="{{ cadastro.email or '' }}" required placeholder="nome@dominio.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Senha {% if cadastro.usuario_id %}(em branco mantém){% endif %}</label>
+                        <input type="password" name="senha" {% if not cadastro.usuario_id %}required{% endif %} placeholder="******">
+                    </div>
+                    <div class="form-group">
+                        <label>Perfil de permissão</label>
+                        <select name="papel" required>
+                            {% set p = cadastro.papel or 'professor' %}
+                            <option value="admin" {% if p == 'admin' %}selected{% endif %}>Administrador</option>
+                            <option value="supervisor" {% if p == 'supervisor' %}selected{% endif %}>Supervisor administrativo</option>
+                            <option value="financeiro" {% if p == 'financeiro' %}selected{% endif %}>Financeiro</option>
+                            <option value="direcao" {% if p == 'direcao' %}selected{% endif %}>Direção</option>
+                            <option value="secretaria" {% if p == 'secretaria' %}selected{% endif %}>Secretaria</option>
+                            <option value="professor" {% if p == 'professor' %}selected{% endif %}>Professor</option>
+                            <option value="funcionario" {% if p == 'funcionario' %}selected{% endif %}>Funcionário</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Situação na folha</label>
+                        <select name="ativo">
+                            <option value="1" {% if cadastro.ativo %}selected{% endif %}>Ativo</option>
+                            <option value="0" {% if not cadastro.ativo %}selected{% endif %}>Inativo</option>
+                        </select>
+                    </div>
+                </div>
+
+                <h4 class="card-title">Dados pessoais</h4>
+                <div class="form-grid">
+                    <div class="form-group"><label>CPF</label><input name="cpf" value="{{ cadastro.cpf or '' }}" placeholder="000.000.000-00"></div>
+                    <div class="form-group"><label>RG</label><input name="rg" value="{{ cadastro.rg or '' }}"></div>
+                    <div class="form-group"><label>Data de nascimento</label><input type="date" name="data_nascimento" value="{{ cadastro.data_nascimento or '' }}"></div>
+                    <div class="form-group"><label>Telefone</label><input name="telefone" value="{{ cadastro.telefone or '' }}" placeholder="(00) 00000-0000"></div>
+                    <div class="form-group"><label>Cargo</label><input name="cargo" value="{{ cadastro.cargo or '' }}" placeholder="Professor, secretaria..."></div>
+                    <div class="form-group"><label>Disciplina / especialidade</label><input name="especialidade" value="{{ cadastro.especialidade or '' }}"></div>
+                    <div class="form-group span2"><label>Formação</label><input name="formacao" value="{{ cadastro.formacao or '' }}"></div>
+                    <div class="form-group"><label>CEP</label><input name="cep" value="{{ cadastro.cep or '' }}"></div>
+                    <div class="form-group span2"><label>Rua</label><input name="rua" value="{{ cadastro.rua or '' }}"></div>
+                    <div class="form-group"><label>Número</label><input name="numero" value="{{ cadastro.numero or '' }}"></div>
+                    <div class="form-group"><label>Bairro</label><input name="bairro" value="{{ cadastro.bairro or '' }}"></div>
+                    <div class="form-group"><label>Cidade</label><input name="cidade" value="{{ cadastro.cidade or '' }}"></div>
+                    <div class="form-group"><label>UF</label><input name="estado" maxlength="2" value="{{ cadastro.estado or '' }}"></div>
+                </div>
+
+                <h4 class="card-title">Pagamento e contrato</h4>
+                <div class="form-grid" id="blocoContrato">
+                    <div class="form-group span2">
+                        <label>Tipo de contrato</label>
+                        {% set tc = cadastro.tipo_contrato or 'clt_mensalista' %}
+                        <select name="tipo_contrato" id="tipoContrato" data-contrato-select>
+                            <option value="clt_mensalista" {% if tc == 'clt_mensalista' %}selected{% endif %}>CLT mensalista (salário fixo)</option>
+                            <option value="clt_horista" {% if tc in ['clt_horista','horista'] %}selected{% endif %}>CLT horista (hora-aula)</option>
+                            <option value="pj" {% if tc == 'pj' %}selected{% endif %}>PJ / NFS-e</option>
+                            <option value="rpa" {% if tc in ['rpa','autonomo','extra_pf'] %}selected{% endif %}>RPA / Extra PF (autônomo)</option>
+                        </select>
+                    </div>
+
+                    <div class="regra-box" data-contratos="clt_mensalista">
+                        <strong>CLT mensalista.</strong> Informe o salário fixo. O líquido é bruto − INSS (tabela progressiva) − IRRF.
+                        Encargos da escola: FGTS 8%, 13º (1/12), férias + 1/3. No Lucro Presumido/Real entram ainda INSS patronal 20%, RAT e Sistema S.
+                        No Simples Nacional esses três últimos ficam zerados.
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista rpa pj">
+                        <label data-contratos="clt_mensalista">Salário mensal bruto (R$)</label>
+                        <label data-contratos="pj">Valor da NFS-e (R$)</label>
+                        <label data-contratos="rpa">Valor bruto do RPA (R$)</label>
+                        <input name="salario" data-obrigatorio value="{{ '%.2f'|format(cadastro.salario|float if cadastro.salario else 0) }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa">
+                        <label>PIS / NIT</label>
+                        <input name="pis_nit" value="{{ cadastro.pis_nit or '' }}">
+                    </div>
+
+                    <div class="regra-box" data-contratos="clt_horista">
+                        <strong>CLT horista.</strong> Cadastre o valor da hora-aula e as horas do mês. Base = horas × valor.
+                        Sobre essa base soma-se o DSR (1/6, ou equivalente do mês). INSS, IRRF e encargos incidem sobre horas + DSR.
+                    </div>
+                    <div class="form-group" data-contratos="clt_horista">
+                        <label>Valor da hora-aula (R$)</label>
+                        <input name="valor_hora" data-obrigatorio value="{{ '%.2f'|format(cadastro.valor_hora|float if cadastro.valor_hora else 0) }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_horista">
+                        <label>Horas trabalhadas no mês</label>
+                        <input name="horas_mes" data-obrigatorio value="{{ '%.2f'|format(cadastro.horas_mes|float if cadastro.horas_mes else 0) }}">
+                    </div>
+
+                    <div class="regra-box" data-contratos="pj">
+                        <strong>PJ / NFS-e.</strong> Sem FGTS, férias, 13º ou INSS de folha CLT. Pagamento contra nota.
+                        Se a legislação exigir, ative retenção federal (IRRF 1,5%, PIS 0,65%, COFINS 3%, CSLL 1%) e/ou ISS na fonte.
+                    </div>
+                    <div class="form-group" data-contratos="pj">
+                        <label>CNPJ</label>
+                        <input name="cnpj" value="{{ cadastro.cnpj or '' }}" placeholder="00.000.000/0000-00">
+                    </div>
+                    <div class="form-group" data-contratos="pj">
+                        <label>Retenção federal (IRRF, PIS, COFINS, CSLL)</label>
+                        <select name="reter_federal">
+                            <option value="0" {% if not cadastro.reter_federal %}selected{% endif %}>Não reter</option>
+                            <option value="1" {% if cadastro.reter_federal %}selected{% endif %}>Reter na NFS-e</option>
+                        </select>
+                    </div>
+                    <div class="form-group" data-contratos="pj">
+                        <label>ISS retido na fonte</label>
+                        <select name="reter_iss">
+                            <option value="0" {% if not cadastro.reter_iss %}selected{% endif %}>Não reter</option>
+                            <option value="1" {% if cadastro.reter_iss %}selected{% endif %}>Reter ISS</option>
+                        </select>
+                    </div>
+                    <div class="form-group" data-contratos="pj">
+                        <label>Alíquota ISS do município (%)</label>
+                        <input name="aliquota_iss" value="{{ cadastro.aliquota_iss or 5 }}">
+                    </div>
+
+                    <div class="regra-box" data-contratos="rpa">
+                        <strong>RPA / Extra PF.</strong> Desconta INSS do autônomo (11% até o teto) e IRRF pela tabela progressiva.
+                        A escola recolhe INSS patronal 20% e RAT sobre o bruto do RPA.
+                    </div>
+
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista pj rpa">
+                        <label>Data de contratação / início</label>
+                        <input type="date" name="data_contratacao" value="{{ cadastro.data_contratacao or '' }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Banco</label>
+                        <input name="banco" value="{{ cadastro.banco or '' }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Agência</label>
+                        <input name="agencia" value="{{ cadastro.agencia or '' }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Conta</label>
+                        <input name="conta" value="{{ cadastro.conta or '' }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Tipo da conta</label>
+                        <input name="tipo_conta" value="{{ cadastro.tipo_conta or '' }}" placeholder="Corrente, poupança">
+                    </div>
+                    <div class="form-group span2" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Chave Pix</label>
+                        <input name="pix" value="{{ cadastro.pix or '' }}">
+                    </div>
+                </div>
+
+                {% if preview_folha %}
+                <div class="regra-box" style="margin-bottom: 16px;">
+                    <strong>Simulação no regime {{ regime_folha }} — {{ preview_folha.rotulo_contrato }}</strong>
+                    <p style="margin: 6px 0 8px;">{{ preview_folha.observacao }}</p>
+                    {% if preview_folha.tipo_contrato in ['clt_horista','horista'] %}
+                    <div class="fin-linha-mini"><span>Horas × valor</span><strong>R$ {{ "%.2f"|format(preview_folha.salario) }}</strong></div>
+                    <div class="fin-linha-mini"><span>DSR</span><strong>R$ {{ "%.2f"|format(preview_folha.dsr) }}</strong></div>
+                    {% endif %}
+                    <div class="fin-linha-mini"><span>Bruto</span><strong>R$ {{ "%.2f"|format(preview_folha.bruto) }}</strong></div>
+                    {% if preview_folha.tipo_contrato not in ['pj'] %}
+                    <div class="fin-linha-mini"><span>INSS do prestador</span><strong>R$ {{ "%.2f"|format(preview_folha.inss_funcionario) }}</strong></div>
+                    <div class="fin-linha-mini"><span>IRRF</span><strong>R$ {{ "%.2f"|format(preview_folha.irrf) }}</strong></div>
+                    {% else %}
+                    <div class="fin-linha-mini"><span>Retenções (IRRF/PIS/COFINS/CSLL/ISS)</span><strong>R$ {{ "%.2f"|format(preview_folha.descontos) }}</strong></div>
+                    {% endif %}
+                    <div class="fin-linha-mini"><span>Líquido a pagar</span><strong>R$ {{ "%.2f"|format(preview_folha.liquido) }}</strong></div>
+                    {% if preview_folha.tipo_contrato in ['clt_mensalista','clt_horista','horista'] %}
+                    <div class="fin-linha-mini"><span>FGTS 8%</span><strong>R$ {{ "%.2f"|format(preview_folha.fgts) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Provisão 13º</span><strong>R$ {{ "%.2f"|format(preview_folha.provisao_13) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Férias + 1/3</span><strong>R$ {{ "%.2f"|format(preview_folha.ferias_terco) }}</strong></div>
+                    <div class="fin-linha-mini"><span>INSS patronal</span><strong>R$ {{ "%.2f"|format(preview_folha.inss_patronal) }}</strong></div>
+                    <div class="fin-linha-mini"><span>RAT</span><strong>R$ {{ "%.2f"|format(preview_folha.rat) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Sistema S</span><strong>R$ {{ "%.2f"|format(preview_folha.sistema_s) }}</strong></div>
+                    {% elif preview_folha.tipo_contrato in ['rpa','autonomo','extra_pf'] %}
+                    <div class="fin-linha-mini"><span>INSS patronal 20%</span><strong>R$ {{ "%.2f"|format(preview_folha.inss_patronal) }}</strong></div>
+                    <div class="fin-linha-mini"><span>RAT</span><strong>R$ {{ "%.2f"|format(preview_folha.rat) }}</strong></div>
+                    {% endif %}
+                    <div class="fin-linha-mini"><span>Custo da escola</span><strong>R$ {{ "%.2f"|format(preview_folha.custo_escola) }}</strong></div>
+                </div>
+                {% endif %}
+
+                <div class="acoes">
+                    <button class="btn btn-success" type="submit">Salvar cadastro</button>
+                    {% if cadastro.usuario_id %}
+                    <a class="btn btn-secondary" href="{{ url_for('pagina_financeiro', aba='folha', colab=cadastro.funcionario_id) }}">Ver na folha</a>
+                    {% endif %}
+                </div>
+            </form>
+            {% if cadastro.usuario_id %}
+            <form method="POST" style="margin-top:16px;" onsubmit="return confirm('Remover o login deste usuário? O registro da folha permanece.');">
+                <input type="hidden" name="acao" value="excluir">
+                <input type="hidden" name="usuario_id" value="{{ cadastro.usuario_id }}">
+                <button class="btn btn-danger" type="submit">Excluir acesso</button>
+            </form>
+            {% endif %}
+        </div>
     </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

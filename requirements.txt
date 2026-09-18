@@ -1,0 +1,8 @@
+Flask
+gunicorn
+psycopg2-binary
+python-dotenv
+fpdf2>=2.7.0
+Authlib
+requests
+Werkzeug

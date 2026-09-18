@@ -2,76 +2,103 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calendário Escolar - Sistema Escolar</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Calendário Escolar</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
-        
-        /* Menu Lateral */
-        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
-        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
-        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
-        .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
-        
-        /* Conteúdo Principal */
-        .content { margin-left: 240px; padding: 35px; }
-        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
         h2 { font-weight: 600; color: #2c3e50; }
-        
-        /* Cards e Tabelas */
-        .card-box { background: white; border-radius: 8px; padding: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 25px; }
-        .table-responsive { width: 100%; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; }
-        th { background-color: #f8fafc; color: #475569; font-weight: 600; }
-        tr:hover { background-color: #f8fafc; }
-        
-        /* Botões */
-        .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; transition: 0.2s; font-size: 0.85rem; }
+        .card-box { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 16px; }
+        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+        .cal-head { text-align: center; font-size: 0.75rem; font-weight: 700; color: #64748b; padding: 6px 0; }
+        .cal-dia {
+            min-height: 96px; background: #f8fafc; border-radius: 10px; padding: 6px;
+            text-decoration: none; color: inherit; display: block; border: 1px solid #e2e8f0;
+        }
+        .cal-dia.fora { opacity: 0.45; }
+        .cal-dia.hoje { border-color: #3b82f6; background: #eff6ff; }
+        .cal-dia.sel { border-color: #1e3a5f; box-shadow: 0 0 0 2px #93c5fd; }
+        .cal-num { font-weight: 700; font-size: 0.9rem; }
+        .cal-dot {
+            display: block; font-size: 0.62rem; line-height: 1.25; margin-top: 3px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            border-radius: 4px; padding: 1px 4px; font-weight: 600;
+        }
+        .dot-feriado { color: #991b1b; background: #fee2e2; }
+        .dot-prova { color: #5b21b6; background: #ede9fe; }
+        .dot-geral { color: #075985; background: #e0f2fe; }
+        .dot-turma { color: #9a3412; background: #ffedd5; }
+        .dot-presente { color: #166534; background: #dcfce7; }
+        .dot-falta { color: #991b1b; background: #fee2e2; }
+        .filtros-cal { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; margin-bottom: 16px; }
+        .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; font-size: 0.85rem; }
         .btn-primary { background-color: #3498db; color: white; }
-        .btn-primary:hover { background-color: #2980b9; }
-        .btn-danger { background-color: #e74c3c; color: white; padding: 6px 10px; font-size: 0.8rem; }
-        .btn-danger:hover { background-color: #c0392b; }
-        
-        /* Formulários */
-        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px; }
+        .btn-success { background-color: #2ecc71; color: white; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
         .form-group { display: flex; flex-direction: column; }
-        .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
-        .form-group input, .form-group select, .form-group textarea { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
-        
-        /* Alertas */
-        .alert { padding: 15px; margin-bottom: 20px; border-radius: 6px; font-weight: 500; }
-        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .form-group label { font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; }
+        .form-group input, .form-group select, .form-group textarea { padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+        .alert { padding: 12px; margin-bottom: 12px; border-radius: 6px; }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-danger { background: #f8d7da; color: #721c24; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+        .tela-dia {
+            position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+            z-index: 2000; display: flex; align-items: flex-start; justify-content: center;
+            padding: 24px 12px; overflow-y: auto;
+        }
+        .tela-dia-box {
+            background: #fff; border-radius: 14px; width: min(720px, 100%);
+            padding: 22px; box-shadow: 0 20px 50px rgba(15,23,42,0.25); margin-bottom: 40px;
+        }
+        .tela-dia-box h3 { margin: 0 0 6px; }
+        .tela-sec { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
+        .tela-sec h4 { margin: 0 0 8px; font-size: 0.95rem; color: #1e3a5f; }
+        @media (max-width: 700px) {
+            .cal-dia { min-height: 72px; padding: 4px; }
+            .cal-dot { font-size: 0.55rem; }
+        }
     </style>
 </head>
 <body>
-
-    <!-- Menu Lateral Padronizado -->
-    <div class="sidebar">
-        <h4>🏫 Gestão Escolar</h4>
-        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
-        <a href="{{ url_for('pagina_alunos') }}">👨‍🎓 Gestão de Alunos</a>
-        <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
-        <a href="{{ url_for('pagina_pedagogico') }}">📚 Pedagógico</a>
-        <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
-        <a href="{{ url_for('calendario_escolar') }}" class="active">📅 Calendário Escolar</a>
-        <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
-    </div>
-
-    <!-- Conteúdo Principal -->
+    {% set nav_active = 'calendario' %}
+    {% include '_nav.html' %}
     <div class="content">
         <div class="header-flex">
-            <h2>📅 Calendário Escolar e Eventos</h2>
+            <h2>
+                {% if modo_presenca and contexto_aluno %}Presença — {{ contexto_aluno.nome_completo }}
+                {% elif modo_presenca and contexto_turma %}Chamada — {{ contexto_turma.nome }}
+                {% else %}Calendário da escola{% endif %}
+            </h2>
             <div>
-                <a href="{{ url_for('calendario_escolar', mes=mes_anterior, ano=ano_anterior) }}" class="btn btn-primary">◀ Mês Anterior</a>
-                <span style="font-weight: 600; margin: 0 15px; font-size: 1.1rem;">{{ nome_mes_atual }}</span>
-                <a href="{{ url_for('calendario_escolar', mes=mes_proximo, ano=ano_proximo) }}" class="btn btn-primary">Próximo Mês ▶</a>
+                <a class="btn btn-primary" href="{{ url_for('calendario_escolar', mes=mes_anterior, ano=ano_anterior, **cal_params) }}">◀</a>
+                <strong style="margin: 0 8px;">{{ nome_mes_atual }}</strong>
+                <a class="btn btn-primary" href="{{ url_for('calendario_escolar', mes=mes_proximo, ano=ano_proximo, **cal_params) }}">▶</a>
             </div>
         </div>
 
-        <!-- Mensagens Flash do Flask -->
+        {% set pdf_data = dia_selecionado or (data_hoje.isoformat() if data_hoje is defined else '') %}
+        {% set pdf_origem = 'calendario' %}
+        {% set pdf_turma_id = cal_params.get('turma_id') %}
+        {% set pdf_aluno_id = cal_params.get('aluno_id') %}
+        {% set pdf_extra = {} %}
+        {% if pdf_turma_id %}{% set _ = pdf_extra.update({'turma_id': pdf_turma_id}) %}{% endif %}
+        {% if pdf_aluno_id %}{% set _ = pdf_extra.update({'aluno_id': pdf_aluno_id}) %}{% endif %}
+        <div class="card-box">
+            {% include '_pdf_periodo.html' %}
+        </div>
+
+        {% if modo_presenca %}
+        <p style="font-size: 0.9rem; color: #475569; margin-bottom: 12px;">
+            Clique em um dia para abrir a tela com eventos, prova e chamada.
+            <a href="{{ url_for('calendario_escolar') }}">Voltar ao calendário geral</a>
+        </p>
+        {% else %}
+        <p style="font-size: 0.9rem; color: #475569; margin-bottom: 12px;">
+            Eventos gerais (azul) e de turma (laranja) aparecem nos dias. Clique no dia para ver detalhes, prova e chamada.
+        </p>
+        {% endif %}
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
@@ -80,75 +107,259 @@
             {% endif %}
         {% endwith %}
 
-        <!-- Formulário para Adicionar Evento -->
+        <form method="GET" class="card-box filtros-cal" action="{{ url_for('calendario_escolar') }}">
+            <input type="hidden" name="mes" value="{{ mes_atual }}">
+            <input type="hidden" name="ano" value="{{ ano_atual }}">
+            <div class="form-group">
+                <label>Ver no calendário</label>
+                <select name="visao">
+                    <option value="geral" {% if visao == 'geral' %}selected{% endif %}>Evento geral</option>
+                    <option value="turma" {% if visao == 'turma' %}selected{% endif %}>Turma</option>
+                    <option value="aluno" {% if visao == 'aluno' %}selected{% endif %}>Aluno</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Turma</label>
+                <select name="turma_id">
+                    <option value="">Todas / não filtrar</option>
+                    {% for t in turmas %}
+                    <option value="{{ t.id }}" {% if contexto_turma_id == t.id %}selected{% endif %}>{{ t.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Aluno (matrícula ou CPF)</label>
+                <input type="text" name="busca_aluno" value="{{ busca_aluno }}" placeholder="Ex: 2026001 ou CPF">
+            </div>
+            <div class="form-group">
+                <button class="btn btn-primary" type="submit">Filtrar</button>
+            </div>
+            {% if alunos_busca %}
+            <div class="form-group" style="grid-column: 1 / -1;">
+                <label>Alunos encontrados — clique para abrir</label>
+                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                    {% for a in alunos_busca %}
+                    <a class="btn btn-success" href="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, visao='aluno', aluno_id=a.id, busca_aluno=busca_aluno) }}">{{ a.nome_completo }} ({{ a.matricula or a.cpf }})</a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </form>
+
         <div class="card-box">
-            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Adicionar Novo Evento</h3>
-            <form action="{{ url_for('calendario_escolar') }}" method="POST">
+            <div class="cal-grid">
+                {% for d in ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'] %}
+                <div class="cal-head">{{ d }}</div>
+                {% endfor %}
+                {% for semana in dias_do_mes %}
+                    {% for dia in semana %}
+                        {% set chave = dia.isoformat() %}
+                        {% set evs = eventos_por_dia.get(chave, []) %}
+                        {% set pvs = provas_por_dia.get(chave, []) %}
+                        {% set st = frequencia_mes.get(chave) %}
+                        <a class="cal-dia {% if dia.month != mes_atual %}fora{% endif %} {% if dia == data_hoje %}hoje{% endif %} {% if dia_selecionado == chave %}sel{% endif %}"
+                           href="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=chave, **cal_params) }}">
+                            <div class="cal-num">{{ dia.day }}</div>
+                            {% if modo_presenca and st %}
+                                <span class="cal-dot {% if st == 'presente' %}dot-presente{% else %}dot-falta{% endif %}">{{ st }}</span>
+                            {% endif %}
+                            {% for ev in evs[:4] %}
+                                <span class="cal-dot {% if ev.tipo == 'feriado' %}dot-feriado{% elif ev.tipo in ['prova', 'semana_prova'] %}dot-prova{% elif ev.turma_id %}dot-turma{% else %}dot-geral{% endif %}">{{ ev.titulo }}</span>
+                            {% endfor %}
+                            {% for pv in pvs[:2] %}
+                                <span class="cal-dot dot-prova">{{ pv.titulo }}{% if pv.horario %} {{ pv.horario.strftime('%H:%M') if pv.horario.strftime is defined else pv.horario }}{% endif %}</span>
+                            {% endfor %}
+                        </a>
+                    {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+
+        {% if dia_selecionado %}
+        <div class="tela-dia">
+            <div class="tela-dia-box">
+                <div class="header-flex" style="margin-bottom: 12px;">
+                    <h3>Dia {{ dia_selecionado[8:10] }}/{{ dia_selecionado[5:7] }}/{{ dia_selecionado[0:4] }}</h3>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                        <a class="btn btn-success" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='dia', data=dia_selecionado, origem='calendario', **pdf_extra) }}">PDF do dia</a>
+                        <a class="btn btn-primary" href="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, **cal_params) }}">Fechar</a>
+                    </div>
+                </div>
+
+                <div class="tela-sec">
+                    <h4>Eventos</h4>
+                    {% set evs_info = eventos_do_dia | rejectattr('tipo', 'equalto', 'prova') | list %}
+                    {% if evs_info %}
+                        {% for ev in evs_info %}
+                        <p style="margin: 0 0 10px;">
+                            <strong>{{ ev.titulo }}</strong>
+                            <span style="color:#64748b;">({{ ev.tipo }}{% if ev.turma_nome %} · {{ ev.turma_nome }}{% endif %}{% if ev.horario %} · {{ ev.horario.strftime('%H:%M') if ev.horario.strftime is defined else ev.horario }}{% endif %})</span>
+                            {% if ev.descricao %}<br>{{ ev.descricao }}{% else %}<br><span style="color:#94a3b8;">Sem descrição.</span>{% endif %}
+                        </p>
+                        {% endfor %}
+                    {% else %}
+                        <p style="color:#64748b; margin:0;">Nenhum evento cadastrado neste dia.</p>
+                    {% endif %}
+                </div>
+
+                <div class="tela-sec">
+                    <h4>Provas do dia</h4>
+                    {% if provas_do_dia %}
+                        {% for pv in provas_do_dia %}
+                        <p style="margin: 0 0 10px;">
+                            <strong>{{ pv.titulo }}</strong>
+                            {% if pv.materia %} — {{ pv.materia }}{% endif %}
+                            <span style="color:#7c3aed; font-weight:700;">
+                                {% if pv.horario %} Horário: {{ pv.horario.strftime('%H:%M') if pv.horario.strftime is defined else pv.horario }}{% else %} Horário não informado{% endif %}
+                            </span>
+                            {% if pv.turma_nome %}<br>Turma: {{ pv.turma_nome }}{% endif %}
+                            {% if pv.descricao %}<br>{{ pv.descricao }}{% endif %}
+                        </p>
+                        {% endfor %}
+                    {% else %}
+                        <p style="color:#64748b; margin:0;">Nenhuma prova neste dia.</p>
+                    {% endif %}
+                </div>
+
+                <div class="tela-sec">
+                    <h4>Chamada</h4>
+                    {% if dia_feriado %}
+                        <p style="color:#b91c1c; margin:0;">Feriado / recesso — não há chamada neste dia.</p>
+                    {% elif dia_normal %}
+                        {% if contexto_turma %}
+                            <form method="POST" action="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=dia_selecionado, **cal_params) }}">
+                                <input type="hidden" name="acao" value="marcar_frequencia">
+                                <input type="hidden" name="turma_id" value="{{ contexto_turma.id }}">
+                                <input type="hidden" name="data_aula" value="{{ dia_selecionado }}">
+                                {% if lista_frequencia_dia %}
+                                <table>
+                                    <thead><tr><th>Aluno</th><th>Situação</th></tr></thead>
+                                    <tbody>
+                                    {% for al in lista_frequencia_dia %}
+                                        <tr>
+                                            <td>{{ al.nome_completo }}</td>
+                                            <td>
+                                                <select name="status_{{ al.id }}">
+                                                    <option value="presente" {% if al.status == 'presente' or not al.status %}selected{% endif %}>Presente</option>
+                                                    <option value="falta" {% if al.status == 'falta' %}selected{% endif %}>Falta</option>
+                                                    <option value="justificada" {% if al.status == 'justificada' %}selected{% endif %}>Justificada</option>
+                                                </select>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                    </tbody>
+                                </table>
+                                <button class="btn btn-success" type="submit" style="margin-top: 12px;">Salvar chamada do dia</button>
+                                {% else %}
+                                <p style="color:#b91c1c;">Nenhum aluno matriculado nesta turma.</p>
+                                {% endif %}
+                            </form>
+                        {% elif contexto_aluno %}
+                            <p>Situação atual: <strong>{{ frequencia_aluno_dia.status if frequencia_aluno_dia else 'sem lançamento' }}</strong></p>
+                            <form method="POST" action="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=dia_selecionado, **cal_params) }}">
+                                <input type="hidden" name="acao" value="marcar_frequencia">
+                                <input type="hidden" name="aluno_id" value="{{ contexto_aluno.id }}">
+                                <input type="hidden" name="turma_id" value="{{ contexto_turma_id or '' }}">
+                                <input type="hidden" name="data_aula" value="{{ dia_selecionado }}">
+                                <div class="form-group" style="max-width: 240px; margin: 10px 0;">
+                                    <label>Registrar</label>
+                                    <select name="status">
+                                        <option value="presente">Presente</option>
+                                        <option value="falta">Falta</option>
+                                        <option value="justificada">Falta justificada</option>
+                                    </select>
+                                </div>
+                                <button class="btn btn-success" type="submit">Salvar presença</button>
+                            </form>
+                        {% else %}
+                            <p style="margin-bottom: 8px;">Dia letivo. Escolha a turma para lançar a chamada:</p>
+                            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                                {% for t in turmas %}
+                                <a class="btn btn-primary" href="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=dia_selecionado, turma_id=t.id) }}">{{ t.nome }}</a>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if not modo_presenca %}
+        <div class="card-box">
+            <h3 style="margin-bottom: 12px;">Novo evento da escola</h3>
+            <form method="POST">
+                <input type="hidden" name="acao" value="criar_evento">
                 <div class="form-grid">
                     <div class="form-group" style="grid-column: span 2;">
-                        <label>Título do Evento</label>
-                        <input type="text" name="titulo" placeholder="Ex: Reunião de Pais, Prova de Matemática..." required>
+                        <label>Título</label>
+                        <input type="text" name="titulo" required placeholder="Ex: Semana de provas, Feriado, Feira de ciências">
                     </div>
                     <div class="form-group">
-                        <label>Data do Evento</label>
+                        <label>Data</label>
                         <input type="date" name="data_evento" required>
                     </div>
                     <div class="form-group">
-                        <label>Tipo / Categoria</label>
+                        <label>Tipo</label>
                         <select name="tipo" required>
-                            <option value="geral">Geral (Escola)</option>
-                            <option value="turma">Específico de Turma</option>
-                            <option value="prova">Avaliação / Prova</option>
-                            <option value="feriado">Feriado / Recesso</option>
+                            <option value="geral">Evento geral</option>
+                            <option value="feriado">Feriado / recesso</option>
+                            <option value="semana_prova">Semana de provas</option>
+                            <option value="prova">Prova de uma turma</option>
                         </select>
                     </div>
-                    <div class="form-group" style="grid-column: span 4;">
-                        <label>Descrição / Observações</label>
-                        <textarea name="descricao" rows="2" placeholder="Detalhes adicionais sobre o evento..."></textarea>
+                    <div class="form-group">
+                        <label>Horário (obrigatório se for prova)</label>
+                        <input type="time" name="horario">
+                    </div>
+                    <div class="form-group">
+                        <label>Disciplina da prova</label>
+                        <input type="text" name="materia_prova" placeholder="Ex: Matemática">
+                    </div>
+                    <div class="form-group">
+                        <label>Turma (se for prova específica)</label>
+                        <select name="turma_id">
+                            <option value="">Toda a escola</option>
+                            {% for t in turmas %}
+                            <option value="{{ t.id }}">{{ t.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label>Descrição</label>
+                        <textarea name="descricao" rows="2"></textarea>
                     </div>
                 </div>
-                <button type="submit" class="btn btn-primary">Salvar Evento no Calendário</button>
+                <button class="btn btn-primary" type="submit" style="margin-top: 10px;">Salvar evento</button>
             </form>
         </div>
+        {% endif %}
 
-        <!-- Listagem de Eventos Cadastrados -->
         <div class="card-box">
-            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Eventos Registrados</h3>
-            <div class="table-responsive">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Data</th>
-                            <th>Título</th>
-                            <th>Tipo</th>
-                            <th>Descrição</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% if eventos %}
-                            {% for evento in eventos %}
-                            <tr>
-                                <td>{{ evento.data_evento.strftime('%d/%m/%Y') if evento.data_evento else '' }}</td>
-                                <td style="font-weight: 600;">{{ evento.titulo }}</td>
-                                <td><span style="text-transform: uppercase; font-size: 0.75rem; background: #e2e8f0; padding: 3px 8px; border-radius: 4px;">{{ evento.tipo }}</span></td>
-                                <td>{{ evento.descricao or '-' }}</td>
-                                <td>
-                                    <!-- Ação de exclusão opcional caso queira implementar no backend -->
-                                    <span style="color: #777; font-size: 0.8rem;">-</span>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        {% else %}
-                            <tr>
-                                <td colspan="5" style="text-align: center; color: #777;">Nenhum evento cadastrado no sistema.</td>
-                            </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
+            <h3 style="margin-bottom: 12px;">Agenda do mês</h3>
+            <table>
+                <thead><tr><th>Data</th><th>Horário</th><th>Tipo</th><th>Título</th><th>Turma</th></tr></thead>
+                <tbody>
+                {% set ns = namespace(tem=false) %}
+                {% for ev in eventos %}
+                    {% if ev.data_evento and ev.data_evento.month == mes_atual and ev.data_evento.year == ano_atual %}
+                    {% set ns.tem = true %}
+                    <tr>
+                        <td>{{ ev.data_evento.strftime('%d/%m/%Y') }}</td>
+                        <td>{% if ev.horario %}{{ ev.horario.strftime('%H:%M') if ev.horario.strftime is defined else ev.horario }}{% else %}—{% endif %}</td>
+                        <td>{{ ev.tipo }}</td>
+                        <td>{{ ev.titulo }}</td>
+                        <td>{{ ev.turma_nome or '—' }}</td>
+                    </tr>
+                    {% endif %}
+                {% endfor %}
+                {% if not ns.tem %}
+                    <tr><td colspan="5" style="color:#777;">Nenhum evento neste mês.</td></tr>
+                {% endif %}
+                </tbody>
+            </table>
         </div>
     </div>
-
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

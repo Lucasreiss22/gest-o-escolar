@@ -1,0 +1,6 @@
+<form method="POST" action="{{ acao }}" style="display:inline;">
+    {% for chave, valor in campos.items() %}
+    <input type="hidden" name="{{ chave }}" value="{{ valor }}">
+    {% endfor %}
+    <button type="submit" class="btn {{ classe|default('btn-outline-primary') }}" {% if tamanho %}style="{{ tamanho }}"{% endif %}>Enviar por e-mail</button>
+</form>

@@ -2,80 +2,22 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema de Gestão Escolar</title>
-    
-    <!-- Estilos Embutidos Globais -->
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
-        
-        /* Menu Lateral Escuro */
-        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; overflow-y: auto; }
-        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
-        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
-        .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
-        
-        /* Área de Conteúdo */
-        .content { margin-left: 240px; padding: 35px; }
-        h2 { margin-bottom: 25px; font-weight: 600; color: #2c3e50; }
-        
-        /* Grid dos Cards */
-        .row { display: flex; gap: 20px; flex-wrap: wrap; }
-        .col-md-4 { flex: 1; min-width: 250px; }
-        
-        /* Cards Coloridos */
-        .card { padding: 25px; border-radius: 10px; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
-        .card h5 { font-size: 1rem; opacity: 0.9; margin-bottom: 15px; font-weight: 500; }
-        .card .display-5 { font-size: 2.8rem; font-weight: bold; }
-        
-        .bg-primary { background-color: #3498db; }
-        .bg-success { background-color: #2ecc71; }
-        .bg-warning { background-color: #f39c12; color: white; }
-
-        /* Barra Superior de Usuário */
-        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; background: white; padding: 15px 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .user-info { font-size: 0.95rem; color: #555; }
-        .btn-logout { background-color: #e74c3c; color: white; padding: 8px 15px; border-radius: 5px; text-decoration: none; font-size: 0.9rem; transition: 0.2s; }
-        .btn-logout:hover { background-color: #c0392b; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#1e3a5f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>{% block title %}Gestão Escolar{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    {% block extra_css %}{% endblock %}
 </head>
 <body>
-
-    <!-- Menu Lateral Padronizado (Fixo em todas as telas) -->
-    <div class="sidebar">
-        <h4>🏫 Gestão Escolar</h4>
-        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
-        <a href="{{ url_for('pagina_alunos') }}">👨‍🎓 Gestão de Alunos</a>
-        <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
-        <a href="{{ url_for('pagina_pedagogico') }}">📚 Pedagógico</a>
-        <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
-        <a href="{{ url_for('calendario_escolar') }}">📅 Calendário Escolar</a>
-        
-        {% if session.get('usuario_papel') == 'admin' %}
-        <a href="{{ url_for('gerenciar_usuarios') }}">👥 Gerenciar Usuários</a>
-        {% endif %}
-        
-        <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
-    </div>
-
-    <!-- Conteúdo Dinâmico que muda de página para página -->
+    {% include '_nav.html' %}
     <div class="content">
-        
-        <!-- Barra Superior com Informações do Usuário Logado -->
-        <div class="top-bar">
-            <div class="user-info">
-                Logado como: <strong>{{ session.get('usuario_nome', 'Usuário') }}</strong> 
-                (<span style="text-transform: uppercase; font-size: 0.8rem; color: #3498db; font-weight: bold;">{{ session.get('usuario_papel', 'comum') }}</span>)
-            </div>
-            <div>
-                <a href="{{ url_for('logout') }}" class="btn-logout">🚪 Sair</a>
-            </div>
-        </div>
-
-        {% block content %}
-        {% endblock %}
+        {% block content %}{% endblock %}
     </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

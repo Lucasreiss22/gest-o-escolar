@@ -2,147 +2,374 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Gestão de Alunos - Sistema Escolar</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
-        
-        /* Menu Lateral */
-        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
-        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
-        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
-        .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
-        
-        /* Conteúdo Principal */
-        .content { margin-left: 240px; padding: 35px; }
-        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
-        h2 { font-weight: 600; color: #2c3e50; }
-        
-        /* Cards e Tabelas */
-        .card-box { background: white; border-radius: 8px; padding: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 25px; }
-        .table-responsive { width: 100%; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; }
-        th { background-color: #f8fafc; color: #475569; font-weight: 600; }
-        tr:hover { background-color: #f8fafc; }
-        
-        /* Botões */
-        .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; transition: 0.2s; font-size: 0.85rem; }
-        .btn-primary { background-color: #3498db; color: white; }
-        .btn-primary:hover { background-color: #2980b9; }
-        .btn-danger { background-color: #e74c3c; color: white; padding: 6px 10px; font-size: 0.8rem; }
-        .btn-danger:hover { background-color: #c0392b; }
-        
-        /* Formulário de Cadastro Rápido */
-        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px; }
-        .form-group { display: flex; flex-direction: column; }
-        .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
-        .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
-        
-        /* Alertas */
-        .alert { padding: 15px; margin-bottom: 20px; border-radius: 6px; font-weight: 500; }
-        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-    </style>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body>
-
-    <!-- Menu Lateral Padronizado -->
-    <div class="sidebar">
-        <h4>🏫 Gestão Escolar</h4>
-        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
-        <a href="{{ url_for('pagina_alunos') }}" class="active">👨‍🎓 Gestão de Alunos</a>
-        <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
-        <a href="{{ url_for('pagina_pedagogico') }}">📚 Pedagógico</a>
-        <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
-        <a href="{{ url_for('calendario_escolar') }}">📅 Calendário Escolar</a>
-        <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
-    </div>
+    {% set nav_active = 'alunos' %}
+    {% include '_nav.html' %}
 
     <!-- Conteúdo Principal -->
     <div class="content">
-        <div class="header-flex">
-            <h2>👨‍🎓 Gestão de Alunos</h2>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="fw-bold text-dark">👨‍🎓 Gestão de Alunos</h2>
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoAluno">
+                <i class="bi bi-plus-lg"></i> Cadastrar Novo Aluno
+            </button>
         </div>
 
-        <!-- Mensagens Flash do Flask -->
+        <!-- Mensagens Flash -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
-        <!-- Formulário para Cadastrar Novo Aluno -->
-        <div class="card-box">
-            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Cadastrar Novo Aluno</h3>
-            <form action="{{ url_for('cadastrar_aluno_rota') }}" method="POST">
-                <div class="form-grid">
-                    <div class="form-group" style="grid-column: span 2;">
-                        <label>Nome Completo</label>
-                        <input type="text" name="nome" placeholder="Nome do aluno" required>
+        <!-- Barra de Busca -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <form action="{{ url_for('pagina_alunos') }}" method="GET" class="row g-3 align-items-center">
+                    <div class="col-md-10">
+                        <div class="input-group">
+                            <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                            <input type="text" name="q" class="form-control" placeholder="Buscar por nome, CPF ou matrícula..." value="{{ termo_busca }}">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Matrícula</label>
-                        <input type="text" name="matricula" placeholder="Ex: 2026001" required>
+                    <div class="col-md-2 d-grid">
+                        <button type="submit" class="btn btn-secondary btn-sm">Buscar</button>
                     </div>
-                    <div class="form-group">
-                        <label>Turma</label>
-                        <select name="turma_id" required>
-                            <option value="">Selecione a turma...</option>
-                            {% for turma in turmas %}
-                                <option value="{{ turma.id }}">{{ turma.nome }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-                <button type="submit" class="btn btn-primary">Cadastrar Aluno</button>
-            </form>
+                </form>
+            </div>
         </div>
 
         <!-- Tabela de Alunos Matriculados -->
-        <div class="card-box">
-            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Alunos Matriculados</h3>
-            <div class="table-responsive">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Matrícula</th>
-                            <th>Nome do Aluno</th>
-                            <th>Turma</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% if alunos %}
-                            {% for aluno in alunos %}
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-4">
+                <h3 class="fs-5 text-secondary fw-bold mb-3">Alunos Matriculados</h3>
+                <div class="table-responsive hide-mobile">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
                             <tr>
-                                <td>{{ aluno.matricula }}</td>
-                                <td>
-                                    <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" style="color: #3498db; text-decoration: none; font-weight: 600;">
-                                        {{ aluno.nome_completo or aluno.nome }}
-                                    </a>
-                                </td>
-                                <td>{{ aluno.turma_nome or '-' }}</td>
-                                <td>
-                                    <form action="{{ url_for('excluir_aluno_rota', id=aluno.id) }}" method="POST" style="display:inline;">
-                                        <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja realmente excluir este aluno?');">Excluir</button>
-                                    </form>
-                                </td>
+                                <th>Matrícula</th>
+                                <th>Nome do Aluno</th>
+                                <th>Turma</th>
+                                <th>Status</th>
+                                <th class="text-end">Ações</th>
                             </tr>
-                            {% endfor %}
-                        {% else %}
-                            <tr>
-                                <td colspan="4" style="text-align: center; color: #777;">Nenhum aluno cadastrado no momento.</td>
-                            </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {% if alunos %}
+                                {% for aluno in alunos %}
+                                <tr>
+                                    <td>{{ aluno.matricula }}</td>
+                                    <td>
+                                        <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="text-primary text-decoration-none fw-bold">
+                                            {{ aluno.nome_completo or aluno.nome }}
+                                        </a>
+                                    </td>
+                                    <td>{{ aluno.turma_nome or '-' }}</td>
+                                    <td>
+                                        {% set st = (aluno.status or aluno.situacao or 'ativo') | lower %}
+                                        {% if st == 'ativo' %}
+                                            <span class="badge bg-success">Ativo</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Inativo</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="btn btn-sm btn-outline-primary me-1" title="Ver Detalhes">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        <form action="{{ url_for('excluir_aluno_rota', id=aluno.id) }}" method="POST" style="display:inline;">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Deseja realmente excluir este aluno?');" title="Excluir">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="5" class="text-center py-4 text-muted">Nenhum aluno cadastrado no momento.</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="show-mobile">
+                    {% if alunos %}
+                        {% for aluno in alunos %}
+                        {% set st = (aluno.status or aluno.situacao or 'ativo') | lower %}
+                        <article class="list-card">
+                            <h3>{{ aluno.nome_completo or aluno.nome }}</h3>
+                            <div class="meta">
+                                Matrícula {{ aluno.matricula or '-' }}
+                                · {{ aluno.turma_nome or 'Sem turma' }}
+                                · {{ 'Ativo' if st == 'ativo' else 'Inativo' }}
+                            </div>
+                            <div class="acoes">
+                                <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="btn btn-primary">Abrir ficha</a>
+                            </div>
+                        </article>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">Nenhum aluno cadastrado no momento.</p>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>
 
+    <!-- MODAL CADASTRO DE ALUNO (COMPLETO) -->
+    <div class="modal fade" id="modalNovoAluno" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-person-plus-fill me-2"></i>Cadastrar Novo Aluno</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('pagina_alunos') }}" method="POST">
+                    <input type="hidden" name="acao" value="cadastrar_aluno">
+                    <div class="modal-body p-4">
+                        
+                        <!-- Navegação por Abas -->
+                        <ul class="nav nav-tabs mb-3" id="alunoTab" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active fw-bold" id="dados-tab" data-bs-toggle="tab" data-bs-target="#dados" type="button" role="tab">1. Dados Pessoais</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link fw-bold" id="endereco-tab" data-bs-toggle="tab" data-bs-target="#endereco" type="button" role="tab">2. Endereço & Contato</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link fw-bold" id="financeiro-tab" data-bs-toggle="tab" data-bs-target="#financeiro" type="button" role="tab">3. Financeiro</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link fw-bold" id="responsaveis-tab" data-bs-toggle="tab" data-bs-target="#responsaveis" type="button" role="tab">4. Responsáveis Legais</button>
+                            </li>
+                        </ul>
+
+                        <div class="tab-content" id="alunoTabContent">
+                            
+                            <!-- ABA 1: DADOS PESSOAIS -->
+                            <div class="tab-pane fade show active" id="dados" role="tabpanel">
+                                <div class="row g-3">
+                                    <div class="col-md-8">
+                                        <label class="form-label small fw-bold">Nome Completo *</label>
+                                        <input type="text" name="nome_completo" class="form-control" placeholder="Nome completo do aluno" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Data de Nascimento *</label>
+                                        <input type="date" name="data_nascimento" class="form-control" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">CPF</label>
+                                        <input type="text" name="cpf" class="form-control" placeholder="000.000.000-00">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">RG</label>
+                                        <input type="text" name="rg" class="form-control" placeholder="00.000.000-0">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Certidão de Nascimento</label>
+                                        <input type="text" name="certidao_nascimento" class="form-control" placeholder="Termo / Cartório">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Sexo</label>
+                                        <select name="sexo" class="form-select">
+                                            <option value="">Selecione...</option>
+                                            <option value="M">Masculino</option>
+                                            <option value="F">Feminino</option>
+                                            <option value="O">Outro</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Turma Inicial (Opcional)</label>
+                                        <select name="turma_id" class="form-select">
+                                            <option value="">Nenhuma turma vinculada</option>
+                                            {% if turmas %}
+                                                {% for turma in turmas %}
+                                                    <option value="{{ turma.id }}">{{ turma.nome }}</option>
+                                                {% endfor %}
+                                            {% endif %}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ABA 2: ENDEREÇO & CONTATO -->
+                            <div class="tab-pane fade" id="endereco" role="tabpanel">
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Telefone Principal *</label>
+                                        <input type="text" name="telefone_principal" class="form-control" placeholder="(00) 00000-0000" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Telefone Secundário</label>
+                                        <input type="text" name="telefone_secundario" class="form-control" placeholder="(00) 00000-0000">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">E-mail do aluno *</label>
+                                        <input type="email" name="email" class="form-control" placeholder="aluno@email.com" required>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold">CEP</label>
+                                        <input type="text" name="cep" class="form-control" placeholder="00000-000">
+                                    </div>
+                                    <div class="col-md-7">
+                                        <label class="form-label small fw-bold">Rua / Logradouro</label>
+                                        <input type="text" name="rua" class="form-control" placeholder="Nome da rua, avenida...">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small fw-bold">Número</label>
+                                        <input type="text" name="numero" class="form-control" placeholder="123">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Bairro</label>
+                                        <input type="text" name="bairro" class="form-control" placeholder="Bairro">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-bold">Cidade</label>
+                                        <input type="text" name="cidade" class="form-control" placeholder="Cidade">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small fw-bold">Estado (UF)</label>
+                                        <input type="text" name="estado" class="form-control" placeholder="RJ" maxlength="2">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ABA 3: FINANCEIRO -->
+                            <div class="tab-pane fade" id="financeiro" role="tabpanel">
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Valor da Mensalidade (R$)</label>
+                                        <input type="text" name="valor_mensalidade" class="form-control" placeholder="0.00" value="0.00">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Duração do contrato</label>
+                                        <select name="contrato_meses" class="form-select">
+                                            <option value="6">6 meses</option>
+                                            <option value="12" selected>12 meses</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Início do contrato</label>
+                                        <input type="date" name="contrato_inicio" class="form-control">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Turno da mensalidade</label>
+                                        <select name="turnos_mensalidade" class="form-select">
+                                            <option value="manha">Somente manhã</option>
+                                            <option value="tarde">Somente tarde</option>
+                                            <option value="integral">Dois turnos (manhã e tarde)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Tipo de Desconto</label>
+                                        <select name="desconto_tipo" class="form-select">
+                                            <option value="nenhum">Nenhum</option>
+                                            <option value="percentual">Percentual (%)</option>
+                                            <option value="valor_fixo">Valor Fixo (R$)</option>
+                                            <option value="bolsa">Bolsa Integral</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Valor do Desconto</label>
+                                        <input type="text" name="desconto_valor" class="form-control" placeholder="0.00" value="0.00">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ABA 4: RESPONSÁVEIS LEGAIS -->
+                            <div class="tab-pane fade" id="responsaveis" role="tabpanel">
+                                <h6 class="text-primary fw-bold mb-3"><i class="bi bi-shield-shaded me-1"></i>Responsável Legal 1 (Principal)</h6>
+                                <div class="row g-3 mb-4">
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-bold">Nome do Responsável 1</label>
+                                        <input type="text" name="resp1_nome" class="form-control" placeholder="Nome completo">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold">CPF</label>
+                                        <input type="text" name="resp1_cpf" class="form-control" placeholder="000.000.000-00">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold">Grau de Parentesco</label>
+                                        <input type="text" name="resp1_parentesco" class="form-control" placeholder="Ex: Pai, Mãe, Tutor">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Telefone / WhatsApp</label>
+                                        <input type="text" name="resp1_telefone" class="form-control" placeholder="(00) 00000-0000">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">E-mail do responsável 1 *</label>
+                                        <input type="email" name="resp1_email" class="form-control" placeholder="mae@email.com" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Local de Trabalho</label>
+                                        <input type="text" name="resp1_trabalho" class="form-control" placeholder="Empresa">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Telefone do Trabalho</label>
+                                        <input type="text" name="resp1_tel_trabalho" class="form-control" placeholder="(00) 0000-0000">
+                                    </div>
+                                </div>
+
+                                <hr>
+
+                                <h6 class="text-secondary fw-bold mb-3"><i class="bi bi-shield me-1"></i>Responsável Legal 2 (Opcional)</h6>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label small fw-bold">Nome do Responsável 2</label>
+                                        <input type="text" name="resp2_nome" class="form-control" placeholder="Nome completo">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold">CPF</label>
+                                        <input type="text" name="resp2_cpf" class="form-control" placeholder="000.000.000-00">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold">Grau de Parentesco</label>
+                                        <input type="text" name="resp2_parentesco" class="form-control" placeholder="Ex: Mãe, Tio, Avô">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Telefone / WhatsApp</label>
+                                        <input type="text" name="resp2_telefone" class="form-control" placeholder="(00) 00000-0000">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">E-mail do responsável 2</label>
+                                        <input type="email" name="resp2_email" class="form-control" placeholder="pai@email.com">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Local de Trabalho</label>
+                                        <input type="text" name="resp2_trabalho" class="form-control" placeholder="Empresa">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Telefone do Trabalho</label>
+                                        <input type="text" name="resp2_tel_trabalho" class="form-control" placeholder="(00) 0000-0000">
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary btn-sm px-4">Salvar Matrícula</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

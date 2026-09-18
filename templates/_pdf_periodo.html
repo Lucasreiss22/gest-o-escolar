@@ -1,0 +1,31 @@
+{% set pdf_data = pdf_data|default('') %}
+{% set pdf_origem = pdf_origem|default('calendario') %}
+<form class="pdf-bar" method="GET" action="{{ url_for('relatorio_pdf_consulta') }}">
+    <input type="hidden" name="data" value="{{ pdf_data }}">
+    <input type="hidden" name="origem" value="{{ pdf_origem }}">
+    {% if pdf_turma_id %}
+    <input type="hidden" name="turma_id" value="{{ pdf_turma_id }}">
+    {% endif %}
+    {% if pdf_aluno_id %}
+    <input type="hidden" name="aluno_id" value="{{ pdf_aluno_id }}">
+    {% endif %}
+    <div class="form-group">
+        <label>Baixar PDF</label>
+        <select name="tipo">
+            <option value="chamada">Chamada</option>
+            <option value="eventos">Eventos</option>
+            <option value="completo">Completo (chamada + eventos)</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>Período</label>
+        <select name="periodo">
+            <option value="dia">Dia</option>
+            <option value="semana">Semana</option>
+            <option value="mes" selected>Mês</option>
+        </select>
+    </div>
+    <button class="btn btn-success" type="submit">Gerar</button>
+    <button class="btn btn-primary" type="submit" name="enviar" value="1" formaction="{{ url_for('relatorio_pdf_consulta') }}" formmethod="post">Enviar por e-mail</button>
+</form>
+<p class="pdf-bar-hint">Escolha o tipo e o período. Com turma ou aluno filtrado, o PDF usa esse recorte.</p>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Contra-cheque</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        .card-box { background:#fff; border-radius:12px; padding:20px; box-shadow:0 8px 24px rgba(15,23,42,.08); max-width:640px; }
+        .linha { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eef2f7; }
+        .btn { padding:9px 16px; border:none; border-radius:8px; background:#1e3a5f; color:#fff; text-decoration:none; display:inline-block; font-weight:700; }
+    </style>
+</head>
+<body>
+    {% set nav_active = 'contracheque' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        <h2>Contra-cheque</h2>
+        <form method="GET" style="margin-bottom:16px;">
+            <input type="month" name="mes" value="{{ mes_atual }}" onchange="this.form.submit()">
+        </form>
+        {% if item %}
+        <div class="card-box">
+            <p><strong>{{ item.nome_completo }}</strong> · {{ item.cargo }} · {{ item.rotulo_contrato }}</p>
+            <p class="text-muted">{{ escola }} · {{ mes_label }}</p>
+            <div class="linha"><span>Bruto</span><strong>R$ {{ "%.2f"|format(item.bruto) }}</strong></div>
+            <div class="linha"><span>INSS</span><strong>R$ {{ "%.2f"|format(item.inss_funcionario) }}</strong></div>
+            <div class="linha"><span>IRRF</span><strong>R$ {{ "%.2f"|format(item.irrf) }}</strong></div>
+            <div class="linha"><span>Líquido</span><strong>R$ {{ "%.2f"|format(item.liquido) }}</strong></div>
+            <p style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+                <a class="btn" href="{{ url_for('pdf_contracheque_rota', mes=mes_atual, funcionario_id=item.id) }}">Baixar PDF</a>
+                <form action="{{ url_for('pdf_contracheque_rota') }}" method="POST" style="display:inline;">
+                    <input type="hidden" name="mes" value="{{ mes_atual }}">
+                    <input type="hidden" name="funcionario_id" value="{{ item.id }}">
+                    <input type="hidden" name="enviar" value="1">
+                    <button class="btn" type="submit">Enviar por e-mail</button>
+                </form>
+            </p>
+        </div>
+        {% else %}
+        <p>Nenhum colaborador vinculado a este usuário. Peça à secretaria para ligar o e-mail do cadastro da equipe ao seu login.</p>
+        {% endif %}
+    </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

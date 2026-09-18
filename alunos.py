@@ -4,65 +4,66 @@ from psycopg2.extras import RealDictCursor
 
 
 def gerar_proxima_matricula(cursor) -> str:
-    """Gera a próxima matrícula no formato AAAANNN (Ex: 2026001).
-
-    Busca o maior sequencial do ano corrente no banco e incrementa 1.
-    """
+    """Gera a próxima matrícula no formato AAAANNN (Ex: 2026001)."""
     ano_atual = datetime.datetime.now().year
 
     query = """
-        SELECT matricula 
-        FROM alunos 
-        WHERE matricula LIKE %s 
-        ORDER BY matricula DESC 
+        SELECT matricula
+        FROM alunos
+        WHERE matricula LIKE %s
+        ORDER BY matricula DESC
         LIMIT 1;
     """
     cursor.execute(query, (f"{ano_atual}%",))
     ultimo_registro = cursor.fetchone()
 
+    novo_sequencial = 1
     if ultimo_registro:
-        # Como o cursor é RealDict, acessamos pela chave 'matricula'
         ultimo_valor = ultimo_registro["matricula"] if isinstance(ultimo_registro, dict) else ultimo_registro[0]
-        ultimo_sequencial = int(ultimo_valor[4:])
-        novo_sequencial = ultimo_sequencial + 1
-    else:
-        # Primeiro aluno cadastrado no ano
-        novo_sequencial = 1
+        texto = str(ultimo_valor or "")
+        if len(texto) >= 5:
+            try:
+                novo_sequencial = int(texto[4:]) + 1
+            except ValueError:
+                novo_sequencial = 1
 
-    # Formata garantindo no mínimo 3 dígitos (001, 002... 250... 1000)
     return f"{ano_atual}{novo_sequencial:03d}"
 
 
 def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2: dict = None):
-    """Cadastra um novo aluno no banco de dados e gera sua matrícula automaticamente.
+    """Cadastra um novo aluno no banco de dados e gera sua matrícula automaticamente."""
+    from database import garantir_tabelas_folha, garantir_tabelas_pedagogicas
+    garantir_tabelas_folha()
+    garantir_tabelas_pedagogicas()
 
-    Executa em uma transação para garantir consistência entre Aluno e
-    Responsáveis.
-    """
     conexao = obter_conexao()
     if not conexao:
         raise Exception("Não foi possível estabelecer conexão com o banco de dados.")
 
     cursor = None
     try:
-        # Configurando o cursor para retornar dicionários
         cursor = conexao.cursor(cursor_factory=RealDictCursor)
-
-        # 1. Gerar Matrícula Automática
         matricula = gerar_proxima_matricula(cursor)
 
-        # 2. Inserir Aluno
+        sexo_bruto = (dados_aluno.get("sexo") or "").strip()
+        sexo = sexo_bruto[:1].upper() if sexo_bruto else None
+        if sexo_bruto.lower().startswith("fem"):
+            sexo = "F"
+        elif sexo_bruto.lower().startswith("masc"):
+            sexo = "M"
+        estado = (dados_aluno.get("estado") or "")[:2].upper() or None
+
         sql_aluno = """
             INSERT INTO alunos (
                 matricula, nome_completo, cpf, rg, certidao_nascimento, data_nascimento, sexo,
                 telefone_principal, telefone_secundario, email,
                 cep, rua, numero, bairro, cidade, estado,
-                valor_mensalidade, desconto_tipo, desconto_valor
+                valor_mensalidade, desconto_tipo, desconto_valor, status
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s,
                 %s, %s, %s, %s, %s, %s,
-                %s, %s, %s
+                %s, %s, %s, 'ativo'
             ) RETURNING id;
         """
 
@@ -73,7 +74,7 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
             dados_aluno.get("rg"),
             dados_aluno.get("certidao_nascimento"),
             dados_aluno["data_nascimento"],
-            dados_aluno.get("sexo"),
+            sexo,
             dados_aluno["telefone_principal"],
             dados_aluno.get("telefone_secundario"),
             dados_aluno.get("email"),
@@ -82,9 +83,9 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
             dados_aluno.get("numero"),
             dados_aluno.get("bairro"),
             dados_aluno.get("cidade"),
-            dados_aluno.get("estado"),
+            estado,
             dados_aluno.get("valor_mensalidade", 0.00),
-            dados_aluno.get("desconto_tipo", "nenhum"),
+            dados_aluno.get("desconto_tipo") or "nenhum",
             dados_aluno.get("desconto_valor", 0.00),
         )
 
@@ -92,52 +93,52 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
         resultado_aluno = cursor.fetchone()
         aluno_id = resultado_aluno["id"] if isinstance(resultado_aluno, dict) else resultado_aluno[0]
 
-        # SQL para inserção de responsáveis
+        turma_id = dados_aluno.get("turma_id")
+        if turma_id:
+            cursor.execute("""
+                INSERT INTO turma_alunos (turma_id, aluno_id)
+                VALUES (%s, %s)
+                ON CONFLICT (turma_id, aluno_id) DO NOTHING;
+            """, (turma_id, aluno_id))
+
         sql_resp = """
             INSERT INTO responsaveis_aluno (
                 aluno_id, tipo_responsavel, nome_completo, cpf, grau_parentesco,
-                telefone, local_trabalho, telefone_trabalho
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+                telefone, email, local_trabalho, telefone_trabalho
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
         """
 
-        # 3. Inserir Responsável 1 (Opcional, caso venha preenchido)
         if responsavel_1 and responsavel_1.get("nome_completo"):
-            valores_resp1 = (
-                aluno_id,
-                1,
+            cursor.execute(sql_resp, (
+                aluno_id, 1,
                 responsavel_1["nome_completo"],
                 responsavel_1.get("cpf"),
                 responsavel_1.get("grau_parentesco"),
                 responsavel_1.get("telefone"),
+                responsavel_1.get("email"),
                 responsavel_1.get("local_trabalho"),
                 responsavel_1.get("telefone_trabalho"),
-            )
-            cursor.execute(sql_resp, valores_resp1)
+            ))
 
-        # 4. Inserir Responsável 2 (Opcional)
         if responsavel_2 and responsavel_2.get("nome_completo"):
-            valores_resp2 = (
-                aluno_id,
-                2,
+            cursor.execute(sql_resp, (
+                aluno_id, 2,
                 responsavel_2["nome_completo"],
                 responsavel_2.get("cpf"),
                 responsavel_2.get("grau_parentesco"),
                 responsavel_2.get("telefone"),
+                responsavel_2.get("email"),
                 responsavel_2.get("local_trabalho"),
                 responsavel_2.get("telefone_trabalho"),
-            )
-            cursor.execute(sql_resp, valores_resp2)
+            ))
 
         conexao.commit()
-        print(f"✅ Aluno cadastrado com sucesso! Matrícula gerada: {matricula}")
         return matricula
 
     except Exception as e:
         if conexao:
             conexao.rollback()
-        print(f"❌ Erro ao cadastrar aluno: {e}")
-        raise e  # Repassa o erro exato para o app.py capturar e mostrar no flash
-
+        raise e
     finally:
         if cursor:
             cursor.close()
@@ -145,26 +146,68 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
             conexao.close()
 
 
-def listar_alunos():
-    """Retorna uma lista com todos os alunos cadastrados usando dicionários."""
+def listar_alunos(termo: str = None):
+    """Retorna uma lista de alunos com turmas agrupadas, permitindo busca por nome, CPF ou matrícula."""
     conexao = obter_conexao()
     if not conexao:
         return []
 
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT id, matricula, nome_completo, situacao FROM alunos ORDER BY id DESC;")
-            alunos = cursor.fetchall()
-            return alunos
+            if termo:
+                filtro = f"%{termo}%"
+                cursor.execute(
+                    """
+                    SELECT
+                        a.id,
+                        a.matricula,
+                        a.nome_completo,
+                        a.email,
+                        a.telefone_principal,
+                        COALESCE(NULLIF(a.status, ''), 'ativo') AS status,
+                        STRING_AGG(t.nome, ', ') AS turma_nome
+                    FROM alunos a
+                    LEFT JOIN turma_alunos ta ON ta.aluno_id = a.id
+                    LEFT JOIN turmas t ON t.id = ta.turma_id
+                    WHERE a.nome_completo ILIKE %s
+                       OR COALESCE(a.matricula, '') ILIKE %s
+                       OR CAST(a.id AS TEXT) ILIKE %s
+                    GROUP BY a.id, a.matricula, a.nome_completo, a.email, a.telefone_principal, a.status
+                    ORDER BY a.id DESC;
+                    """,
+                    (filtro, filtro, filtro),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT
+                        a.id,
+                        a.matricula,
+                        a.nome_completo,
+                        a.email,
+                        a.telefone_principal,
+                        COALESCE(NULLIF(a.status, ''), 'ativo') AS status,
+                        STRING_AGG(t.nome, ', ') AS turma_nome
+                    FROM alunos a
+                    LEFT JOIN turma_alunos ta ON ta.aluno_id = a.id
+                    LEFT JOIN turmas t ON t.id = ta.turma_id
+                    GROUP BY a.id, a.matricula, a.nome_completo, a.email, a.telefone_principal, a.status
+                    ORDER BY a.id DESC;
+                    """
+                )
+            return cursor.fetchall()
     except Exception as e:
-        print(f"❌ Erro ao listar alunos: {e}")
+        try:
+            print(f"Erro ao listar/buscar alunos: {e}")
+        except Exception:
+            pass
         return []
     finally:
         conexao.close()
 
 
 def atualizar_responsavel(resp_id, dados):
-    """Atualiza os dados de um responsável existente."""
+    """Atualiza as informações de cadastro de um responsável legal."""
     conexao = obter_conexao()
     if not conexao:
         raise Exception("Não foi possível conectar ao banco de dados.")
@@ -172,21 +215,13 @@ def atualizar_responsavel(resp_id, dados):
         with conexao.cursor() as cursor:
             cursor.execute("""
                 UPDATE responsaveis_aluno 
-                SET nome_completo = %s, 
-                    grau_parentesco = %s, 
-                    telefone = %s, 
-                    email = %s, 
-                    local_trabalho = %s, 
-                    telefone_trabalho = %s
+                SET nome_completo = %s, cpf = %s, grau_parentesco = %s, 
+                    telefone = %s, email = %s, local_trabalho = %s, telefone_trabalho = %s
                 WHERE id = %s;
             """, (
-                dados.get("nome_completo"),
-                dados.get("grau_parentesco"),
-                dados.get("telefone"),
-                dados.get("email"),
-                dados.get("local_trabalho"),
-                dados.get("telefone_trabalho"),
-                resp_id
+                dados.get("nome_completo"), dados.get("cpf"), dados.get("grau_parentesco"),
+                dados.get("telefone"), dados.get("email"), dados.get("local_trabalho"),
+                dados.get("telefone_trabalho"), resp_id
             ))
             conexao.commit()
     except Exception as e:
@@ -197,7 +232,7 @@ def atualizar_responsavel(resp_id, dados):
 
 
 def deletar_responsavel(resp_id):
-    """Remove um responsável do banco de dados pelo ID."""
+    """Remove um responsável legal vinculado ao aluno."""
     conexao = obter_conexao()
     if not conexao:
         raise Exception("Não foi possível conectar ao banco de dados.")
@@ -210,31 +245,3 @@ def deletar_responsavel(resp_id):
         raise e
     finally:
         conexao.close()
-
-
-# --- TESTE PRÁTICO ---
-if __name__ == "__main__":
-    print("\n--- Testando Cadastro de Aluno ---")
-    
-    aluno_teste = {
-        "nome_completo": "Lucas Gabriel Silva",
-        "data_nascimento": "2018-05-14",
-        "sexo": "M",
-        "telefone_principal": "21999998888",
-        "valor_mensalidade": 650.00,
-        "desconto_tipo": "percentual",
-        "desconto_valor": 10.00
-    }
-
-    resp1_teste = {
-        "nome_completo": "Mariana Silva",
-        "cpf": "123.456.789-00",
-        "grau_parentesco": "Mãe",
-        "telefone": "21988887777"
-    }
-
-    cadastrar_aluno(aluno_teste, resp1_teste)
-    
-    print("\nAlunos no banco:")
-    for a in listar_alunos():
-        print(f"ID: {a['id']} | Matrícula: {a['matricula']} | Nome: {a['nome_completo']} | Status: {a['situacao']}")

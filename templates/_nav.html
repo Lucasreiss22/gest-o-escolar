@@ -1,0 +1,45 @@
+{% set nav_active = nav_active|default('') %}
+<header class="app-topbar">
+    <button type="button" class="menu-toggle" id="menuToggle" aria-label="Abrir menu">☰</button>
+    <span class="app-topbar-title">{% if escola_nome %}{{ escola_nome }}{% else %}Gestão Escolar{% endif %}</span>
+    {% if origem_plataforma %}
+    <a href="{{ url_for('plataforma_voltar') }}" class="app-topbar-logout">Voltar à plataforma</a>
+    {% elif session.get('usuario_id') %}
+    <a href="{{ url_for('logout') }}" class="app-topbar-logout">Sair</a>
+    {% endif %}
+</header>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+<nav class="sidebar" id="sidebar">
+    <h4>Gestão Escolar</h4>
+    <a href="{{ url_for('dashboard') }}" class="{% if nav_active == 'dashboard' %}active{% endif %}">Dashboard</a>
+    {% if pode('alunos') %}
+    <a href="{{ url_for('pagina_alunos') }}" class="{% if nav_active == 'alunos' %}active{% endif %}">Gestão de Alunos</a>
+    {% endif %}
+    {% if pode('professores') %}
+    <a href="{{ url_for('pagina_professores') }}" class="{% if nav_active == 'professores' %}active{% endif %}">Equipe / Professores</a>
+    {% endif %}
+    {% if pode('pedagogico') %}
+    <a href="{{ url_for('pagina_pedagogico') }}" class="{% if nav_active == 'pedagogico' %}active{% endif %}">Pedagógico</a>
+    {% endif %}
+    {% if pode('financeiro') %}
+    <a href="{{ url_for('pagina_financeiro') }}" class="{% if nav_active == 'financeiro' %}active{% endif %}">Financeiro</a>
+    {% endif %}
+    {% if pode('calendario') %}
+    <a href="{{ url_for('calendario_escolar') }}" class="{% if nav_active == 'calendario' %}active{% endif %}">Calendário Escolar</a>
+    {% endif %}
+    {% if pode('contracheque') %}
+    <a href="{{ url_for('contracheque') }}" class="{% if nav_active == 'contracheque' %}active{% endif %}">Contra-cheque</a>
+    {% endif %}
+    {% if pode('usuarios') %}
+    <a href="{{ url_for('gerenciar_usuarios') }}" class="{% if nav_active == 'usuarios' %}active{% endif %}">Gerenciar Usuários</a>
+    {% endif %}
+    {% if pode('configuracoes') %}
+    <a href="{{ url_for('pagina_configuracoes') }}" class="{% if nav_active == 'configuracoes' %}active{% endif %}">Configurações</a>
+    {% endif %}
+    {% if origem_plataforma %}
+    <a href="{{ url_for('plataforma_voltar') }}" class="nav-logout">Voltar à plataforma</a>
+    {% endif %}
+    {% if session.get('usuario_id') %}
+    <a href="{{ url_for('logout') }}" class="nav-logout">Sair</a>
+    {% endif %}
+</nav>

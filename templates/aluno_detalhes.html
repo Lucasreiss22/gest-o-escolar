@@ -2,27 +2,31 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Detalhes do Aluno</title>
-    <!-- Bootstrap CSS -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Detalhes do Aluno - Sistema Escolar</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
-<body class="bg-light">
-
-    <div class="container-fluid py-4 px-4">
+<body>
+    {% set nav_active = 'alunos' %}
+    {% include '_nav.html' %}
+    <div class="content">
         <!-- CABEÇALHO -->
         <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
             <a href="{{ url_for('pagina_alunos') }}" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-arrow-left"></i> Voltar para Alunos
             </a>
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <a class="btn btn-outline-success btn-sm" href="{{ url_for('calendario_escolar', aluno_id=aluno.id or aluno[0]) }}">Calendário de presença</a>
+                <a class="btn btn-outline-primary btn-sm" href="#notas">Notas / boletim</a>
+                <a class="btn btn-outline-danger btn-sm" href="#faltas">Faltas</a>
                 <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalEditarAluno">
                     <i class="bi bi-pencil-square"></i> Editar Aluno
                 </button>
-                <span class="badge {% if aluno.status in ['ativo', 'ATIVO'] %}bg-success{% else %}bg-secondary{% endif %} fs-6 text-uppercase">
-                    {{ aluno.status or 'Inativo' }}
+                {% set st = (aluno.status or aluno.situacao or 'inativo') | lower %}
+                <span class="badge {% if st == 'ativo' %}bg-success{% else %}bg-secondary{% endif %} fs-6 text-uppercase">
+                    {{ st }}
                 </span>
             </div>
         </div>
@@ -51,6 +55,8 @@
                         <small class="text-muted fs-6">
                             Matrícula: <strong>{{ aluno.matricula or 'Não gerada' }}</strong> |
                             Mensalidade Base: <strong>R$ {{ "%.2f"|format(aluno.valor_mensalidade or aluno.mensalidade_base or 0.0) }}</strong>
+                            · {{ aluno.contrato_meses or 12 }} meses
+                            · {% if aluno.turnos_mensalidade == 'integral' %}manhã e tarde{% elif aluno.turnos_mensalidade == 'tarde' %}tarde{% else %}manhã{% endif %}
                         </small>
                     </div>
                 </div>
@@ -139,12 +145,12 @@
                                                     <h5 class="modal-title fw-bold">Editar Responsável Legal</h5>
                                                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                                                 </div>
-                                                <form action="{{ url_for('pagina_alunos') }}" method="POST">
+                <form action="{{ url_for('salvar_responsavel', aluno_id=aluno.id or aluno[0]) }}" method="POST">
                                                     <input type="hidden" name="acao" value="editar_responsavel">
                                                     <input type="hidden" name="responsavel_id" value="{{ resp_id }}">
                                                     <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
 
-                                                    <div class="modal-body">
+                                                    <div class="modal-body text-start">
                                                         <div class="mb-3">
                                                             <label class="form-label small fw-bold">Nome Completo</label>
                                                             <input type="text" name="nome_completo" class="form-control" value="{{ resp.nome_completo or resp.nome or '' }}" required>
@@ -166,8 +172,8 @@
                                                             </div>
                                                         </div>
                                                         <div class="mb-3">
-                                                            <label class="form-label small fw-bold">E-mail</label>
-                                                            <input type="email" name="email" class="form-control" value="{{ resp.email or '' }}">
+                                                            <label class="form-label small fw-bold">E-mail *</label>
+                                                            <input type="email" name="email" class="form-control" value="{{ resp.email or '' }}" required>
                                                         </div>
                                                         <div class="row g-2 mb-3">
                                                             <div class="col-6">
@@ -201,7 +207,7 @@
             </div>
 
             <!-- TURMAS ATUAIS -->
-            <div class="col-md-6">
+            <div class="col-md-6" id="turmas">
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-header bg-white fw-bold py-3">
                         <i class="bi bi-journal-bookmark-fill text-success"></i> Turmas Enturmadas
@@ -210,12 +216,20 @@
                         {% if turmas %}
                             <ul class="list-group list-group-flush">
                                 {% for t in turmas %}
-                                    <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <div class="fw-bold">{{ t.nome or t[0] }}</div>
-                                            <small class="text-muted">Prof(a): {{ t.professor or t[3] or 'Não atribuído' }}</small>
+                                    <li class="list-group-item px-0">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <div class="fw-bold">{{ t.nome or t[0] }}</div>
+                                                <small class="text-muted">Prof(a): {{ t.professor or t[3] or 'Não atribuído' }}</small>
+                                                {% if disciplinas_por_turma.get(t.turma_id) %}
+                                                <div class="small text-muted">Disciplinas: {{ disciplinas_por_turma.get(t.turma_id)|join(', ') }}</div>
+                                                {% endif %}
+                                            </div>
+                                            <div class="text-end">
+                                                <span class="badge bg-info text-dark d-block mb-1">{{ t.ano_letivo or t[1] }} - {{ t.turno or t[2] }}</span>
+                                                <a class="small" href="{{ url_for('calendario_escolar', aluno_id=aluno.id, turma_id=t.turma_id) }}">Presença</a>
+                                            </div>
                                         </div>
-                                        <span class="badge bg-info text-dark">{{ t.ano_letivo or t[1] }} - {{ t.turno or t[2] }}</span>
                                     </li>
                                 {% endfor %}
                             </ul>
@@ -276,7 +290,7 @@
                                                             <input type="hidden" name="autorizado_id" value="{{ aut_id }}">
                                                             <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
 
-                                                            <div class="modal-body">
+                                                            <div class="modal-body text-start">
                                                                 <div class="mb-3">
                                                                     <label class="form-label small fw-bold">Nome Completo</label>
                                                                     <input type="text" name="nome_completo" class="form-control" value="{{ aut.nome_completo or aut.nome or '' }}" required>
@@ -372,6 +386,10 @@
                                                 <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#modalBaixa{{ cobranca_id }}">
                                                     Dar Baixa
                                                 </button>
+                                                <a class="btn btn-sm btn-outline-info" href="{{ url_for('cobranca_pdf', cobranca_id=cobranca_id) }}">PDF</a>
+                                                <form action="{{ url_for('cobranca_email', cobranca_id=cobranca_id) }}" method="POST" class="d-inline">
+                                                    <button class="btn btn-sm btn-outline-primary" type="submit">E-mail</button>
+                                                </form>
 
                                                 <!-- MODAL DE BAIXA RÁPIDA -->
                                                 <div class="modal fade text-start" id="modalBaixa{{ cobranca_id }}" tabindex="-1" aria-hidden="true">
@@ -386,8 +404,8 @@
                                                                 <input type="hidden" name="cobranca_id" value="{{ cobranca_id }}">
                                                                 <input type="hidden" name="origem_aluno_id" value="{{ aluno.id or aluno[0] }}">
 
-                                                                <div class="modal-body">
-                                                                    <div class="mb-3 text-start">
+                                                                <div class="modal-body text-start">
+                                                                    <div class="mb-3">
                                                                         <label class="form-label small fw-bold">Forma de Pagamento</label>
                                                                         <select name="forma_pagamento" class="form-select" required>
                                                                             <option value="Pix">Pix</option>
@@ -397,7 +415,7 @@
                                                                             <option value="Boleto">Boleto</option>
                                                                         </select>
                                                                     </div>
-                                                                    <div class="mb-3 text-start">
+                                                                    <div class="mb-3">
                                                                         <label class="form-label small fw-bold">Data de Pagamento</label>
                                                                         <input type="date" name="data_pagamento" class="form-control" required>
                                                                     </div>
@@ -412,6 +430,10 @@
                                                 </div>
                                             {% else %}
                                                 <small class="text-muted">{{ cobranca.forma_pagamento or cobranca[6] or 'Quitado' }}</small>
+                                                <a class="btn btn-sm btn-outline-info" href="{{ url_for('cobranca_pdf', cobranca_id=cobranca_id) }}">PDF</a>
+                                                <form action="{{ url_for('cobranca_email', cobranca_id=cobranca_id) }}" method="POST" class="d-inline">
+                                                    <button class="btn btn-sm btn-outline-primary" type="submit">E-mail</button>
+                                                </form>
                                             {% endif %}
                                         </td>
                                     </tr>
@@ -427,12 +449,118 @@
             </div>
         </div>
 
+        <!-- HISTÓRICO DE PRESENÇA -->
+        <div class="card border-0 shadow-sm mt-4" id="faltas">
+            <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Histórico de presença</span>
+                <a class="btn btn-sm btn-success" href="{{ url_for('calendario_escolar', aluno_id=aluno.id or aluno[0]) }}">Abrir calendário</a>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">Presenças: {{ resumo_frequencia.presente }} · Faltas: {{ resumo_frequencia.falta }} · Justificadas: {{ resumo_frequencia.justificada }}</p>
+                <form action="{{ url_for('lancar_frequencia_aluno', aluno_id=aluno.id or aluno[0]) }}" method="POST" class="row g-2 mb-3 align-items-end">
+                    <div class="col-md-2">
+                        <label class="form-label small mb-1">Data</label>
+                        <input type="date" name="data_aula" class="form-control" value="{{ hoje }}" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1">Turma</label>
+                        <select name="turma_id" id="freq-turma" class="form-select">
+                            <option value="">Turma</option>
+                            {% for t in turmas %}
+                            <option value="{{ t.turma_id or t.id }}" {% if turmas|length == 1 %}selected{% endif %}>{{ t.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1">Disciplina</label>
+                        <select name="disciplina" id="freq-disciplina" class="form-select" required>
+                            <option value="__todas__">Todas as matérias</option>
+                            {% for t in turmas %}
+                                {% for nome in disciplinas_por_turma.get(t.turma_id or t.id, []) %}
+                                <option value="{{ nome }}" data-turma="{{ t.turma_id or t.id }}">{{ nome }}</option>
+                                {% endfor %}
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 d-flex flex-wrap gap-2">
+                        <button class="btn btn-success flex-fill" type="submit" name="status" value="presente">Presente</button>
+                        <button class="btn btn-outline-danger flex-fill" type="submit" name="status" value="falta">Falta</button>
+                        <button class="btn btn-outline-secondary" type="submit" name="status" value="justificada">Justificada</button>
+                    </div>
+                </form>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Data</th><th>Situação</th><th>Disciplina</th></tr></thead>
+                        <tbody>
+                        {% for f in frequencias %}
+                            <tr>
+                                <td>{{ f.data_aula.strftime('%d/%m/%Y') if f.data_aula else f.data_aula }}</td>
+                                <td>
+                                    {% if f.status == 'presente' %}<span class="badge text-bg-success">Presente</span>
+                                    {% elif f.status == 'falta' %}<span class="badge text-bg-danger">Falta</span>
+                                    {% elif f.status == 'justificada' %}<span class="badge text-bg-secondary">Justificada</span>
+                                    {% else %}{{ f.status }}{% endif %}
+                                </td>
+                                <td>{{ f.disciplina or 'Geral' }}</td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="3" class="text-muted">Nenhuma presença lançada.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <!-- BOLETIM E AVALIAÇÕES POR TRIMESTRE -->
-        <div class="card border-0 shadow-sm mt-4 p-4 bg-white">
-            <h3 class="card-title mb-4 fs-5 text-dark fw-bold"><i class="bi bi-journal-text text-secondary"></i> Boletim e Avaliações por Trimestre</h3>
+        <div class="card border-0 shadow-sm mt-4 p-4 bg-white" id="notas">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+                <h3 class="card-title mb-0 fs-5 text-dark fw-bold"><i class="bi bi-journal-text text-secondary"></i> Boletim e Avaliações por Trimestre</h3>
+                <a class="btn btn-sm btn-success" target="_blank" href="{{ url_for('boletim_pdf', aluno_id=aluno.id) }}">Gerar PDF do boletim</a>
+                <form action="{{ url_for('boletim_pdf', aluno_id=aluno.id) }}" method="POST" style="display:inline;">
+                    <input type="hidden" name="enviar" value="1">
+                    <button class="btn btn-sm btn-outline-primary" type="submit">Enviar boletim por e-mail</button>
+                </form>
+            </div>
+
+            <form action="{{ url_for('anexar_boletim', aluno_id=aluno.id or aluno[0]) }}" method="POST" enctype="multipart/form-data" class="mb-4 p-3 border rounded bg-white">
+                <h4 class="fs-6 fw-bold">Anexar boletim à parte</h4>
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label small">Trimestre</label>
+                        <select name="trimestre" class="form-select">
+                            <option value="">—</option>
+                            <option value="1">1º</option>
+                            <option value="2">2º</option>
+                            <option value="3">3º</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small">Descrição</label>
+                        <input type="text" name="descricao_boletim" class="form-control" placeholder="Ex: Boletim oficial da secretaria">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">PDF</label>
+                        <input type="file" name="arquivo_boletim" accept="application/pdf" class="form-control" required>
+                    </div>
+                    <div class="col-md-2 d-grid">
+                        <button class="btn btn-outline-primary" type="submit">Anexar</button>
+                    </div>
+                </div>
+                {% if boletins_anexos %}
+                <ul class="mt-3 mb-0 small">
+                    {% for b in boletins_anexos %}
+                    <li>
+                        <a href="{{ url_for('static', filename='uploads/boletins/' + b.arquivo_pdf) }}" target="_blank">{{ b.descricao or 'Boletim' }}</a>
+                        {% if b.trimestre %}( {{ b.trimestre }}º trimestre ){% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </form>
             
             <!-- Formulário Rápido para Lançar Nota/Prova -->
-            <form action="{{ url_for('adicionar_nota', aluno_id=aluno.id) }}" method="POST" enctype="multipart/form-data" class="mb-4 p-4 bg-light rounded border">
+            <form action="{{ url_for('adicionar_nota', aluno_id=aluno.id or aluno[0]) }}" method="POST" enctype="multipart/form-data" class="mb-4 p-4 bg-light rounded border">
                 <h4 class="mb-3 fs-6 text-secondary fw-bold">Lançar Nova Avaliação / Prova</h4>
                 
                 <div class="row g-3 mb-3">
@@ -526,9 +654,7 @@
                     <h5 class="modal-title fw-bold">Adicionar Responsável Legal</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <form action="{{ url_for('pagina_alunos') }}" method="POST">
-                    <input type="hidden" name="acao" value="adicionar_responsavel">
-                    <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
+                <form action="{{ url_for('adicionar_responsavel', aluno_id=aluno.id or aluno[0]) }}" method="POST">
 
                     <div class="modal-body text-start">
                         <div class="row g-3">
@@ -553,8 +679,8 @@
                             </div>
 
                             <div class="col-md-12">
-                                <label class="form-label small fw-bold">E-mail</label>
-                                <input type="email" name="email" class="form-control">
+                                <label class="form-label small fw-bold">E-mail *</label>
+                                <input type="email" name="email" class="form-control" required>
                             </div>
 
                             <div class="col-md-6">
@@ -585,7 +711,7 @@
                     <h5 class="modal-title fw-bold">Adicionar Pessoa Autorizada</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <form action="{{ url_for('adicionar_autorizado', aluno_id=aluno.id) }}" method="POST">
+                <form action="{{ url_for('adicionar_autorizado', aluno_id=aluno.id or aluno[0]) }}" method="POST">
                     <div class="modal-body text-start">
                         <div class="row g-3">
                             <div class="col-md-12">
@@ -634,6 +760,7 @@
                 <form action="{{ url_for('pagina_financeiro') }}" method="POST">
                     <input type="hidden" name="acao" value="criar_cobranca">
                     <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
+                    <input type="hidden" name="aba" value="receitas">
 
                     <div class="modal-body text-start">
                         <div class="row g-3">
@@ -648,8 +775,24 @@
                             </div>
                             
                             <div class="col-md-6">
-                                <label class="form-label small fw-bold">Vencimento</label>
+                                <label class="form-label small fw-bold">Vencimento (1ª parcela)</label>
                                 <input type="date" name="data_vencimento" class="form-control" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Duração do contrato</label>
+                                <select name="duracao" class="form-select">
+                                    <option value="1">Só este mês</option>
+                                    <option value="6" selected>6 meses</option>
+                                    <option value="12">12 meses</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-bold">Turno incluso</label>
+                                <select name="turnos" class="form-select">
+                                    <option value="manha">Somente manhã</option>
+                                    <option value="tarde">Somente tarde</option>
+                                    <option value="integral">Dois turnos (manhã e tarde)</option>
+                                </select>
                             </div>
                         </div>
                     </div>
@@ -682,9 +825,10 @@
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label small fw-bold">Status</label>
+                                {% set st_edit = (aluno.status or aluno.situacao or 'ativo') | lower %}
                                 <select name="status" class="form-select">
-                                    <option value="ATIVO" {% if aluno.status in ['ativo', 'ATIVO'] %}selected{% endif %}>Ativo</option>
-                                    <option value="INATIVO" {% if aluno.status in ['inativo', 'INATIVO'] %}selected{% endif %}>Inativo</option>
+                                    <option value="ATIVO" {% if st_edit == 'ativo' %}selected{% endif %}>Ativo</option>
+                                    <option value="INATIVO" {% if st_edit == 'inativo' %}selected{% endif %}>Inativo</option>
                                 </select>
                             </div>
                             <div class="col-md-4">
@@ -704,8 +848,8 @@
                                 <input type="text" name="telefone" class="form-control" value="{{ aluno.telefone_principal or aluno.telefone or '' }}">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label small fw-bold">E-mail</label>
-                                <input type="email" name="email" class="form-control" value="{{ aluno.email or '' }}">
+                                <label class="form-label small fw-bold">E-mail *</label>
+                                <input type="email" name="email" class="form-control" value="{{ aluno.email or '' }}" required>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label small fw-bold">Logradouro / Rua</label>
@@ -723,9 +867,24 @@
                                 <label class="form-label small fw-bold">Cidade</label>
                                 <input type="text" name="cidade" class="form-control" value="{{ aluno.cidade or '' }}">
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label small fw-bold">Estado (UF)</label>
-                                <input type="text" name="estado" class="form-control" value="{{ aluno.estado or '' }}" maxlength="2">
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Duração do contrato</label>
+                                <select name="contrato_meses" class="form-select">
+                                    <option value="6" {% if aluno.contrato_meses == 6 %}selected{% endif %}>6 meses</option>
+                                    <option value="12" {% if (aluno.contrato_meses or 12) == 12 %}selected{% endif %}>12 meses</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Turno da mensalidade</label>
+                                <select name="turnos_mensalidade" class="form-select">
+                                    <option value="manha" {% if aluno.turnos_mensalidade != 'tarde' and aluno.turnos_mensalidade != 'integral' %}selected{% endif %}>Somente manhã</option>
+                                    <option value="tarde" {% if aluno.turnos_mensalidade == 'tarde' %}selected{% endif %}>Somente tarde</option>
+                                    <option value="integral" {% if aluno.turnos_mensalidade == 'integral' %}selected{% endif %}>Manhã e tarde</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Início do contrato</label>
+                                <input type="date" name="contrato_inicio" class="form-control" value="{{ aluno.contrato_inicio or '' }}">
                             </div>
                         </div>
                     </div>
@@ -737,8 +896,30 @@
             </div>
         </div>
     </div>
+    </div>
 
     <!-- Bootstrap JS Bundle -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    (function () {
+        var turma = document.getElementById("freq-turma");
+        var disc = document.getElementById("freq-disciplina");
+        if (!turma || !disc) return;
+        function filtrar() {
+            var id = turma.value;
+            Array.from(disc.options).forEach(function (opt) {
+                if (!opt.value || opt.value === "__todas__") {
+                    opt.hidden = false;
+                    return;
+                }
+                opt.hidden = id && opt.getAttribute("data-turma") !== id;
+            });
+            if (disc.selectedOptions[0] && disc.selectedOptions[0].hidden) disc.value = "__todas__";
+        }
+        turma.addEventListener("change", filtrar);
+        filtrar();
+    })();
+    </script>
 </body>
 </html>

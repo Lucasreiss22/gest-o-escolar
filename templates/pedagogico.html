@@ -2,191 +2,653 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Módulo Pedagógico - Sistema Escolar</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
-        
-        /* Menu Lateral */
-        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
-        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
-        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
-        .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
-        
-        /* Conteúdo Principal */
-        .content { margin-left: 240px; padding: 35px; }
-        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
-        h2 { font-weight: 600; color: #2c3e50; }
-        
-        /* Cards e Tabelas */
-        .card-box { background: white; border-radius: 8px; padding: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 25px; }
-        .table-responsive { width: 100%; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; }
-        th { background-color: #f8fafc; color: #475569; font-weight: 600; }
-        tr:hover { background-color: #f8fafc; }
-        
-        /* Botões */
-        .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; transition: 0.2s; font-size: 0.85rem; }
-        .btn-primary { background-color: #3498db; color: white; }
-        .btn-primary:hover { background-color: #2980b9; }
-        .btn-success { background-color: #2ecc71; color: white; }
-        .btn-success:hover { background-color: #27ae60; }
-        .btn-danger { background-color: #e74c3c; color: white; padding: 6px 10px; font-size: 0.8rem; }
-        .btn-danger:hover { background-color: #c0392b; }
-        
-        /* Formulários */
-        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px; }
-        .form-group { display: flex; flex-direction: column; }
-        .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
-        .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
-        
-        /* Alertas */
-        .alert { padding: 15px; margin-bottom: 20px; border-radius: 6px; font-weight: 500; }
-        .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .alert-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-
-        .turma-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
-        .turma-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
+        .turma-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+            gap: 12px;
+        }
+        .turma-tile {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 128px;
+            background: #fff;
+            border: 2px solid #e2e8f0;
+            border-radius: 14px;
+            text-decoration: none;
+            color: inherit;
+            padding: 14px 10px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+            transition: border-color .15s, background .15s, transform .15s;
+        }
+        .turma-tile:hover { border-color: #3b82f6; background: #eff6ff; color: inherit; transform: translateY(-2px); }
+        .turma-tile.ativa { border-color: #2563eb; background: #dbeafe; }
+        .turma-tile-nome { font-size: 1.15rem; font-weight: 800; line-height: 1.2; }
+        .turma-tile-meta { font-size: .78rem; color: #64748b; margin-top: 6px; }
+        .turma-detail { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
+        .turma-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
+    {% set nav_active = 'pedagogico' %}
+    {% include '_nav.html' %}
 
-    <!-- Menu Lateral Padronizado -->
-    <div class="sidebar">
-        <h4>🏫 Gestão Escolar</h4>
-        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
-        <a href="{{ url_for('pagina_alunos') }}">👨‍🎓 Gestão de Alunos</a>
-        <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
-        <a href="{{ url_for('pagina_pedagogico') }}" class="active">📚 Pedagógico</a>
-        <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
-        <a href="{{ url_for('calendario_escolar') }}">📅 Calendário Escolar</a>
-        <a href="{{ url_for('pagina_configuracoes') }}">⚙️ Configurações</a>
-    </div>
+    {% macro grade_por_dia() %}
+        <div class="col-12 campo-semanal">
+            <label class="form-label small fw-bold">Aulas por dia (quantidade e duração em cada dia)</label>
+            <p class="small text-muted mb-2">Ex.: Segunda 2 aulas de 1 h e quinta 1 aula de 45 min. O total soma as horas de todos os dias.</p>
+            {% for val, rotulo in dias_semana_opcoes %}
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <strong style="min-width:42px;">{{ rotulo }}</strong>
+                <div class="grade-blocos d-flex flex-wrap gap-2" data-dia="{{ val }}">
+                    <div class="grade-bloco d-flex gap-1 align-items-center">
+                        <input class="form-control form-control-sm" style="width:70px;" type="number" min="0" name="grade_{{ val }}_qtd" value="0" title="Quantidade de aulas">
+                        <span class="small">aulas de</span>
+                        <select class="form-select form-select-sm" style="width:110px;" name="grade_{{ val }}_min">
+                            <option value="60">1 hora</option>
+                            <option value="50">50 min</option>
+                            <option value="45">45 min</option>
+                            <option value="30">30 min</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary js-add-bloco">+ outra duração</button>
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
 
-    <!-- Conteúdo Principal -->
+    {% macro ctx_turma(painel_val=None) %}
+        <input type="hidden" name="aba" value="turmas">
+        <input type="hidden" name="painel" value="{{ painel_val or painel }}">
+    {% endmacro %}
+
+    {% set filtro_turma = request.args.get('turma', '') %}
+    {% set filtro_prof = request.args.get('professor', '') %}
+    {% set filtro_turno = request.args.get('turno', '') %}
+
     <div class="content">
-        <div class="header-flex">
-            <h2>📚 Módulo Pedagógico (Turmas e Matérias)</h2>
-            <a href="{{ url_for('pagina_alunos') }}" class="btn btn-success">➕ Ir para Cadastro de Alunos</a>
+        <h2 class="fw-bold text-dark mb-3">Pedagógico</h2>
+        <ul class="nav nav-pills flex-wrap gap-2 mb-4">
+            <li class="nav-item">
+                <a class="nav-link {% if aba == 'turmas' %}active{% endif %}" href="{{ url_for('pagina_pedagogico', aba='turmas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Turmas</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if aba == 'aluno' %}active{% endif %}" href="{{ url_for('pagina_pedagogico', aba='aluno') }}">Por aluno</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if aba == 'materias' %}active{% endif %}" href="{{ url_for('pagina_pedagogico', aba='materias') }}">Matérias</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('calendario_escolar') }}">Calendário da escola</a>
+            </li>
+        </ul>
+
+        {% set pdf_data = data_chamada %}
+        {% set pdf_origem = 'pedagogico' %}
+        {% set pdf_turma_id = turma_sel %}
+        {% set pdf_aluno_id = None %}
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body py-3">
+                {% include '_pdf_periodo.html' %}
+            </div>
         </div>
 
-        <!-- Mensagens Flash do Flask -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
-        <!-- Formulário para Cadastrar Nova Turma -->
-        <div class="card-box">
-            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Cadastrar Nova Turma</h3>
-            <form action="{{ url_for('pagina_pedagogico') }}" method="POST">
-                <input type="hidden" name="acao" value="criar_turma">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>Nome da Turma / Série</label>
-                        <input type="text" name="nome_turma" placeholder="Ex: 1º Ano Ensino Médio" required>
+        {% if aba == 'aluno' %}
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <h3 class="fs-5 fw-bold mb-3">Ver por aluno: notas, faltas, boletim, calendário, disciplinas e turmas</h3>
+                <form method="GET" class="row g-2 mb-3">
+                    <input type="hidden" name="aba" value="aluno">
+                    <div class="col-md-8">
+                        <input class="form-control" name="aluno" value="{{ busca_aluno }}" placeholder="Buscar aluno por nome...">
                     </div>
-                    <div class="form-group">
-                        <label>Ano Letivo</label>
-                        <input type="text" name="ano_letivo" value="2026" required>
+                    <div class="col-md-4 d-grid"><button class="btn btn-secondary" type="submit">Buscar</button></div>
+                </form>
+                {% if busca_aluno %}
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Aluno</th><th>Atalhos</th></tr></thead>
+                        <tbody>
+                        {% set ns = namespace(achou=false) %}
+                        {% for aluno in alunos_cadastrados %}
+                            {% if busca_aluno.lower() in aluno.nome_completo.lower() %}
+                            {% set ns.achou = true %}
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}">{{ aluno.nome_completo }}</a>
+                                    <small class="text-muted d-block">Mat. {{ aluno.matricula or '-' }}</small>
+                                </td>
+                                <td class="d-flex flex-wrap gap-1">
+                                    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}#notas">Notas / boletim</a>
+                                    <a class="btn btn-outline-danger btn-sm" href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}#faltas">Faltas</a>
+                                    <a class="btn btn-outline-success btn-sm" href="{{ url_for('calendario_escolar', aluno_id=aluno.id) }}">Calendário (presença)</a>
+                                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}#turmas">Turmas / disciplinas</a>
+                                </td>
+                            </tr>
+                            {% endif %}
+                        {% endfor %}
+                        {% if not ns.achou %}
+                            <tr><td colspan="2" class="text-muted">Nenhum aluno encontrado.</td></tr>
+                        {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">Digite o nome do aluno para ver os atalhos de notas, faltas e turmas.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if aba == 'materias' %}
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <h3 class="fs-5 fw-bold mb-2">Cadastrar matéria</h3>
+                <p class="small text-muted">Informe quantas aulas de cada duração em cada dia. O total soma as horas: 3 dias com 1 h = 3 h/semana.</p>
+                <form method="POST" class="row g-2">
+                    <input type="hidden" name="acao" value="criar_disciplina">
+                    <input type="hidden" name="aba" value="materias">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold">Nome</label>
+                        <input class="form-control" name="nome_disciplina" placeholder="Ex: História, Música" required>
                     </div>
-                    <div class="form-group">
-                        <label>Turno</label>
-                        <select name="turno" required>
-                            <option value="">Selecione...</option>
-                            <option value="Manhã">Manhã</option>
-                            <option value="Tarde">Tarde</option>
-                            <option value="Noite">Noite</option>
+                    <div class="col-md-2">
+                        <label class="form-label small fw-bold">Frequência</label>
+                        <select name="tipo_frequencia" class="form-select js-tipo-materia">
+                            <option value="semanal">Semanal</option>
+                            <option value="esporadica">Esporádica</option>
                         </select>
                     </div>
-                    <div class="form-group">
-                        <label>Professor Responsável</label>
-                        <select name="professor_id">
-                            <option value="">Selecione...</option>
-                            {% for prof in professores %}
-                                <option value="{{ prof.id }}">{{ prof.nome_completo }}</option>
+                    <div class="col-md-2 campo-esporadica" style="display:none;">
+                        <label class="form-label small fw-bold">Vezes no mês</label>
+                        <input class="form-control" type="number" name="vezes_mes" min="1" value="1">
+                    </div>
+                    <div class="col-md-2 campo-esporadica" style="display:none;">
+                        <label class="form-label small fw-bold">Duração</label>
+                        <select name="minutos_aula" class="form-select">
+                            <option value="60">1 hora</option>
+                            <option value="50">50 min</option>
+                            <option value="45">45 min</option>
+                            <option value="30">30 min</option>
+                        </select>
+                    </div>
+                    {{ grade_por_dia() }}
+                    <div class="col-md-3 d-grid">
+                        <button class="btn btn-primary" type="submit">Cadastrar matéria</button>
+                    </div>
+                </form>
+                <ul class="mt-3 mb-0 list-unstyled">
+                    {% for d in disciplinas %}
+                    <li class="d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 border-bottom">
+                        <span>
+                            <strong>{{ d.nome }}</strong>
+                            <small class="text-muted d-block">{{ d.resumo }}</small>
+                        </span>
+                        <form method="POST" class="m-0" onsubmit="return confirm('Excluir a matéria {{ d.nome }}? Ela sai também das turmas.');">
+                            <input type="hidden" name="acao" value="excluir_disciplina">
+                            <input type="hidden" name="aba" value="materias">
+                            <input type="hidden" name="disciplina_id" value="{{ d.id }}">
+                            <button class="btn btn-sm btn-outline-danger" type="submit">Excluir</button>
+                        </form>
+                    </li>
+                    {% else %}
+                    <li class="text-muted">Nenhuma matéria cadastrada.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if aba == 'turmas' %}
+        <form action="{{ url_for('pagina_pedagogico') }}" method="GET" class="card border-0 shadow-sm mb-3">
+            <div class="card-body py-3">
+                <input type="hidden" name="aba" value="turmas">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold mb-1">Buscar turma</label>
+                        <input type="text" name="turma" class="form-control" placeholder="Nome ou número..." value="{{ filtro_turma }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold mb-1">Professor</label>
+                        <input type="text" name="professor" class="form-control" placeholder="Nome..." value="{{ filtro_prof }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold mb-1">Turno</label>
+                        <select name="turno" class="form-select">
+                            <option value="">Todos</option>
+                            <option value="Manhã" {% if filtro_turno == 'Manhã' %}selected{% endif %}>Manhã</option>
+                            <option value="Tarde" {% if filtro_turno == 'Tarde' %}selected{% endif %}>Tarde</option>
+                            <option value="Noite" {% if filtro_turno == 'Noite' %}selected{% endif %}>Noite</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2 d-grid">
+                        <button type="submit" class="btn btn-secondary">Filtrar</button>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+        <details class="card border-0 shadow-sm mb-4" {% if not pode('pedagogico_cadastro') %}hidden{% endif %}>
+            <summary class="card-body py-3 fw-bold" style="cursor:pointer;">Cadastrar nova turma</summary>
+            <div class="card-body pt-0">
+                <form action="{{ url_for('pagina_pedagogico') }}" method="POST">
+                    <input type="hidden" name="acao" value="criar_turma">
+                    <input type="hidden" name="aba" value="turmas">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Nome da Turma / Série</label>
+                            <input type="text" name="nome_turma" class="form-control" placeholder="Ex: 1º Ano ou Turma 12" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Ano Letivo</label>
+                            <input type="text" name="ano_letivo" class="form-control" value="2026" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Turno</label>
+                            <select name="turno" class="form-select" required>
+                                <option value="">Selecione...</option>
+                                <option value="Manhã">Manhã</option>
+                                <option value="Tarde">Tarde</option>
+                                <option value="Noite">Noite</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Professor Responsável</label>
+                            <select name="professor_id" class="form-select">
+                                <option value="">Selecione...</option>
+                                {% for prof in professores %}
+                                    <option value="{{ prof.id }}">{{ prof.nome_completo }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm px-4">Cadastrar Turma</button>
+                </form>
+            </div>
+        </details>
+
+        <h3 class="fs-6 text-secondary fw-bold mb-2">Escolha a turma</h3>
+        {% if turmas %}
+        <div class="turma-grid mb-4">
+            {% for turma in turmas %}
+            <a class="turma-tile {% if turma_sel == turma.id %}ativa{% endif %}"
+               href="{{ url_for('pagina_pedagogico', aba='turmas', turma_sel=turma.id, painel='horas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">
+                <span class="turma-tile-nome">{{ turma.nome }}</span>
+                <span class="turma-tile-meta">{{ turma.ano_letivo }} · {{ turma.turno }}</span>
+                <span class="turma-tile-meta">{{ turma.total_alunos }} aluno{{ 's' if turma.total_alunos != 1 else '' }}</span>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-center text-muted py-4">Nenhuma turma cadastrada no momento.</p>
+        {% endif %}
+
+        {% if turma_sel %}
+            {% set ns = namespace(turma=None) %}
+            {% for t in turmas %}
+                {% if t.id == turma_sel %}{% set ns.turma = t %}{% endif %}
+            {% endfor %}
+            {% if not ns.turma %}
+            <div class="alert alert-warning">Turma não encontrada neste filtro. <a href="{{ url_for('pagina_pedagogico', aba='turmas') }}">Ver todas</a></div>
+            {% else %}
+            {% set turma = ns.turma %}
+            <div id="turma-detalhe" class="turma-detail">
+                <div class="turma-header">
+                    <div>
+                        <h4 class="fs-5 text-dark fw-bold mb-1">{{ turma.nome }}</h4>
+                        <small class="text-muted">{{ turma.ano_letivo }} · {{ turma.turno }} · Professor: {{ turma.nome_completo or 'Não atribuído' }} · {{ turma.total_alunos }} alunos</small>
+                    </div>
+                    <div class="d-flex flex-wrap gap-1">
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('pagina_pedagogico', aba='turmas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Voltar às turmas</a>
+                        <a class="btn btn-sm btn-outline-success" href="{{ url_for('calendario_escolar', turma_id=turma.id) }}">Calendário / chamada</a>
+                        <form action="{{ url_for('excluir_turma', turma_id=turma.id) }}" method="POST" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Deseja realmente excluir esta turma?');">Excluir turma</button>
+                        </form>
+                    </div>
+                </div>
+
+                <ul class="nav nav-tabs mb-3">
+                    <li class="nav-item">
+                        <a class="nav-link {% if painel == 'horas' %}active{% endif %}" href="{{ url_for('pagina_pedagogico', aba='turmas', turma_sel=turma.id, painel='horas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Matérias e horas</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if painel == 'provas' %}active{% endif %}" href="{{ url_for('pagina_pedagogico', aba='turmas', turma_sel=turma.id, painel='provas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Provas</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if painel == 'alunos' %}active{% endif %}" href="{{ url_for('pagina_pedagogico', aba='turmas', turma_sel=turma.id, painel='alunos', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Alunos</a>
+                    </li>
+                </ul>
+
+                {% if painel == 'horas' %}
+                {% set quadro = quadros_por_turma.get(turma.id, []) %}
+                {% if quadro %}
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Matéria</th>
+                                <th>Tipo</th>
+                                <th>Por dia</th>
+                                <th>Horas/semana</th>
+                                <th>Horas/mês</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for q in quadro %}
+                            <tr>
+                                <td>{{ q.nome }}</td>
+                                <td>{{ q.tipo }}</td>
+                                <td>{{ q.hora_dia }}</td>
+                                <td>{{ q.hora_semana }}</td>
+                                <td>{{ q.hora_mes }}</td>
+                                <td class="text-end">
+                                    <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="d-inline" onsubmit="return confirm('Remover {{ q.nome }} desta turma? A matéria continua cadastrada na escola.');">
+                                        <input type="hidden" name="acao" value="excluir_disciplina_turma">
+                                        <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                                        <input type="hidden" name="disciplina_id" value="{{ q.disciplina_id }}">
+                                        {{ ctx_turma('horas') }}
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Excluir</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted small">Nenhuma matéria nesta turma ainda.</p>
+                {% endif %}
+
+                <details class="mb-3 p-3 border rounded">
+                    <summary class="fw-bold small" style="cursor:pointer;">Incluir matéria nesta turma</summary>
+                <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mt-2">
+                    <input type="hidden" name="acao" value="criar_disciplina_turma">
+                    <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                    {{ ctx_turma('horas') }}
+                    <div class="col-md-3">
+                        <input class="form-control form-control-sm" name="nome_disciplina" placeholder="Nome da matéria" required>
+                    </div>
+                    <div class="col-md-2">
+                        <select name="tipo_frequencia" class="form-select form-select-sm js-tipo-materia">
+                            <option value="semanal">Semanal</option>
+                            <option value="esporadica">Esporádica</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2 campo-esporadica" style="display:none;">
+                        <input class="form-control form-control-sm" type="number" name="vezes_mes" min="1" value="1" placeholder="Vezes/mês">
+                    </div>
+                    <div class="col-md-2 campo-esporadica" style="display:none;">
+                        <select name="minutos_aula" class="form-select form-select-sm">
+                            <option value="60">1 hora</option>
+                            <option value="50">50 min</option>
+                            <option value="45">45 min</option>
+                            <option value="30">30 min</option>
+                        </select>
+                    </div>
+                    {{ grade_por_dia() }}
+                    <div class="col-md-3 d-grid">
+                        <button class="btn btn-primary btn-sm" type="submit">Cadastrar na turma</button>
+                    </div>
+                </form>
+                {% if disciplinas %}
+                <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mb-0">
+                    <input type="hidden" name="acao" value="vincular_disciplina">
+                    <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                    {{ ctx_turma('horas') }}
+                    <div class="col-md-8">
+                        <select name="disciplina_id" class="form-select form-select-sm" required>
+                            <option value="">Ou usar matéria já cadastrada...</option>
+                            {% for d in disciplinas %}
+                            <option value="{{ d.id }}">{{ d.nome }}</option>
                             {% endfor %}
                         </select>
                     </div>
-                </div>
-                <button type="submit" class="btn btn-primary">Cadastrar Turma</button>
-            </form>
-        </div>
+                    <div class="col-md-4 d-grid"><button class="btn btn-outline-primary btn-sm" type="submit">Incluir nesta turma</button></div>
+                </form>
+                {% endif %}
+                </details>
+                {% endif %}
 
-        <!-- Lista de Turmas Ativas e Alunos Vinculados -->
-        <div class="card-box">
-            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Turmas Ativas e Alunos</h3>
-            
-            {% if turmas %}
-                {% for turma in turmas %}
-                    <div class="turma-card">
-                        <div class="turma-header">
-                            <div>
-                                <h4 style="font-size: 1.1rem; color: #2c3e50;">{{ turma.nome }} ({{ turma.ano_letivo }}) - Turno: {{ turma.turno }}</h4>
-                                <small style="color: #666;">Professor: {{ turma.nome_completo or 'Não atribuído' }} | Total de Alunos: {{ turma.total_alunos }}</small>
-                            </div>
-                            <form action="{{ url_for('excluir_turma', id=turma.id) }}" method="POST" style="display:inline;">
-                                <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja realmente excluir esta turma?');">Excluir Turma</button>
-                            </form>
+                {% if painel == 'provas' %}
+                <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mb-3 p-3 bg-light rounded">
+                    <input type="hidden" name="acao" value="criar_prova_turma">
+                    <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                    {{ ctx_turma('provas') }}
+                    <div class="col-12"><strong class="small">Cadastrar prova desta turma (vai para o calendário)</strong></div>
+                    <div class="col-md-3">
+                        <input class="form-control form-control-sm" name="titulo_prova" placeholder="Título da prova" required>
+                    </div>
+                    <div class="col-md-2">
+                        <select name="materia_prova" class="form-select form-select-sm">
+                            <option value="">Disciplina</option>
+                            {% set discs_turma = disciplinas_por_turma.get(turma.id, []) %}
+                            {% if discs_turma %}
+                                {% for nome in discs_turma %}
+                                <option value="{{ nome }}">{{ nome }}</option>
+                                {% endfor %}
+                            {% else %}
+                                {% for d in disciplinas %}
+                                <option value="{{ d.nome }}">{{ d.nome }}</option>
+                                {% endfor %}
+                            {% endif %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="date" name="data_prova" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="time" name="horario_prova" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="col-md-1">
+                        <select name="trimestre_prova" class="form-select form-select-sm">
+                            <option value="1">1º</option>
+                            <option value="2">2º</option>
+                            <option value="3">3º</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2 d-grid">
+                        <button class="btn btn-outline-success btn-sm" type="submit">Agendar prova</button>
+                    </div>
+                    <div class="col-12">
+                        <input class="form-control form-control-sm" name="descricao_prova" placeholder="Descrição (conteúdo, sala, observações)">
+                    </div>
+                </form>
+                {% if provas_por_turma.get(turma.id) %}
+                <ul class="list-group">
+                    {% for pv in provas_por_turma.get(turma.id) %}
+                    <li class="list-group-item d-flex justify-content-between flex-wrap">
+                        <span>
+                            <strong>{{ pv.titulo }}</strong>
+                            {% if pv.materia %}<span class="text-muted"> — {{ pv.materia }}</span>{% endif %}
+                        </span>
+                        <span class="text-muted">
+                            {{ pv.data_prova.strftime('%d/%m/%Y') if pv.data_prova else pv.data_prova }}
+                            {% if pv.horario %} {{ pv.horario.strftime('%H:%M') if pv.horario.strftime is defined else pv.horario }}{% endif %}
+                        </span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted small mb-0">Nenhuma prova cadastrada nesta turma.</p>
+                {% endif %}
+                {% endif %}
+
+                {% if painel == 'alunos' %}
+                {% if pode('pedagogico_cadastro') %}
+                <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mb-3">
+                    <input type="hidden" name="acao" value="vincular_aluno">
+                    <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                    {{ ctx_turma('alunos') }}
+                    <div class="col-md-9">
+                        <select name="aluno_id" class="form-select form-select-sm" required>
+                            <option value="">Selecione um aluno para matricular nesta turma...</option>
+                            {% for aluno in alunos_cadastrados %}
+                                <option value="{{ aluno.id }}">{{ aluno.nome_completo }} {% if aluno.matricula %}(Mat: {{ aluno.matricula }}){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-grid">
+                        <button type="submit" class="btn btn-primary btn-sm">Matricular Aluno</button>
+                    </div>
+                </form>
+                {% endif %}
+
+                <div class="p-3 mb-3 bg-light rounded border">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <strong>Chamada rápida</strong>
+                        <span class="small text-muted">Presente ou falta na matéria escolhida (ou em todas).</span>
+                    </div>
+                    <form method="GET" class="row g-2 mb-2 align-items-end">
+                        <input type="hidden" name="aba" value="turmas">
+                        <input type="hidden" name="turma_sel" value="{{ turma.id }}">
+                        <input type="hidden" name="painel" value="alunos">
+                        <input type="hidden" name="turma" value="{{ filtro_turma }}">
+                        <input type="hidden" name="professor" value="{{ filtro_prof }}">
+                        <input type="hidden" name="turno" value="{{ filtro_turno }}">
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1">Data</label>
+                            <input type="date" name="data_chamada" class="form-control form-control-sm" value="{{ data_chamada }}">
                         </div>
-
-                        <!-- Vincular Aluno a esta Turma -->
-                        <form action="{{ url_for('pagina_pedagogico') }}" method="POST" style="display: flex; gap: 10px; margin-bottom: 15px;">
-                            <input type="hidden" name="acao" value="vincular_aluno">
-                            <input type="hidden" name="turma_id" value="{{ turma.id }}">
-                            <select name="aluno_id" required style="flex: 1; padding: 7px; border: 1px solid #ccc; border-radius: 4px;">
-                                <option value="">Selecione um aluno para matricular nesta turma...</option>
-                                {% for aluno in alunos_cadastrados %}
-                                    <option value="{{ aluno.id }}">{{ aluno.nome_completo }} {% if aluno.matricula %}(Mat: {{ aluno.matricula }}){% endif %}</option>
+                        <div class="col-md-5">
+                            <label class="form-label small mb-1">Disciplina</label>
+                            <select name="disc_chamada" class="form-select form-select-sm">
+                                <option value="__todas__" {% if disc_chamada == '__todas__' %}selected{% endif %}>Todas as matérias</option>
+                                {% for nome in disciplinas_por_turma.get(turma.id, []) %}
+                                <option value="{{ nome }}" {% if disc_chamada == nome %}selected{% endif %}>{{ nome }}</option>
                                 {% endfor %}
                             </select>
-                            <button type="submit" class="btn btn-primary">Matricular Aluno</button>
-                        </form>
-
-                        <!-- Tabela de Alunos da Turma -->
-                        <div class="table-responsive">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Nome do Aluno</th>
-                                        <th>Matrícula</th>
-                                        <th style="width: 100px; text-align: center;">Ações</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% set lista_alunos_turma = alunos_por_turma.get(turma.id, []) %}
-                                    {% if lista_alunos_turma %}
-                                        {% for al in lista_alunos_turma %}
-                                        <tr>
-                                            <td><a href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}" style="color: #3498db; text-decoration: none;">{{ al.nome }}</a></td>
-                                            <td>{{ al.matricula or '-' }}</td>
-                                            <td style="text-align: center;">
-                                                <form action="{{ url_for('remover_aluno_turma', turma_id=turma.id, aluno_id=al.id) }}" method="POST" style="display:inline;">
-                                                    <button type="submit" class="btn btn-danger" onclick="return confirm('Remover aluno desta turma?');">Remover</button>
-                                                </form>
-                                            </td>
-                                        </tr>
-                                        {% endfor %}
-                                    {% else %}
-                                        <tr>
-                                            <td colspan="3" style="text-align: center; color: #777;">Nenhum aluno matriculado nesta turma ainda. (<a href="{{ url_for('pagina_alunos') }}">Cadastrar novo aluno</a>)</td>
-                                        </tr>
-                                    {% endif %}
-                                </tbody>
-                            </table>
                         </div>
+                        <div class="col-md-2 d-grid">
+                            <button class="btn btn-outline-secondary btn-sm" type="submit">Aplicar</button>
+                        </div>
+                    </form>
+                    <div class="d-flex flex-wrap gap-2">
+                        <form method="POST" class="m-0">
+                            <input type="hidden" name="acao" value="marcar_presenca_turma">
+                            <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                            <input type="hidden" name="data_aula" value="{{ data_chamada }}">
+                            <input type="hidden" name="disciplina" value="{{ disc_chamada }}">
+                            {{ ctx_turma('alunos') }}
+                            <button class="btn btn-sm btn-success" type="submit" name="status" value="presente">Todos presentes</button>
+                        </form>
+                        <form method="POST" class="m-0">
+                            <input type="hidden" name="acao" value="marcar_presenca_turma">
+                            <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                            <input type="hidden" name="data_aula" value="{{ data_chamada }}">
+                            <input type="hidden" name="disciplina" value="{{ disc_chamada }}">
+                            {{ ctx_turma('alunos') }}
+                            <button class="btn btn-sm btn-outline-danger" type="submit" name="status" value="falta">Todos faltaram</button>
+                        </form>
+                        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='chamada', periodo='dia', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF chamada do dia</a>
+                        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='semana', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF da semana</a>
+                        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='mes', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF do mês</a>
                     </div>
-                {% endfor %}
-            {% else %}
-                <p style="text-align: center; color: #777; padding: 20px;">Nenhuma turma cadastrada no momento.</p>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Nome do Aluno</th>
+                                <th>Matrícula</th>
+                                <th>Presença</th>
+                                <th class="text-end">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set lista_alunos_turma = alunos_por_turma.get(turma.id, []) %}
+                            {% if lista_alunos_turma %}
+                                {% for al in lista_alunos_turma %}
+                                {% set st = presenca_aluno.get(al.id) %}
+                                <tr>
+                                    <td><a href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}" class="text-primary text-decoration-none fw-bold">{{ al.nome }}</a></td>
+                                    <td>{{ al.matricula or '-' }}</td>
+                                    <td>
+                                        <form method="POST" class="d-inline">
+                                            <input type="hidden" name="acao" value="marcar_presenca_aluno">
+                                            <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                                            <input type="hidden" name="aluno_id" value="{{ al.id }}">
+                                            <input type="hidden" name="data_aula" value="{{ data_chamada }}">
+                                            <input type="hidden" name="disciplina" value="{{ disc_chamada }}">
+                                            {{ ctx_turma('alunos') }}
+                                            <button class="btn btn-sm {% if st == 'presente' %}btn-success{% else %}btn-outline-success{% endif %}" type="submit" name="status" value="presente">Sim</button>
+                                            <button class="btn btn-sm {% if st == 'falta' %}btn-danger{% else %}btn-outline-danger{% endif %}" type="submit" name="status" value="falta">Não</button>
+                                        </form>
+                                    </td>
+                                    <td class="text-end">
+                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}#notas" title="Notas">N</a>
+                                        <a class="btn btn-sm btn-outline-danger" href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}#faltas" title="Faltas">F</a>
+                                        <a class="btn btn-sm btn-outline-success" href="{{ url_for('calendario_escolar', aluno_id=al.id, turma_id=turma.id) }}" title="Calendário">C</a>
+                                        <form action="{{ url_for('excluir_aluno_rota', id=al.id) }}" method="POST" style="display:inline;">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Remover aluno desta turma?');" title="Remover">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="4" class="text-center py-3 text-muted">Nenhum aluno matriculado nesta turma ainda. (<a href="{{ url_for('pagina_alunos') }}">Cadastrar novo aluno</a>)</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+            </div>
             {% endif %}
-        </div>
+        {% endif %}
+        {% endif %}
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    document.querySelectorAll(".js-tipo-materia").forEach(function (sel) {
+        function atualizar() {
+            var form = sel.closest("form");
+            var semanal = sel.value !== "esporadica";
+            form.querySelectorAll(".campo-semanal").forEach(function (el) { el.style.display = semanal ? "" : "none"; });
+            form.querySelectorAll(".campo-esporadica").forEach(function (el) { el.style.display = semanal ? "none" : ""; });
+        }
+        sel.addEventListener("change", atualizar);
+        atualizar();
+    });
+    var det = document.getElementById("turma-detalhe");
+    if (det) det.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelectorAll(".js-add-bloco").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var wrap = btn.parentElement.querySelector(".grade-blocos");
+            var bloco = wrap.querySelector(".grade-bloco");
+            if (!bloco) return;
+            var clone = bloco.cloneNode(true);
+            var qtd = clone.querySelector("input");
+            if (qtd) qtd.value = "1";
+            wrap.appendChild(clone);
+        });
+    });
+    </script>
 </body>
 </html>

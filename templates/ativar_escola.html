@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ativar escola</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 5px; font-size: 0.85rem; text-align: center; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; }
+        .hint { font-size: 0.85rem; color: #64748b; text-align: center; margin-bottom: 16px; }
+    </style>
+</head>
+<body class="login-page">
+    <div class="login-card">
+        <h2>{{ escola.nome }}</h2>
+        <p class="hint">Digite o código que chegou no e-mail {{ escola.email_admin }}. Depois escolha a senha com que você vai entrar — o sistema não gera senha.</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+        <form method="POST">
+            <div class="form-group">
+                <label>Código</label>
+                <input name="codigo" maxlength="6" required>
+            </div>
+            <div class="form-group">
+                <label>Senha que você vai usar para entrar</label>
+                <input type="password" name="senha" minlength="6" required>
+            </div>
+            <div class="form-group">
+                <label>Confirmar senha</label>
+                <input type="password" name="senha2" minlength="6" required>
+            </div>
+            <button class="btn" type="submit">Ativar acesso</button>
+        </form>
+    </div>
+</body>
+</html>

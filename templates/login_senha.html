@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ 'Criar senha' if criar else 'Senha' }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 5px; font-size: 0.85rem; text-align: center; }
+        .alert-danger { background-color: #f8d7da; color: #721c24; }
+        .hint { font-size: 0.85rem; color: #64748b; text-align: center; margin-bottom: 16px; }
+    </style>
+</head>
+<body class="login-page">
+    <div class="login-card">
+        <h2>{{ 'Crie sua senha' if criar else 'Digite sua senha' }}</h2>
+        <p class="hint">{{ email }}</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+        <form method="POST">
+            <div class="form-group">
+                <label>Senha</label>
+                <input type="password" name="senha" minlength="6" required>
+            </div>
+            {% if criar %}
+            <div class="form-group">
+                <label>Confirmar senha</label>
+                <input type="password" name="senha2" minlength="6" required>
+            </div>
+            {% endif %}
+            <button class="btn" type="submit">{{ 'Salvar senha e entrar' if criar else 'Entrar' }}</button>
+        </form>
+        {% if not criar %}
+        <p class="hint" style="margin-top:16px;">
+            Esta senha é a que você definiu neste sistema, não a senha do Gmail.
+            <a href="{{ url_for('login_esqueci_senha') }}">Esqueci a senha</a>
+        </p>
+        {% endif %}
+    </div>
+</body>
+</html>

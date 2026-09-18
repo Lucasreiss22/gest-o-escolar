@@ -2,65 +2,35 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Configurações - Sistema Escolar</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; color: #333; }
-        
-        /* Menu Lateral */
-        .sidebar { height: 100vh; background-color: #2c3e50; color: white; position: fixed; width: 240px; top: 0; left: 0; padding-top: 20px; }
-        .sidebar h4 { text-align: center; margin-bottom: 25px; font-size: 1.2rem; }
-        .sidebar a { color: #ecf0f1; text-decoration: none; padding: 14px 20px; display: block; font-size: 0.95rem; border-left: 4px solid transparent; transition: 0.2s; }
-        .sidebar a:hover, .sidebar a.active { background-color: #34495e; border-left-color: #3498db; }
-        
-        /* Conteúdo */
-        .content { margin-left: 240px; padding: 35px; }
         h2 { font-weight: 600; color: #2c3e50; margin-bottom: 25px; }
-        
-        /* Cards e Formulários */
-        .card-box { background: white; border-radius: 8px; padding: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        .card-box { background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 25px; }
         .card-title { font-size: 1.1rem; color: #2c3e50; margin-bottom: 20px; border-bottom: 2px solid #ecf0f1; padding-bottom: 8px; }
-        
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 15px; }
         .form-group { display: flex; flex-direction: column; }
         .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
         .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
-        
-        .btn { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; transition: 0.2s; font-size: 0.9rem; }
+        .btn { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; font-size: 0.9rem; }
         .btn-primary { background-color: #3498db; color: white; }
-        .btn-primary:hover { background-color: #2980b9; }
         .btn-danger { background-color: #e74c3c; color: white; padding: 6px 12px; font-size: 0.8rem; }
-        .btn-danger:hover { background-color: #c0392b; }
-
-        /* Tabela */
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
         th { background-color: #f8f9fa; color: #2c3e50; font-weight: 600; }
-        
-        /* Alertas */
         .alert { padding: 15px; margin-bottom: 20px; border-radius: 6px; font-weight: 500; }
         .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .alert-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
     </style>
 </head>
 <body>
-
-    <!-- Menu Lateral Padronizado -->
-    <div class="sidebar">
-        <h4>🏫 Gestão Escolar</h4>
-        <a href="{{ url_for('dashboard') }}">📊 Dashboard</a>
-        <a href="{{ url_for('pagina_alunos') }}">👨‍🎓 Gestão de Alunos</a>
-        <a href="{{ url_for('pagina_professores') }}">👨‍🏫 Professores</a>
-        <a href="{{ url_for('pagina_pedagogico') }}">📚 Pedagógico</a>
-        <a href="{{ url_for('pagina_financeiro') }}">💰 Financeiro</a>
-        <a href="{{ url_for('calendario_escolar') }}">📅 Calendário Escolar</a>
-        <a href="{{ url_for('pagina_configuracoes') }}" class="active">⚙️ Configurações</a>
-    </div>
+    {% set nav_active = 'configuracoes' %}
+    {% include '_nav.html' %}
 
     <!-- Conteúdo Principal -->
     <div class="content">
-        <h2>⚙️ Configurações e Usuários</h2>
+        <h2>⚙️ Configurações da instituição</h2>
 
         <!-- Mensagens Flash do Flask -->
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -89,74 +59,61 @@
                         <label>E-mail de Contato / Suporte</label>
                         <input type="email" name="email_contato" value="{{ config.email_contato or 'contato@escola.com' }}">
                     </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Regime Tributário da Escola</label>
+                        <select name="regime_tributario" required>
+                            <option value="simples_nacional" {% if config.regime_tributario == "simples_nacional" %}selected{% endif %}>Simples Nacional (Fator R: Anexo III ou V)</option>
+                            <option value="lucro_presumido" {% if config.regime_tributario == "lucro_presumido" or not config.regime_tributario %}selected{% endif %}>Lucro Presumido</option>
+                            <option value="lucro_real" {% if config.regime_tributario == "lucro_real" %}selected{% endif %}>Lucro Real</option>
+                        </select>
+                    </div>
+                </div>
+                <h3 class="card-title" style="margin-top:18px;">Envio de e-mail (boletos, boletim, contra-cheque)</h3>
+                <p style="font-size:0.85rem;color:#64748b;margin-bottom:12px;">
+                    Use um e-mail real da escola. No Gmail, ative a verificação em duas etapas e crie uma
+                    <strong>senha de app</strong> (não use a senha normal da conta).
+                </p>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Servidor SMTP</label>
+                        <input type="text" name="smtp_host" value="{{ config.smtp_host or 'smtp.gmail.com' }}" placeholder="smtp.gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Porta</label>
+                        <input type="number" name="smtp_port" value="{{ config.smtp_port or 587 }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Usuário SMTP (e-mail de envio)</label>
+                        <input type="email" name="smtp_user" value="{{ config.smtp_user or '' }}" placeholder="escola@gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Senha SMTP / senha de app</label>
+                        <input type="password" name="smtp_password" placeholder="{% if config.smtp_password %}deixe em branco para manter{% else %}senha de app{% endif %}">
+                    </div>
+                    <div class="form-group">
+                        <label>Remetente (From)</label>
+                        <input type="email" name="smtp_from" value="{{ config.smtp_from or config.smtp_user or config.email_contato or '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>TLS</label>
+                        <select name="smtp_tls">
+                            <option value="1" {% if config.smtp_tls is not defined or config.smtp_tls %}selected{% endif %}>Sim (porta 587)</option>
+                            <option value="0" {% if config.smtp_tls is defined and not config.smtp_tls %}selected{% endif %}>Não</option>
+                        </select>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-primary">Salvar Parâmetros</button>
             </form>
         </div>
 
-        <!-- Cadastro de Usuários e Permissões -->
         <div class="card-box">
-            <h3 class="card-title">Cadastro de Usuários e Funções</h3>
-            <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
-                <input type="hidden" name="acao" value="cadastrar_usuario">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>Nome Completo</label>
-                        <input type="text" name="nome_usuario" required placeholder="Ex: João Silva">
-                    </div>
-                    <div class="form-group">
-                        <label>E-mail de Acesso</label>
-                        <input type="email" name="email_usuario" required placeholder="joao@escola.com">
-                    </div>
-                    <div class="form-group">
-                        <label>Senha</label>
-                        <input type="password" name="senha_usuario" required placeholder="******">
-                    </div>
-                    <div class="form-group">
-                        <label>Função / Permissão</label>
-                        <select name="funcao_usuario" required>
-                            <option value="">Selecione...</option>
-                            <option value="Administrador">Administrador</option>
-                            <option value="Secretaria">Secretaria</option>
-                            <option value="Financeiro">Financeiro</option>
-                            <option value="Professor">Professor</option>
-                        </select>
-                    </div>
-                </div>
-                <button type="submit" class="btn btn-primary">Cadastrar Usuário</button>
-            </form>
-
-            <h3 class="card-title" style="margin-top: 30px;">Usuários Cadastrados</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Nome</th>
-                        <th>E-mail</th>
-                        <th>Função</th>
-                        <th style="text-align: center;">Ações</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for u in usuarios %}
-                    <tr>
-                        <td>{{ u.nome }}</td>
-                        <td>{{ u.email }}</td>
-                        <td>{{ u.funcao }}</td>
-                        <td style="text-align: center;">
-                            <form action="{{ url_for('excluir_usuario_sistema', id=u.id) }}" method="POST" style="display:inline;">
-                                <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja realmente excluir este usuário?');">Excluir</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="4" style="text-align: center; color: #777;">Nenhum usuário cadastrado além do padrão.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <h3 class="card-title">Usuários e equipe</h3>
+            <p style="color:#64748b; font-size:0.9rem;">
+                Cadastro de acesso, dados pessoais, contrato e pagamento ficam em um único lugar.
+            </p>
+            <a class="btn btn-primary" href="{{ url_for('gerenciar_usuarios') }}">Abrir Gerenciar Usuários</a>
         </div>
     </div>
-
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
