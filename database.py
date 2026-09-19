@@ -136,9 +136,9 @@ def obter_conexao(master=False):
     try:
         dsn = cfg.get("DATABASE_URL") or ""
         if dsn:
-            conexao = psycopg2.connect(**_destino_postgres(dsn, master_nome, cfg.get("DB_SSLMODE") or "require"))
+            params = _destino_postgres(dsn, master_nome, cfg.get("DB_SSLMODE") or "require")
         else:
-            conexao = psycopg2.connect(
+            params = dict(
                 host=cfg["DB_HOST"],
                 port=cfg["DB_PORT"],
                 dbname=master_nome,
@@ -147,7 +147,18 @@ def obter_conexao(master=False):
                 sslmode=cfg.get("DB_SSLMODE") or "prefer",
                 cursor_factory=psycopg2.extras.RealDictCursor,
             )
-        _aplicar_schema(conexao, schema)
+        if schema == "public":
+            params["options"] = "-csearch_path=public"
+        else:
+            params["options"] = f"-csearch_path={schema},public"
+        conexao = psycopg2.connect(**params)
+        try:
+            conexao.set_session(autocommit=True)
+        except Exception:
+            try:
+                conexao.autocommit = True
+            except Exception:
+                pass
         return conexao
     except Exception as erro:
         ultimo_erro_pg = str(erro)

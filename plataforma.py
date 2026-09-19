@@ -211,9 +211,12 @@ def excluir_escola(escola_id):
         admin = obter_conexao(master=True)
         if admin:
             try:
-                admin.autocommit = True
                 with admin.cursor() as cursor:
                     cursor.execute(f'DROP SCHEMA IF EXISTS "{db_nome}" CASCADE')
+                try:
+                    admin.commit()
+                except Exception:
+                    pass
             finally:
                 admin.close()
     return escola
@@ -477,9 +480,12 @@ def criar_banco_escola(db_nome):
     if not conexao:
         raise RuntimeError("Sem conexão com o Postgres para criar o espaço da escola.")
     try:
-        conexao.autocommit = True
         with conexao.cursor() as cursor:
             cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{db_nome}"')
+        try:
+            conexao.commit()
+        except Exception:
+            pass
     except Exception as e:
         raise RuntimeError(
             "Não foi possível criar o espaço da escola no Supabase. "
