@@ -26,7 +26,7 @@ def carregar_config():
     smtp_user = smtp_user or (super_email if smtp_pass else "")
     return {
         "SECRET_KEY": secret,
-        "DATABASE_URL": "".join((os.environ.get("DATABASE_URL") or "").split()),
+        "DATABASE_URL": "".join((os.environ.get("DATABASE_URL") or "").split()).replace("[", "").replace("]", ""),
         "DB_HOST": os.environ.get("DB_HOST", "localhost"),
         "DB_PORT": os.environ.get("DB_PORT", "5432"),
         "DB_NAME": os.environ.get("DB_NAME", "gestao_escolar"),
