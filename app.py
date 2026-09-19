@@ -77,6 +77,13 @@ import secrets
 import uuid
 
 _CFG = carregar_config()
+try:
+    from urllib.parse import urlparse
+    _dsn = (_CFG.get("DATABASE_URL") or "").replace("postgresql://", "http://").replace("postgres://", "http://")
+    _host = urlparse(_dsn).hostname or "(sem host)"
+    print(f"Postgres alvo: {_host}")
+except Exception:
+    pass
 app = Flask(__name__)
 app.secret_key = _CFG["SECRET_KEY"]
 app.config["PREFERRED_URL_SCHEME"] = _CFG["PREFERRED_URL_SCHEME"]
