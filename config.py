@@ -14,6 +14,14 @@ def _bool(nome, padrao=False):
     return bruto in {"1", "true", "yes", "on"}
 
 
+def _int_env(nome, padrao):
+    bruto = (os.environ.get(nome) or "").strip()
+    try:
+        return int(bruto)
+    except (TypeError, ValueError):
+        return padrao
+
+
 def ambiente_producao():
     return _bool("RENDER") or (os.environ.get("FLASK_ENV") or "").lower() == "production"
 
@@ -37,7 +45,7 @@ def carregar_config():
         "GOOGLE_CLIENT_SECRET": os.environ.get("GOOGLE_CLIENT_SECRET", "").strip(),
         "ADMIN_EMAILS": os.environ.get("ADMIN_EMAILS", "").strip(),
         "SMTP_HOST": os.environ.get("SMTP_HOST", "").strip() or ("smtp.gmail.com" if smtp_pass else ""),
-        "SMTP_PORT": int(os.environ.get("SMTP_PORT") or 587),
+        "SMTP_PORT": _int_env("SMTP_PORT", 587),
         "SMTP_USER": smtp_user,
         "SMTP_PASSWORD": smtp_pass,
         "SMTP_FROM": (os.environ.get("SMTP_FROM") or smtp_user).strip(),

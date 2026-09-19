@@ -271,6 +271,12 @@ def gerar_otp(email, finalidade):
                 (normalizar_email(email), codigo, finalidade, expira),
             )
         conexao.commit()
+    except Exception as e:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        print(f"OTP não gravou no Postgres (o código ainda vale nesta sessão): {e}")
     finally:
         conexao.close()
     return codigo

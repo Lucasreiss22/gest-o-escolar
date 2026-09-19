@@ -92,6 +92,12 @@ if ambiente_producao():
     app.config["SESSION_COOKIE_SECURE"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+
+@app.errorhandler(500)
+def _erro_interno(_e):
+    flash("O servidor teve um erro interno. Volte e tente de novo. Não cole a senha na barra de endereço do navegador.", "danger")
+    return redirect(url_for("login_conectar_gmail")), 302
+
 oauth = None
 try:
     from authlib.integrations.flask_client import OAuth as _OAuth
@@ -853,7 +859,11 @@ def _voltar_ou(padrao):
 
 
 def _enviar_codigo_plataforma(email, access_token=None):
-    codigo = gerar_otp(email, "login_plataforma")
+    try:
+        codigo = gerar_otp(email, "login_plataforma")
+    except Exception as e:
+        print(f"gerar_otp falhou: {e}")
+        codigo = f"{secrets.randbelow(1000000):06d}"
     session["otp_local"] = codigo
     corpo = (
         f"Seu código de confirmação da Gestão Escolar é: {codigo}\n\n"
@@ -952,7 +962,11 @@ def login_conectar_gmail():
         except Exception as e:
             flash(str(e), "danger")
             return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
-        return _enviar_codigo_plataforma(email)
+        try:
+            return _enviar_codigo_plataforma(email)
+        except Exception as e:
+            flash(f"Não foi possível enviar o código: {e}", "danger")
+            return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
     return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
 
 
