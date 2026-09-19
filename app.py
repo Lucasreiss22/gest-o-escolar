@@ -854,12 +854,12 @@ def _voltar_ou(padrao):
 
 def _enviar_codigo_plataforma(email, access_token=None):
     codigo = gerar_otp(email, "login_plataforma")
+    session["otp_local"] = codigo
     corpo = (
         f"Seu código de confirmação da Gestão Escolar é: {codigo}\n\n"
         "Ele vale por 20 minutos. Se você não pediu este acesso, ignore o e-mail."
     )
     assunto = "Código de acesso da plataforma"
-    session.pop("otp_local", None)
     try:
         if access_token:
             enviar_via_gmail_api(access_token, [email], assunto, corpo, remetente=email)
@@ -874,12 +874,12 @@ def _enviar_codigo_plataforma(email, access_token=None):
             "534", "535", "application-specific", "invalidsecondfactor", "username and password not accepted",
         )):
             texto = (
-                "O Google bloqueou a senha normal da conta. No campo abaixo cole a senha de app "
-                "(16 letras), não a senha com que você abre o Gmail."
+                "O Google bloqueou a senha. Cole a senha de app de 16 letras "
+                "(sem espaços), não a senha com que você abre o Gmail."
             )
         flash(f"Não foi possível enviar o código para {email}: {texto}", "danger")
         return redirect(url_for("login_conectar_gmail"))
-    flash(f"Código enviado para {email}. Abra o Gmail e digite os 6 dígitos.", "success")
+    flash(f"Código enviado para {email}. Abra o Gmail (e o Spam) e digite os 6 dígitos.", "success")
     return redirect(url_for("login_codigo"))
 
 
@@ -938,15 +938,17 @@ def login_conectar_gmail():
             if not senha:
                 raise ValueError("Informe a senha de app (16 letras) para o sistema enviar o código.")
             session["login_email"] = email
+            os.environ["SMTP_HOST"] = "smtp.gmail.com"
+            os.environ["SMTP_PORT"] = "587"
+            os.environ["SMTP_USER"] = email
+            os.environ["SMTP_PASSWORD"] = senha
+            os.environ["SMTP_FROM"] = email
+            os.environ["SMTP_TLS"] = "true"
             try:
                 salvar_smtp_plataforma("smtp.gmail.com", 587, email, senha, email)
             except Exception as e:
-                detalhe = erro_conexao_atual() or str(e)
-                raise RuntimeError(
-                    f"Postgres não conectou ({detalhe}). "
-                    f"O site está usando o host: {postgres_host}. "
-                    "No Render use Save and deploy (não só Save only) depois de colar a URI do pooler."
-                ) from e
+                # O envio usa SMTP_USER/PASSWORD do ambiente; o banco não pode bloquear o Gmail.
+                print(f"SMTP da plataforma não gravou no Postgres: {e}")
         except Exception as e:
             flash(str(e), "danger")
             return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)

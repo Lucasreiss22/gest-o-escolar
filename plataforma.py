@@ -256,7 +256,7 @@ def gerar_otp(email, finalidade):
     expira = datetime.now() + timedelta(minutes=20)
     conexao = obter_conexao(master=True)
     if not conexao:
-        raise RuntimeError("Sem conexão com o banco.")
+        return codigo
     try:
         with conexao.cursor() as cursor:
             cursor.execute(
@@ -277,6 +277,16 @@ def gerar_otp(email, finalidade):
 
 
 def validar_otp(email, codigo, finalidade):
+    codigo = (codigo or "").strip()
+    try:
+        from flask import has_request_context, session
+        if has_request_context():
+            local = (session.get("otp_local") or "").strip()
+            if local and codigo == local and session.get("login_email") == normalizar_email(email):
+                session.pop("otp_local", None)
+                return True
+    except Exception:
+        pass
     conexao = obter_conexao(master=True)
     if not conexao:
         return False
