@@ -1,6 +1,7 @@
 import psycopg2
 import psycopg2.extras
 from contextvars import ContextVar
+from urllib.parse import unquote, urlparse
 
 from config import carregar_config
 
@@ -74,17 +75,16 @@ def obter_conexao(master=False):
         if dsn.startswith("postgres://"):
             dsn = "postgresql://" + dsn[len("postgres://"):]
         if dsn:
-            base, sep, resto = dsn.rpartition("/")
-            if sep:
-                query = ""
-                _nome, qsep, qtd = resto.partition("?")
-                if qsep:
-                    query = "?" + qtd
-                dsn = f"{base}/{dbname}{query}"
+            parsed = urlparse(dsn)
             conexao = psycopg2.connect(
-                dsn,
+                host=parsed.hostname,
+                port=parsed.port or 5432,
+                dbname=dbname,
+                user=unquote(parsed.username or ""),
+                password=unquote(parsed.password or ""),
                 sslmode=cfg.get("DB_SSLMODE") or "require",
                 cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=15,
             )
         else:
             conexao = psycopg2.connect(
