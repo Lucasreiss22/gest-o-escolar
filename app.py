@@ -21,7 +21,7 @@ from email_envio import (
 )
 from psycopg2.extras import RealDictCursor
 from alunos import cadastrar_aluno, listar_alunos, atualizar_responsavel, deletar_responsavel
-from database import obter_conexao, garantir_tabelas_pedagogicas, garantir_tabelas_folha, definir_banco_escola, limpar_banco_escola, resetar_tenant
+from database import obter_conexao, garantir_tabelas_pedagogicas, garantir_tabelas_folha, definir_banco_escola, limpar_banco_escola, resetar_tenant, erro_conexao_atual
 from tributacao import (
     apurar_simples,
     apurar_pis_cofins,
@@ -928,9 +928,17 @@ def login_conectar_gmail():
             email = exigencia_email(request.form.get("smtp_user") or email, "E-mail")
             senha = (request.form.get("smtp_password") or "").replace(" ", "").strip()
             if not senha:
-                raise ValueError("Informe a senha do e-mail para o sistema conseguir enviar o código.")
+                raise ValueError("Informe a senha de app (16 letras) para o sistema enviar o código.")
             session["login_email"] = email
-            salvar_smtp_plataforma("smtp.gmail.com", 587, email, senha, email)
+            try:
+                salvar_smtp_plataforma("smtp.gmail.com", 587, email, senha, email)
+            except Exception as e:
+                detalhe = erro_conexao_atual() or str(e)
+                raise RuntimeError(
+                    f"Postgres não conectou ({detalhe}). "
+                    "Confira DATABASE_URL em uma linha só, host pooler.supabase.com, "
+                    "e SMTP_HOST=smtp.gmail.com (não coloque a senha de app no HOST)."
+                ) from e
         except Exception as e:
             flash(str(e), "danger")
             return render_template("login_conectar_gmail.html", email=email)

@@ -47,8 +47,17 @@ def _nome_banco_atual(master=False):
     return None
 
 
+ultimo_erro_pg = ""
+
+
+def erro_conexao_atual():
+    return ultimo_erro_pg
+
+
 def obter_conexao(master=False):
     """Abre conexão com o banco da plataforma (master) ou só com o banco da escola ativa."""
+    global ultimo_erro_pg
+    ultimo_erro_pg = ""
     cfg = carregar_config()
     master_nome = nome_banco_master()
     if master:
@@ -89,6 +98,7 @@ def obter_conexao(master=False):
             )
         return conexao
     except Exception as erro:
+        ultimo_erro_pg = str(erro)
         print(f"Erro ao conectar ao PostgreSQL ({dbname}): {erro}")
         return None
 
