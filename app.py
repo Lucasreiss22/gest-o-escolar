@@ -949,7 +949,7 @@ def login_conectar_gmail():
                 detalhe = erro_conexao_atual() or str(e)
                 raise RuntimeError(
                     f"Postgres não conectou ({detalhe}). "
-                    "O site está usando o host: {postgres_host}. "
+                    f"O site está usando o host: {postgres_host}. "
                     "No Render use Save and deploy (não só Save only) depois de colar a URI do pooler."
                 ) from e
         except Exception as e:
