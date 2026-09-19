@@ -208,17 +208,14 @@ def excluir_escola(escola_id):
     finally:
         conexao.close()
     if re.fullmatch(r"[a-z][a-z0-9_]{1,62}", db_nome or ""):
-        admin = _conectar_postgres()
-        admin.autocommit = True
-        try:
-            with admin.cursor() as cursor:
-                cursor.execute(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
-                    (db_nome,),
-                )
-                cursor.execute(f'DROP DATABASE IF EXISTS "{db_nome}"')
-        finally:
-            admin.close()
+        admin = obter_conexao(master=True)
+        if admin:
+            try:
+                admin.autocommit = True
+                with admin.cursor() as cursor:
+                    cursor.execute(f'DROP SCHEMA IF EXISTS "{db_nome}" CASCADE')
+            finally:
+                admin.close()
     return escola
 
 
@@ -476,11 +473,18 @@ def _conectar_postgres():
 def criar_banco_escola(db_nome):
     if not re.fullmatch(r"[a-z][a-z0-9_]{1,62}", db_nome):
         raise ValueError("Nome de banco inválido.")
-    conexao = _conectar_postgres()
-    conexao.autocommit = True
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o Postgres para criar o espaço da escola.")
     try:
+        conexao.autocommit = True
         with conexao.cursor() as cursor:
-            cursor.execute(f'CREATE DATABASE "{db_nome}"')
+            cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{db_nome}"')
+    except Exception as e:
+        raise RuntimeError(
+            "Não foi possível criar o espaço da escola no Supabase. "
+            f"Detalhe: {e}"
+        ) from e
     finally:
         conexao.close()
 

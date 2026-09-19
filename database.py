@@ -1,3 +1,4 @@
+import re
 import psycopg2
 import psycopg2.extras
 from contextvars import ContextVar
@@ -101,39 +102,56 @@ def host_postgres_configurado():
         return ""
 
 
+def _schema_seguro(nome):
+    texto = (nome or "").strip()
+    if texto == "public" or re.fullmatch(r"[a-z][a-z0-9_]{0,62}", texto):
+        return texto
+    return ""
+
+
+def _aplicar_schema(conexao, schema):
+    nome = _schema_seguro(schema) or "public"
+    with conexao.cursor() as cursor:
+        if nome == "public":
+            cursor.execute('SET search_path TO public')
+        else:
+            cursor.execute(f'SET search_path TO "{nome}", public')
+
+
 def obter_conexao(master=False):
-    """Abre conexão com o banco da plataforma (master) ou só com o banco da escola ativa."""
+    """Abre conexão no mesmo Postgres (Supabase não cria DATABASE). Escola usa schema próprio."""
     global ultimo_erro_pg
     ultimo_erro_pg = ""
     cfg = carregar_config()
     master_nome = nome_banco_master()
     if master:
-        dbname = master_nome
+        schema = "public"
     else:
-        dbname = _nome_banco_atual(master=False)
-        if not dbname:
+        schema = _nome_banco_atual(master=False)
+        if not schema:
             return None
-        if dbname == master_nome:
-            print("Recusado: operação de escola não pode usar o banco da plataforma.")
+        if not _schema_seguro(schema):
+            print(f"Schema de escola inválido: {schema}")
             return None
     try:
         dsn = cfg.get("DATABASE_URL") or ""
         if dsn:
-            conexao = psycopg2.connect(**_destino_postgres(dsn, dbname, cfg.get("DB_SSLMODE") or "require"))
+            conexao = psycopg2.connect(**_destino_postgres(dsn, master_nome, cfg.get("DB_SSLMODE") or "require"))
         else:
             conexao = psycopg2.connect(
                 host=cfg["DB_HOST"],
                 port=cfg["DB_PORT"],
-                dbname=dbname,
+                dbname=master_nome,
                 user=cfg["DB_USER"],
                 password=cfg["DB_PASSWORD"],
                 sslmode=cfg.get("DB_SSLMODE") or "prefer",
                 cursor_factory=psycopg2.extras.RealDictCursor,
             )
+        _aplicar_schema(conexao, schema)
         return conexao
     except Exception as erro:
         ultimo_erro_pg = str(erro)
-        print(f"Erro ao conectar ao PostgreSQL ({dbname}): {erro}")
+        print(f"Erro ao conectar ao PostgreSQL ({master_nome}/{schema}): {erro}")
         return None
 
 

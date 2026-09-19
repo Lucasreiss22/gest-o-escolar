@@ -98,14 +98,14 @@ if ambiente_producao():
 def _erro_interno(e):
     import traceback
     traceback.print_exc()
+    caminho = request.path or "/login"
     return (
         "<!doctype html><html lang=pt-br><meta charset=utf-8>"
-        "<title>Erro ao enviar código</title>"
+        "<title>Erro</title>"
         "<body style='font-family:sans-serif;max-width:520px;margin:40px auto;line-height:1.5'>"
-        "<h1>Não foi possível concluir o envio</h1>"
-        "<p>O site continua no ar. Volte e tente de novo. Se o Gmail não enviar, o código de 6 dígitos deve aparecer na tela seguinte.</p>"
+        "<h1>O site teve um erro neste passo</h1>"
         f"<p style='color:#64748b;font-size:0.9rem'>{e}</p>"
-        "<p><a href='/login/conectar-gmail'>Voltar para enviar o código</a></p>"
+        f"<p><a href='{caminho}'>Tentar de novo</a> · <a href='/login'>Login</a></p>"
         "</body></html>"
     ), 200
 
@@ -1131,8 +1131,9 @@ def login_senha():
     return render_template("login_senha.html", email=email, criar=criar)
 
 
-def _enviar_convite_escola(escola):
-    link = url_for("ativar_escola", token=escola["convite_token"], _external=True)
+def _enviar_convite_escola(escola, access_token=None, link=None):
+    if not link:
+        link = url_for("ativar_escola", token=escola["convite_token"], _external=True)
     codigo = escola.get("convite_codigo") or ""
     nome = escola["nome"]
     corpo = (
@@ -1150,13 +1151,19 @@ def _enviar_convite_escola(escola):
         f"<p><a href='{link}'>Abrir página de ativação</a></p>"
         f"<p>Na página você escolhe a senha com que vai entrar. Nenhuma senha é gerada pelo sistema.</p>"
     )
+    token = access_token
+    if token is None:
+        try:
+            token = session.get("google_access_token")
+        except Exception:
+            token = None
     ok, erro = enviar_codigo(
         escola["email_admin"],
         codigo,
         f"Código de acesso da escola {nome}",
         corpo,
         html=html,
-        access_token=session.get("google_access_token"),
+        access_token=token,
     )
     return ok, erro, link
 
@@ -1234,18 +1241,21 @@ def plataforma_escolas():
                     antiga = buscar_escola_por_email(email_novo)
                     excluir_escola(antiga["id"])
                 escola = cadastrar_escola(request.form.get("nome"), email_novo)
-                ok, erro, link = _enviar_convite_escola(escola)
-                if erro:
-                    flash(
-                        f"Escola criada, mas o e-mail ainda não saiu para {escola['email_admin']}. "
-                        f"Clique em Permitir envio de e-mail e depois em Reenviar e-mail. ({erro})",
-                        "danger",
-                    )
-                else:
-                    flash(
-                        f"E-mail com o código enviado para {escola['email_admin']}. Abra a caixa de entrada e o Spam.",
-                        "success",
-                    )
+                link = url_for("ativar_escola", token=escola["convite_token"], _external=True)
+                flash(
+                    f"Escola {escola['nome']} cadastrada. Código para {escola['email_admin']}: "
+                    f"{escola['convite_codigo']}. Link: {link}",
+                    "success",
+                )
+                token_gmail = session.get("google_access_token")
+
+                def _bg_convite():
+                    try:
+                        _enviar_convite_escola(escola, access_token=token_gmail, link=link)
+                    except Exception as erro_bg:
+                        print(f"Convite e-mail: {erro_bg}")
+
+                threading.Thread(target=_bg_convite, daemon=True).start()
             except Exception as e:
                 flash(f"Não foi possível cadastrar a escola: {e}", "danger")
         elif acao == "reenviar_convite":
