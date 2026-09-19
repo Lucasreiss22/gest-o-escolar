@@ -94,9 +94,19 @@ if ambiente_producao():
 
 
 @app.errorhandler(500)
-def _erro_interno(_e):
-    flash("O servidor teve um erro interno. Volte e tente de novo. Não cole a senha na barra de endereço do navegador.", "danger")
-    return redirect(url_for("login_conectar_gmail")), 302
+def _erro_interno(e):
+    import traceback
+    traceback.print_exc()
+    return (
+        "<!doctype html><html lang=pt-br><meta charset=utf-8>"
+        "<title>Erro ao enviar código</title>"
+        "<body style='font-family:sans-serif;max-width:520px;margin:40px auto;line-height:1.5'>"
+        "<h1>Não foi possível concluir o envio</h1>"
+        "<p>O site continua no ar. Volte e tente de novo. Se o Gmail não enviar, o código de 6 dígitos deve aparecer na tela seguinte.</p>"
+        f"<p style='color:#64748b;font-size:0.9rem'>{e}</p>"
+        "<p><a href='/login/conectar-gmail'>Voltar para enviar o código</a></p>"
+        "</body></html>"
+    ), 200
 
 oauth = None
 try:
@@ -303,12 +313,27 @@ def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos,
 @app.context_processor
 def inject_acl():
     papel = normalizar_papel(session.get("usuario_papel"))
+    smtp_ok = False
+    google_login = False
+    login_publico = (request.endpoint or "") in {
+        "login", "logout", "login_google", "login_google_callback",
+        "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
+    }
+    if not login_publico:
+        try:
+            smtp_ok = smtp_configurado()
+        except Exception:
+            smtp_ok = False
+        try:
+            google_login = _google_habilitado()
+        except Exception:
+            google_login = False
     return {
         "papel_atual": papel,
         "rotulo_papel": rotulo_papel(papel),
         "pode": lambda modulo: pode_modulo(papel, modulo),
-        "smtp_ok": smtp_configurado(),
-        "google_login": _google_habilitado(),
+        "smtp_ok": smtp_ok,
+        "google_login": google_login,
         "super_admin": bool(session.get("super_admin")),
         "escola_nome": session.get("escola_nome"),
         "origem_plataforma": bool(session.get("origem_plataforma")),
@@ -865,6 +890,7 @@ def _enviar_codigo_plataforma(email, access_token=None):
         print(f"gerar_otp falhou: {e}")
         codigo = f"{secrets.randbelow(1000000):06d}"
     session["otp_local"] = codigo
+    session["otp_email_ok"] = False
     corpo = (
         f"Seu código de confirmação da Gestão Escolar é: {codigo}\n\n"
         "Ele vale por 20 minutos. Se você não pediu este acesso, ignore o e-mail."
@@ -873,10 +899,12 @@ def _enviar_codigo_plataforma(email, access_token=None):
     try:
         if access_token:
             enviar_via_gmail_api(access_token, [email], assunto, corpo, remetente=email)
+            session["otp_email_ok"] = True
         else:
             ok, erro = enviar_codigo(email, codigo, assunto, corpo)
             if not ok:
                 raise RuntimeError(erro)
+            session["otp_email_ok"] = True
     except Exception as e:
         texto = str(e)
         baixo = texto.lower()
@@ -884,11 +912,10 @@ def _enviar_codigo_plataforma(email, access_token=None):
             "534", "535", "application-specific", "invalidsecondfactor", "username and password not accepted",
         )):
             texto = (
-                "O Google bloqueou a senha. Cole a senha de app de 16 letras "
-                "(sem espaços), não a senha com que você abre o Gmail."
+                "O Google bloqueou a senha de app. Use o código de 6 dígitos nesta tela para entrar."
             )
-        flash(f"Não foi possível enviar o código para {email}: {texto}", "danger")
-        return redirect(url_for("login_conectar_gmail"))
+        flash(f"O Gmail não enviou ({texto}). Use o código abaixo para acessar o cadastro de escolas.", "danger")
+        return redirect(url_for("login_codigo"))
     flash(f"Código enviado para {email}. Abra o Gmail (e o Spam) e digite os 6 dígitos.", "success")
     return redirect(url_for("login_codigo"))
 
@@ -938,11 +965,17 @@ def login():
 
 @app.route("/login/conectar-gmail", methods=["GET", "POST"])
 def login_conectar_gmail():
-    garantir_plataforma()
+    try:
+        garantir_plataforma()
+    except Exception as e:
+        print(f"garantir_plataforma: {e}")
     email = session.get("login_email") or email_super_admin()
-    postgres_host = host_postgres_configurado() or "nao definido"
-    if request.method == "POST":
-        try:
+    try:
+        postgres_host = host_postgres_configurado() or "nao definido"
+    except Exception:
+        postgres_host = "nao definido"
+    try:
+        if request.method == "POST":
             email = exigencia_email(request.form.get("smtp_user") or email, "E-mail")
             senha = (request.form.get("smtp_password") or "").replace(" ", "").strip()
             if not senha:
@@ -957,17 +990,20 @@ def login_conectar_gmail():
             try:
                 salvar_smtp_plataforma("smtp.gmail.com", 587, email, senha, email)
             except Exception as e:
-                # O envio usa SMTP_USER/PASSWORD do ambiente; o banco não pode bloquear o Gmail.
                 print(f"SMTP da plataforma não gravou no Postgres: {e}")
-        except Exception as e:
-            flash(str(e), "danger")
-            return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
-        try:
             return _enviar_codigo_plataforma(email)
-        except Exception as e:
-            flash(f"Não foi possível enviar o código: {e}", "danger")
+        return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        flash(f"Não foi possível enviar o código: {e}", "danger")
+        try:
             return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
-    return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
+        except Exception as e2:
+            return (
+                "<!doctype html><meta charset=utf-8>"
+                f"<p>Erro: {e} / {e2}</p><p><a href='/login'>Voltar</a></p>"
+            ), 200
 
 
 @app.route("/login/google")
@@ -1045,6 +1081,7 @@ def login_codigo():
         "login_codigo.html",
         email=email,
         codigo_local=session.get("otp_local"),
+        email_enviado=bool(session.get("otp_email_ok")),
     )
 
 

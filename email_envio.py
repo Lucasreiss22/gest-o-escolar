@@ -41,7 +41,10 @@ def corrigir_smtp(smtp):
         host = "smtp.gmail.com"
     dados["SMTP_HOST"] = host or "smtp.gmail.com"
     dados["SMTP_PASSWORD"] = senha
-    dados["SMTP_PORT"] = int(dados.get("SMTP_PORT") or 587)
+    try:
+        dados["SMTP_PORT"] = int(dados.get("SMTP_PORT") or 587)
+    except (TypeError, ValueError):
+        dados["SMTP_PORT"] = 587
     dados["SMTP_USER"] = usuario
     dados["SMTP_FROM"] = (dados.get("SMTP_FROM") or usuario).strip()
     if dados.get("SMTP_TLS") is None:
@@ -220,7 +223,7 @@ def _tentar_smtp_gmail(cfg, msg):
             senhas.append(item)
     ultimo = None
     for senha in senhas:
-        for usar_ssl, porta in ((False, 587), (True, 465)):
+        for usar_ssl, porta in ((False, 587),):
             try:
                 if usar_ssl:
                     smtp = smtplib.SMTP_SSL("smtp.gmail.com", porta, timeout=12)
@@ -234,8 +237,12 @@ def _tentar_smtp_gmail(cfg, msg):
                 return
             except smtplib.SMTPAuthenticationError as e:
                 ultimo = e
-            except OSError as e:
+            except (OSError, smtplib.SMTPException) as e:
                 ultimo = e
+                if getattr(e, "errno", None) in {11001, 11002, 8} or "getaddrinfo" in str(e).lower():
+                    raise RuntimeError(
+                        "Sem internet ou o Gmail não foi encontrado. Confira a conexão e tente de novo."
+                    ) from e
                 if getattr(e, "errno", None) in {11001, 11002, 8} or "getaddrinfo" in str(e).lower():
                     raise RuntimeError(
                         "Sem internet ou o Gmail não foi encontrado. Confira a conexão e tente de novo."
