@@ -930,6 +930,12 @@ def login():
 def login_conectar_gmail():
     garantir_plataforma()
     email = session.get("login_email") or email_super_admin()
+    try:
+        from urllib.parse import urlparse
+        dsn = (_CFG.get("DATABASE_URL") or "").replace("postgresql://", "http://").replace("postgres://", "http://")
+        postgres_host = urlparse(dsn).hostname or "nao definido"
+    except Exception:
+        postgres_host = "nao definido"
     if request.method == "POST":
         try:
             email = exigencia_email(request.form.get("smtp_user") or email, "E-mail")
@@ -943,14 +949,14 @@ def login_conectar_gmail():
                 detalhe = erro_conexao_atual() or str(e)
                 raise RuntimeError(
                     f"Postgres não conectou ({detalhe}). "
-                    "Confira DATABASE_URL em uma linha só, host pooler.supabase.com, "
-                    "e SMTP_HOST=smtp.gmail.com (não coloque a senha de app no HOST)."
+                    "O site está usando o host: {postgres_host}. "
+                    "No Render use Save and deploy (não só Save only) depois de colar a URI do pooler."
                 ) from e
         except Exception as e:
             flash(str(e), "danger")
-            return render_template("login_conectar_gmail.html", email=email)
+            return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
         return _enviar_codigo_plataforma(email)
-    return render_template("login_conectar_gmail.html", email=email)
+    return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
 
 
 @app.route("/login/google")
