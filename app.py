@@ -74,6 +74,7 @@ from datetime import datetime, date, timedelta
 import json
 import hashlib
 import secrets
+import threading
 import uuid
 
 _CFG = carregar_config()
@@ -884,39 +885,30 @@ def _voltar_ou(padrao):
 
 
 def _enviar_codigo_plataforma(email, access_token=None):
-    try:
-        codigo = gerar_otp(email, "login_plataforma")
-    except Exception as e:
-        print(f"gerar_otp falhou: {e}")
-        codigo = f"{secrets.randbelow(1000000):06d}"
+    codigo = f"{secrets.randbelow(1000000):06d}"
     session["otp_local"] = codigo
     session["otp_email_ok"] = False
+    session["login_email"] = email
     corpo = (
         f"Seu código de confirmação da Gestão Escolar é: {codigo}\n\n"
         "Ele vale por 20 minutos. Se você não pediu este acesso, ignore o e-mail."
     )
     assunto = "Código de acesso da plataforma"
-    try:
-        if access_token:
-            enviar_via_gmail_api(access_token, [email], assunto, corpo, remetente=email)
-            session["otp_email_ok"] = True
-        else:
-            ok, erro = enviar_codigo(email, codigo, assunto, corpo)
-            if not ok:
-                raise RuntimeError(erro)
-            session["otp_email_ok"] = True
-    except Exception as e:
-        texto = str(e)
-        baixo = texto.lower()
-        if any(x in texto or x in baixo for x in (
-            "534", "535", "application-specific", "invalidsecondfactor", "username and password not accepted",
-        )):
-            texto = (
-                "O Google bloqueou a senha de app. Use o código de 6 dígitos nesta tela para entrar."
-            )
-        flash(f"O Gmail não enviou ({texto}). Use o código abaixo para acessar o cadastro de escolas.", "danger")
-        return redirect(url_for("login_codigo"))
-    flash(f"Código enviado para {email}. Abra o Gmail (e o Spam) e digite os 6 dígitos.", "success")
+    token = access_token
+    destino = email
+
+    def _bg():
+        try:
+            if token:
+                enviar_via_gmail_api(token, [destino], assunto, corpo, remetente=destino)
+            else:
+                ok, erro = enviar_codigo(destino, codigo, assunto, corpo)
+                print(f"OTP e-mail: ok={ok} erro={erro}")
+        except Exception as e:
+            print(f"OTP e-mail falhou: {e}")
+
+    threading.Thread(target=_bg, daemon=True).start()
+    flash("Use o código de 6 dígitos abaixo. O e-mail pode chegar depois, ou não chegar no Render.", "success")
     return redirect(url_for("login_codigo"))
 
 
@@ -987,10 +979,15 @@ def login_conectar_gmail():
             os.environ["SMTP_PASSWORD"] = senha
             os.environ["SMTP_FROM"] = email
             os.environ["SMTP_TLS"] = "true"
-            try:
-                salvar_smtp_plataforma("smtp.gmail.com", 587, email, senha, email)
-            except Exception as e:
-                print(f"SMTP da plataforma não gravou no Postgres: {e}")
+            smtp_email, smtp_senha = email, senha
+
+            def _salvar_smtp_bg():
+                try:
+                    salvar_smtp_plataforma("smtp.gmail.com", 587, smtp_email, smtp_senha, smtp_email)
+                except Exception as e:
+                    print(f"SMTP da plataforma não gravou no Postgres: {e}")
+
+            threading.Thread(target=_salvar_smtp_bg, daemon=True).start()
             return _enviar_codigo_plataforma(email)
         return render_template("login_conectar_gmail.html", email=email, postgres_host=postgres_host)
     except Exception as e:

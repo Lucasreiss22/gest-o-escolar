@@ -226,9 +226,9 @@ def _tentar_smtp_gmail(cfg, msg):
         for usar_ssl, porta in ((False, 587),):
             try:
                 if usar_ssl:
-                    smtp = smtplib.SMTP_SSL("smtp.gmail.com", porta, timeout=12)
+                    smtp = smtplib.SMTP_SSL("smtp.gmail.com", porta, timeout=8)
                 else:
-                    smtp = smtplib.SMTP("smtp.gmail.com", porta, timeout=12)
+                    smtp = smtplib.SMTP("smtp.gmail.com", porta, timeout=8)
                 with smtp:
                     if not usar_ssl:
                         smtp.starttls()

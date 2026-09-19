@@ -16,10 +16,8 @@
 <body class="login-page">
     <div class="login-card">
         <h2>Confirme o e-mail</h2>
-        {% if email_enviado %}
-        <p class="hint">Enviamos um código de 6 dígitos para <strong>{{ email }}</strong>. Abra o Gmail (inclusive spam).</p>
-        {% elif codigo_local %}
-        <p class="hint">O Gmail pode não ter enviado. Use este código para entrar no cadastro de escolas:</p>
+        {% if codigo_local %}
+        <p class="hint">Este é o código para entrar no cadastro de escolas. O Gmail no Render costuma falhar; use o número abaixo.</p>
         <div class="codigo-box">{{ codigo_local }}</div>
         {% else %}
         <p class="hint">Peça o código de novo em <a href="{{ url_for('login_conectar_gmail') }}">Enviar código</a>.</p>
@@ -30,7 +28,7 @@
         <form method="POST">
             <div class="form-group">
                 <label>Código</label>
-                <input name="codigo" inputmode="numeric" maxlength="6" value="{{ '' if email_enviado else (codigo_local or '') }}" placeholder="000000" required>
+                <input name="codigo" inputmode="numeric" maxlength="6" value="{{ codigo_local or '' }}" placeholder="000000" required>
             </div>
             <button class="btn" type="submit">Confirmar código</button>
         </form>
