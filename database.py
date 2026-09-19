@@ -55,6 +55,52 @@ def erro_conexao_atual():
     return ultimo_erro_pg
 
 
+def _destino_postgres(dsn, dbname, sslmode):
+    """Converte host Direct (IPv6) do Supabase para Session pooler (IPv4)."""
+    if dsn.startswith("postgres://"):
+        dsn = "postgresql://" + dsn[len("postgres://"):]
+    parsed = urlparse(dsn)
+    host = parsed.hostname or ""
+    port = parsed.port or 5432
+    user = unquote(parsed.username or "")
+    password = unquote(parsed.password or "")
+    ref_alias = {
+        "yqkptzxrkfreisydyir": "yqkptzkxrklreisydyir",
+    }
+    if host.startswith("db.") and host.endswith(".supabase.co"):
+        ref = host.split(".")[1]
+        ref = ref_alias.get(ref, ref)
+        host = "aws-0-sa-east-1.pooler.supabase.com"
+        port = 5432
+        if user == "postgres" or not user.startswith("postgres."):
+            user = f"postgres.{ref}"
+    if "yqkptzxrkfreisydyir" in (user or ""):
+        user = user.replace("yqkptzxrkfreisydyir", "yqkptzkxrklreisydyir")
+    print(f"Postgres alvo: {host} user={user}")
+    return dict(
+        host=host,
+        port=port,
+        dbname=dbname,
+        user=user,
+        password=password,
+        sslmode=sslmode or "require",
+        cursor_factory=psycopg2.extras.RealDictCursor,
+        connect_timeout=15,
+    )
+
+
+def host_postgres_configurado():
+    cfg = carregar_config()
+    dsn = cfg.get("DATABASE_URL") or ""
+    if not dsn:
+        return ""
+    try:
+        params = _destino_postgres(dsn, "postgres", "require")
+        return params.get("host") or ""
+    except Exception:
+        return ""
+
+
 def obter_conexao(master=False):
     """Abre conexão com o banco da plataforma (master) ou só com o banco da escola ativa."""
     global ultimo_erro_pg
@@ -72,20 +118,8 @@ def obter_conexao(master=False):
             return None
     try:
         dsn = cfg.get("DATABASE_URL") or ""
-        if dsn.startswith("postgres://"):
-            dsn = "postgresql://" + dsn[len("postgres://"):]
         if dsn:
-            parsed = urlparse(dsn)
-            conexao = psycopg2.connect(
-                host=parsed.hostname,
-                port=parsed.port or 5432,
-                dbname=dbname,
-                user=unquote(parsed.username or ""),
-                password=unquote(parsed.password or ""),
-                sslmode=cfg.get("DB_SSLMODE") or "require",
-                cursor_factory=psycopg2.extras.RealDictCursor,
-                connect_timeout=15,
-            )
+            conexao = psycopg2.connect(**_destino_postgres(dsn, dbname, cfg.get("DB_SSLMODE") or "require"))
         else:
             conexao = psycopg2.connect(
                 host=cfg["DB_HOST"],

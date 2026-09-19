@@ -21,7 +21,7 @@ from email_envio import (
 )
 from psycopg2.extras import RealDictCursor
 from alunos import cadastrar_aluno, listar_alunos, atualizar_responsavel, deletar_responsavel
-from database import obter_conexao, garantir_tabelas_pedagogicas, garantir_tabelas_folha, definir_banco_escola, limpar_banco_escola, resetar_tenant, erro_conexao_atual
+from database import obter_conexao, garantir_tabelas_pedagogicas, garantir_tabelas_folha, definir_banco_escola, limpar_banco_escola, resetar_tenant, erro_conexao_atual, host_postgres_configurado
 from tributacao import (
     apurar_simples,
     apurar_pis_cofins,
@@ -930,12 +930,7 @@ def login():
 def login_conectar_gmail():
     garantir_plataforma()
     email = session.get("login_email") or email_super_admin()
-    try:
-        from urllib.parse import urlparse
-        dsn = (_CFG.get("DATABASE_URL") or "").replace("postgresql://", "http://").replace("postgres://", "http://")
-        postgres_host = urlparse(dsn).hostname or "nao definido"
-    except Exception:
-        postgres_host = "nao definido"
+    postgres_host = host_postgres_configurado() or "nao definido"
     if request.method == "POST":
         try:
             email = exigencia_email(request.form.get("smtp_user") or email, "E-mail")
