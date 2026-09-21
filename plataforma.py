@@ -90,10 +90,7 @@ def garantir_plataforma():
                 )
                 if not cursor.fetchone():
                     cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {spec}")
-        try:
-            conexao.commit()
-        except Exception:
-            pass
+        conexao.commit()
     except Exception as e:
         try:
             conexao.rollback()
@@ -217,12 +214,12 @@ def excluir_escola(escola_id):
         admin = obter_conexao(master=True)
         if admin:
             try:
+                try:
+                    admin.set_session(autocommit=True)
+                except Exception:
+                    admin.autocommit = True
                 with admin.cursor() as cursor:
                     cursor.execute(f'DROP SCHEMA IF EXISTS "{db_nome}" CASCADE')
-                try:
-                    admin.commit()
-                except Exception:
-                    pass
             finally:
                 admin.close()
     return escola
@@ -486,12 +483,12 @@ def criar_banco_escola(db_nome):
     if not conexao:
         raise RuntimeError("Sem conexão com o Postgres para criar o espaço da escola.")
     try:
+        try:
+            conexao.set_session(autocommit=True)
+        except Exception:
+            conexao.autocommit = True
         with conexao.cursor() as cursor:
             cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{db_nome}"')
-        try:
-            conexao.commit()
-        except Exception:
-            pass
     except Exception as e:
         raise RuntimeError(
             "Não foi possível criar o espaço da escola no Supabase. "
@@ -561,10 +558,7 @@ def bootstrap_banco_escola(nome_escola, email_admin):
                 """,
                 (nome_escola, email_admin),
             )
-        try:
             conexao.commit()
-        except Exception:
-            pass
     finally:
         conexao.close()
 
@@ -736,6 +730,8 @@ def localizar_escola_do_email(email):
                     )
                     if cursor.fetchone():
                         return escola
+            except Exception as e:
+                print(f"localizar escola {escola.get('db_nome')}: {e}")
             finally:
                 conexao.close()
         finally:
@@ -755,10 +751,17 @@ def usuario_da_escola(email, senha, escola=None):
         try:
             with conexao.cursor() as cursor:
                 cursor.execute(
-                    "SELECT id, nome, senha, papel FROM usuarios WHERE LOWER(email) = %s",
+                    "SELECT * FROM usuarios WHERE LOWER(email) = %s",
                     (normalizar_email(email),),
                 )
                 usuario = cursor.fetchone()
+        except Exception as e:
+            print(f"usuario_da_escola: {e}")
+            try:
+                conexao.rollback()
+            except Exception:
+                pass
+            usuario = None
         finally:
             conexao.close()
     finally:

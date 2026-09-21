@@ -152,13 +152,6 @@ def obter_conexao(master=False):
         else:
             params["options"] = f"-csearch_path={schema},public"
         conexao = psycopg2.connect(**params)
-        try:
-            conexao.set_session(autocommit=True)
-        except Exception:
-            try:
-                conexao.autocommit = True
-            except Exception:
-                pass
         return conexao
     except Exception as erro:
         ultimo_erro_pg = str(erro)
@@ -527,10 +520,7 @@ def garantir_tabelas_pedagogicas():
                         UNIQUE (aluno_id, data_aula, disciplina)
                         """
                     )
-            try:
-                conexao.commit()
-            except Exception:
-                pass
+            conexao.commit()
     except Exception as e:
         try:
             conexao.rollback()
@@ -727,10 +717,7 @@ def garantir_tabelas_folha():
                         WHERE status IS NULL OR TRIM(status) = ''
                         """
                     )
-            try:
-                conexao.commit()
-            except Exception:
-                pass
+            conexao.commit()
     except Exception as e:
         try:
             conexao.rollback()

@@ -124,7 +124,7 @@ def _erro_interno(e):
 
 @app.errorhandler(Exception)
 def _qualquer_erro(e):
-    if isinstance(e, HTTPException):
+    if isinstance(e, HTTPException) and e.code != 500:
         return e
     return _pagina_erro(e)
 
@@ -823,8 +823,11 @@ def _iniciar_sessao(usuario, email):
     session["usuario_id"] = usuario["id"]
     session["usuario_nome"] = usuario.get("nome") or usuario.get("nome_completo")
     session["usuario_papel"] = normalizar_papel(usuario.get("papel") or usuario.get("cargo") or "admin")
-    garantir_tabelas_folha()
-    garantir_tabelas_pedagogicas()
+    try:
+        garantir_tabelas_folha()
+        garantir_tabelas_pedagogicas()
+    except Exception as e:
+        print(f"Tabelas da escola no login: {e}")
     conexao = obter_conexao()
     if conexao:
         try:
@@ -836,6 +839,12 @@ def _iniciar_sessao(usuario, email):
                 func = cursor.fetchone()
                 if func:
                     session["funcionario_id"] = func["id"] if isinstance(func, dict) else func[0]
+        except Exception as e:
+            print(f"Funcionario no login: {e}")
+            try:
+                conexao.rollback()
+            except Exception:
+                pass
         finally:
             conexao.close()
 
@@ -1106,6 +1115,14 @@ def login_senha():
     email = session.get("login_email")
     if not email:
         return redirect(url_for("login"))
+    try:
+        return _login_senha(email)
+    except Exception as e:
+        flash(f"Não foi possível entrar: {e}", "danger")
+        return render_template("login_senha.html", email=email, criar=False)
+
+
+def _login_senha(email):
     criar = False
     if eh_super_admin(email):
         admin = buscar_admin_plataforma(email)
@@ -1272,20 +1289,21 @@ def plataforma_escolas():
                     excluir_escola(antiga["id"])
                 escola = cadastrar_escola(request.form.get("nome"), email_novo)
                 link = url_for("ativar_escola", token=escola["convite_token"], _external=True)
-                flash(
-                    f"Escola {escola['nome']} cadastrada. Código para {escola['email_admin']}: "
-                    f"{escola['convite_codigo']}. Link: {link}",
-                    "success",
-                )
                 token_gmail = session.get("google_access_token")
-
-                def _bg_convite():
-                    try:
-                        _enviar_convite_escola(escola, access_token=token_gmail, link=link)
-                    except Exception as erro_bg:
-                        print(f"Convite e-mail: {erro_bg}")
-
-                threading.Thread(target=_bg_convite, daemon=True).start()
+                ok, erro, link = _enviar_convite_escola(escola, access_token=token_gmail, link=link)
+                if ok:
+                    flash(
+                        f"Escola {escola['nome']} cadastrada. Código para {escola['email_admin']}: "
+                        f"{escola['convite_codigo']}. E-mail enviado. Link: {link}",
+                        "success",
+                    )
+                else:
+                    flash(
+                        f"Escola {escola['nome']} cadastrada. O e-mail não saiu ({erro}). "
+                        f"Código para {escola['email_admin']}: {escola['convite_codigo']}. "
+                        f"Link: {link}. Em Permitir envio de e-mail, autorize o Gmail da plataforma e clique em Reenviar.",
+                        "danger",
+                    )
             except Exception as e:
                 flash(f"Não foi possível cadastrar a escola: {e}", "danger")
         elif acao == "reenviar_convite":
@@ -1753,6 +1771,11 @@ def dashboard():
         return redirect(url_for("login"))
 
     metrics = {"total_alunos": 0, "total_professores": 0, "total_turmas": 0, "total_usuarios": 0, "total_funcionarios": 0}
+    try:
+        garantir_tabelas_folha()
+        garantir_tabelas_pedagogicas()
+    except Exception as e:
+        print(f"Dashboard tabelas: {e}")
 
     conexao = obter_conexao()
     if conexao:
