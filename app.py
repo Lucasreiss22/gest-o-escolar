@@ -7,6 +7,8 @@ try:
 except Exception:
     pass
 from flask import Flask, flash, redirect, render_template, request, url_for, session, send_file
+from markupsafe import escape
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from config import carregar_config, ambiente_producao
@@ -94,20 +96,37 @@ if ambiente_producao():
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 
-@app.errorhandler(500)
-def _erro_interno(e):
+def _pagina_erro(e):
     import traceback
     traceback.print_exc()
-    caminho = request.path or "/login"
+    caminho = "/login"
+    try:
+        caminho = request.path or "/login"
+    except Exception:
+        pass
+    detalhe = escape(str(e) or "erro interno")
+    destino = escape(caminho)
     return (
         "<!doctype html><html lang=pt-br><meta charset=utf-8>"
         "<title>Erro</title>"
         "<body style='font-family:sans-serif;max-width:520px;margin:40px auto;line-height:1.5'>"
         "<h1>O site teve um erro neste passo</h1>"
-        f"<p style='color:#64748b;font-size:0.9rem'>{e}</p>"
-        f"<p><a href='{caminho}'>Tentar de novo</a> · <a href='/login'>Login</a></p>"
+        f"<p style='color:#64748b;font-size:0.9rem'>{detalhe}</p>"
+        f"<p><a href='{destino}'>Tentar de novo</a> · <a href='/login'>Login</a></p>"
         "</body></html>"
     ), 200
+
+
+@app.errorhandler(500)
+def _erro_interno(e):
+    return _pagina_erro(e)
+
+
+@app.errorhandler(Exception)
+def _qualquer_erro(e):
+    if isinstance(e, HTTPException):
+        return e
+    return _pagina_erro(e)
 
 oauth = None
 try:
@@ -1190,7 +1209,12 @@ def plataforma_escolas():
         return redirect(url_for("login"))
     if request.method == "POST":
         acao = request.form.get("acao")
-        conexao = obter_conexao(master=True)
+        conexao = None
+        try:
+            conexao = obter_conexao(master=True)
+        except Exception as e:
+            flash(f"Banco indisponível: {e}", "danger")
+            return redirect(url_for("plataforma_escolas"))
         if acao in {"salvar_smtp", "salvar_smtp_e_enviar"}:
             try:
                 senha_app = (request.form.get("smtp_password") or "").strip()
@@ -1235,6 +1259,12 @@ def plataforma_escolas():
             if conexao:
                 conexao.close()
         elif acao == "criar_escola":
+            if conexao:
+                try:
+                    conexao.close()
+                except Exception:
+                    pass
+                conexao = None
             try:
                 email_novo = request.form.get("email_admin")
                 if request.form.get("recadastrar") and buscar_escola_por_email(email_novo):
@@ -1345,19 +1375,29 @@ def plataforma_escolas():
                 return redirect(url_for("dashboard"))
             except Exception as e:
                 flash(f"Não foi possível abrir a escola: {e}", "danger")
+        if conexao:
+            try:
+                conexao.close()
+            except Exception:
+                pass
         return redirect(url_for("plataforma_escolas"))
     smtp = {}
-    conexao = obter_conexao(master=True)
-    if conexao:
-        try:
-            with conexao.cursor() as cursor:
-                cursor.execute("SELECT * FROM plataforma_smtp WHERE id = 1")
-                smtp = cursor.fetchone() or {}
-        finally:
-            conexao.close()
+    escolas = []
+    try:
+        conexao = obter_conexao(master=True)
+        if conexao:
+            try:
+                with conexao.cursor() as cursor:
+                    cursor.execute("SELECT * FROM plataforma_smtp WHERE id = 1")
+                    smtp = cursor.fetchone() or {}
+            finally:
+                conexao.close()
+        escolas = listar_escolas()
+    except Exception as e:
+        flash(f"Não foi possível carregar as escolas: {e}", "danger")
     return render_template(
         "plataforma_escolas.html",
-        escolas=listar_escolas(),
+        escolas=escolas,
         smtp=smtp,
         google_login=_google_habilitado(),
     )

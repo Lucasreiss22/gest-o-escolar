@@ -381,7 +381,7 @@ def _tabela_existe(cursor, tabela):
     cursor.execute(
         """
         SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = %s
+        WHERE table_schema = current_schema() AND table_name = %s
         """,
         (tabela,),
     )
@@ -394,7 +394,7 @@ def _garantir_coluna(cursor, tabela, coluna, spec):
     cursor.execute(
         """
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+        WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s
         """,
         (tabela, coluna),
     )
@@ -527,9 +527,15 @@ def garantir_tabelas_pedagogicas():
                         UNIQUE (aluno_id, data_aula, disciplina)
                         """
                     )
-            conexao.commit()
+            try:
+                conexao.commit()
+            except Exception:
+                pass
     except Exception as e:
-        conexao.rollback()
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
         _log_db(f"Erro ao garantir tabelas pedagogicas: {e}")
     finally:
         conexao.close()
@@ -703,16 +709,14 @@ def garantir_tabelas_folha():
             ):
                 _garantir_coluna(cursor, tabela, coluna, spec)
             if _tabela_existe(cursor, "alunos"):
-                cursor.execute("SAVEPOINT sexo_tipo")
                 try:
                     cursor.execute("ALTER TABLE alunos ALTER COLUMN sexo TYPE VARCHAR(20)")
-                    cursor.execute("RELEASE SAVEPOINT sexo_tipo")
                 except Exception:
-                    cursor.execute("ROLLBACK TO SAVEPOINT sexo_tipo")
+                    pass
                 cursor.execute(
                     """
                     SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = 'alunos' AND column_name = 'status'
+                    WHERE table_schema = current_schema() AND table_name = 'alunos' AND column_name = 'status'
                     """
                 )
                 if cursor.fetchone():
@@ -723,9 +727,15 @@ def garantir_tabelas_folha():
                         WHERE status IS NULL OR TRIM(status) = ''
                         """
                     )
-            conexao.commit()
+            try:
+                conexao.commit()
+            except Exception:
+                pass
     except Exception as e:
-        conexao.rollback()
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
         _log_db(f"Erro ao garantir tabelas de folha: {e}")
     finally:
         conexao.close()

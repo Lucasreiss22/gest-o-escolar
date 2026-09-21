@@ -90,9 +90,15 @@ def garantir_plataforma():
                 )
                 if not cursor.fetchone():
                     cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {spec}")
-        conexao.commit()
+        try:
+            conexao.commit()
+        except Exception:
+            pass
     except Exception as e:
-        conexao.rollback()
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
         print(f"Erro ao garantir tabelas da plataforma: {e}")
     finally:
         conexao.close()
@@ -496,11 +502,9 @@ def criar_banco_escola(db_nome):
 
 
 def bootstrap_banco_escola(nome_escola, email_admin):
-    from database import garantir_tabelas_folha, garantir_tabelas_pedagogicas
-
     conexao = obter_conexao()
     if not conexao:
-        raise RuntimeError("Não conectou no banco da escola recém-criado.")
+        raise RuntimeError("Não conectou no espaço da escola recém-criado.")
     try:
         with conexao.cursor() as cursor:
             cursor.execute(
@@ -511,14 +515,22 @@ def bootstrap_banco_escola(nome_escola, email_admin):
                     email VARCHAR(150) UNIQUE NOT NULL,
                     senha VARCHAR(255),
                     papel VARCHAR(40) DEFAULT 'admin'
-                );
+                )
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS configuracoes (
                     id INT PRIMARY KEY,
                     nome_escola VARCHAR(180),
                     ano_letivo INT,
                     email_contato VARCHAR(150),
                     regime_tributario VARCHAR(40) DEFAULT 'simples_nacional'
-                );
+                )
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS funcionarios (
                     id SERIAL PRIMARY KEY,
                     nome_completo VARCHAR(150),
@@ -526,7 +538,11 @@ def bootstrap_banco_escola(nome_escola, email_admin):
                     cargo VARCHAR(80),
                     telefone VARCHAR(30),
                     usuario_id INT
-                );
+                )
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS alunos (
                     id SERIAL PRIMARY KEY,
                     matricula VARCHAR(20),
@@ -534,18 +550,23 @@ def bootstrap_banco_escola(nome_escola, email_admin):
                     email VARCHAR(150),
                     telefone_principal VARCHAR(30),
                     status VARCHAR(20) DEFAULT 'ativo'
-                );
+                )
+                """
+            )
+            cursor.execute(
+                """
                 INSERT INTO configuracoes (id, nome_escola, ano_letivo, email_contato)
                 VALUES (1, %s, EXTRACT(YEAR FROM CURRENT_DATE)::INT, %s)
-                ON CONFLICT (id) DO UPDATE SET nome_escola = EXCLUDED.nome_escola;
+                ON CONFLICT (id) DO UPDATE SET nome_escola = EXCLUDED.nome_escola
                 """,
                 (nome_escola, email_admin),
             )
-        conexao.commit()
+        try:
+            conexao.commit()
+        except Exception:
+            pass
     finally:
         conexao.close()
-    garantir_tabelas_pedagogicas()
-    garantir_tabelas_folha()
 
 
 def cadastrar_escola(nome, email_admin):
