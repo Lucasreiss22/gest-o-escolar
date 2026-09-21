@@ -6,7 +6,6 @@ try:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
-from urllib.parse import quote
 from flask import Flask, flash, redirect, render_template, request, url_for, session, send_file
 from markupsafe import escape
 from werkzeug.exceptions import HTTPException
@@ -1088,46 +1087,14 @@ def _enviar_convite_escola(escola, access_token=None, link=None):
         f"<p><a href='{link}'>Abrir página de ativação</a></p>"
         f"<p>Na página você escolhe a senha com que vai entrar. Nenhuma senha é gerada pelo sistema.</p>"
     )
-    token = access_token
-    if token is None:
-        try:
-            token = session.get("google_access_token")
-        except Exception:
-            token = None
     ok, erro = enviar_codigo(
         escola["email_admin"],
         codigo,
         f"Código de acesso da escola {nome}",
         corpo,
         html=html,
-        access_token=token,
     )
     return ok, erro, link
-
-
-def _gmail_manual_url(escola, link=None):
-    dest = (escola.get("email_admin") or "").strip()
-    token = escola.get("convite_token") or ""
-    if not dest or not token:
-        return ""
-    if not link:
-        link = url_for("ativar_escola", token=token, _external=True)
-    codigo = escola.get("convite_codigo") or ""
-    nome = escola.get("nome") or ""
-    assunto = f"Código de acesso da escola {nome}"
-    corpo = (
-        f"Olá,\n\n"
-        f"A escola {nome} foi cadastrada na Gestão Escolar.\n\n"
-        f"Seu código é: {codigo}\n\n"
-        f"Abra o link abaixo e digite só esse código:\n{link}\n\n"
-        f"Na página você escolhe a senha de entrada. O sistema não gera senha.\n"
-    )
-    return (
-        "https://mail.google.com/mail/?view=cm&fs=1&tf=1"
-        f"&to={quote(dest)}"
-        f"&su={quote(assunto)}"
-        f"&body={quote(corpo)}"
-    )
 
 
 def _avisar_envio(escola, ok, erro, acao="cadastro"):
@@ -1135,16 +1102,14 @@ def _avisar_envio(escola, ok, erro, acao="cadastro"):
     session.pop("gmail_manual", None)
     if ok:
         if acao == "cadastro":
-            flash(f"Escola {escola.get('nome')} cadastrada. Código enviado automaticamente para {dest}.", "success")
+            flash(f"Escola {escola.get('nome')} cadastrada. Código enviado para {dest}.", "success")
         else:
-            flash(f"Código enviado automaticamente para {dest}.", "success")
+            flash(f"Código de acesso enviado para {dest}.", "success")
         return
-    url = _gmail_manual_url(escola)
-    if url:
-        session["gmail_manual"] = url
     flash(
-        f"O envio automático não concluiu ({erro}). "
-        "Abaixo aparece a terceira opção, só para envio manual pelo Gmail.",
+        f"Escola criada, mas falhou o envio automático para {dest}. Erro: {erro}"
+        if acao == "cadastro"
+        else f"O envio automático para {dest} falhou. Erro: {erro}",
         "danger",
     )
 
@@ -1346,13 +1311,11 @@ def plataforma_escolas():
             "resend": False,
             "brevo": False,
         }
-    gmail_manual = session.pop("gmail_manual", None)
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
         smtp=smtp,
         diagnostico=diagnostico,
-        gmail_manual=gmail_manual,
         google_login=_google_habilitado(),
         google_autorizado=bool((smtp or {}).get("google_refresh_token") if isinstance(smtp, dict) else getattr(smtp, "google_refresh_token", None)),
         google_redirect=url_for("login_google_callback", _external=True),

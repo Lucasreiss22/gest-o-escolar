@@ -281,7 +281,11 @@ def _tentar_smtp_gmail(cfg, msg):
         porta_cfg = int(cfg.get("SMTP_PORT") or 587)
     except (TypeError, ValueError):
         porta_cfg = 587
-    tentativas = [(False, porta_cfg or 587), (True, 465)] if porta_cfg != 465 else [(True, 465), (False, 587)]
+    tentativas = [(False, 587)]
+    if porta_cfg == 465:
+        tentativas = [(True, 465), (False, 587)]
+    elif porta_cfg not in {587, 0}:
+        tentativas = [(False, porta_cfg), (False, 587)]
     ultimo = None
     for senha in senhas:
         for usar_ssl, porta in tentativas:
@@ -331,43 +335,29 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
     if not lista:
         raise RuntimeError("Nenhum e-mail válido para envio. Cadastre o e-mail do responsável, professor ou destinatário.")
 
-    cfg = carregar_smtp()
-    erros = []
-    if smtp_configurado(cfg):
-        try:
-            cfg = corrigir_smtp(cfg)
-            msg = _montar_mensagem(
-                cfg.get("SMTP_FROM") or cfg.get("SMTP_USER"),
-                lista,
-                assunto,
-                corpo,
-                html=html,
-                anexos=anexos,
-            )
-            _tentar_smtp_gmail(cfg, msg)
-            print(f"e-mail enviado via SMTP para {lista}")
-            return lista
-        except Exception as e:
-            erros.append(f"SMTP: {e}")
-            print(erros[-1])
-    try:
-        token = access_token
-        remetente = (cfg.get("SMTP_FROM") if smtp_configurado(cfg) else "") or ""
-        if not token:
-            token, remetente_api = obter_access_token_gmail()
-            remetente = remetente or remetente_api
-        if token:
-            enviar_via_gmail_api(
-                token, lista, assunto, corpo, remetente=remetente, anexos=anexos, html=html
-            )
-            print(f"e-mail enviado via Gmail API para {lista}")
-            return lista
-    except Exception as e:
-        erros.append(f"Gmail API: {e}")
-        print(erros[-1])
-    if erros:
-        raise RuntimeError(" | ".join(erros))
-    raise RuntimeError("Faltam SMTP_USER e SMTP_PASSWORD no Environment do Render.")
+    cfg = carregar_config()
+    smtp = {
+        "SMTP_HOST": (cfg.get("SMTP_HOST") or os.environ.get("SMTP_HOST") or "smtp.gmail.com").strip(),
+        "SMTP_PORT": cfg.get("SMTP_PORT") or int(os.environ.get("SMTP_PORT") or 587),
+        "SMTP_USER": (cfg.get("SMTP_USER") or os.environ.get("SMTP_USER") or "").strip(),
+        "SMTP_PASSWORD": cfg.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD") or "",
+        "SMTP_FROM": (cfg.get("SMTP_FROM") or os.environ.get("SMTP_FROM") or cfg.get("SMTP_USER") or "").strip(),
+        "SMTP_TLS": True,
+    }
+    smtp = corrigir_smtp(smtp)
+    if not smtp_configurado(smtp):
+        raise RuntimeError("Faltam SMTP_USER e SMTP_PASSWORD no Environment do Render.")
+    msg = _montar_mensagem(
+        smtp.get("SMTP_FROM") or smtp.get("SMTP_USER"),
+        lista,
+        assunto,
+        corpo,
+        html=html,
+        anexos=anexos,
+    )
+    _tentar_smtp_gmail(smtp, msg)
+    print(f"e-mail enviado via SMTP para {lista}")
+    return lista
 
 
 def bytes_pdf(buffer):

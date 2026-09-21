@@ -43,12 +43,6 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
-        {% if gmail_manual %}
-        <div class="alert alert-danger">
-            O envio automático (SMTP) não concluiu. Terceira opção, só neste caso:
-            <a href="{{ gmail_manual }}" target="_blank" rel="noopener">enviar manualmente pelo Gmail</a>.
-        </div>
-        {% endif %}
 
         <div class="card-box">
             <h3>Envio automático de e-mail</h3>
@@ -58,9 +52,8 @@
             <p class="alert alert-danger">{{ diagnostico.detalhe }}</p>
             {% endif %}
             <p class="hint">
-                Ao cadastrar ou reenviar, o servidor tenta enviar sozinho (SMTP, depois API se existir).
-                Envio manual pelo Gmail só aparece se os dois automáticos falharem.
-                O código de segurança só chega no e-mail do destinatário.
+                Ao cadastrar ou reenviar, o servidor envia sozinho por SMTP (porta 587) com as variáveis do Render.
+                O código só chega no e-mail do destinatário.
             </p>
         </div>
 
