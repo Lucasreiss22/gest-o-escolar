@@ -51,6 +51,9 @@ def carregar_config():
         "SMTP_PASSWORD": smtp_pass,
         "SMTP_FROM": smtp_from,
         "SMTP_TLS": _bool("SMTP_TLS", True),
+        "BREVO_API_KEY": (os.environ.get("BREVO_API_KEY") or "").strip(),
+        "RESEND_API_KEY": (os.environ.get("RESEND_API_KEY") or "").strip(),
+        "SENDGRID_API_KEY": (os.environ.get("SENDGRID_API_KEY") or "").strip(),
         "PREFERRED_URL_SCHEME": "https" if ambiente_producao() else "http",
         "SUPER_ADMIN_EMAIL": super_email,
     }

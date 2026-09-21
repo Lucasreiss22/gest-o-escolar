@@ -214,28 +214,76 @@ def obter_access_token_gmail():
         return None, remetente
 
 
+def _chaves_api_email(cfg=None):
+    cfg = cfg or carregar_config()
+    return {
+        "brevo": (cfg.get("BREVO_API_KEY") or os.environ.get("BREVO_API_KEY") or "").strip(),
+        "resend": (cfg.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY") or "").strip(),
+        "sendgrid": (cfg.get("SENDGRID_API_KEY") or os.environ.get("SENDGRID_API_KEY") or "").strip(),
+    }
+
+
+def _tem_envio_https(cfg=None):
+    return any(_chaves_api_email(cfg).values())
+
+
 def diagnostico_envio():
     cfg = carregar_config()
     smtp_ok = smtp_configurado()
+    chaves = _chaves_api_email(cfg)
+    https_ok = any(chaves.values())
+    producao = ambiente_producao()
+    if https_ok:
+        meio = "Brevo" if chaves["brevo"] else ("Resend" if chaves["resend"] else "SendGrid")
+        return {
+            "smtp_user": bool(cfg.get("SMTP_USER")),
+            "smtp_password": bool(cfg.get("SMTP_PASSWORD")),
+            "smtp_host": cfg.get("SMTP_HOST") or "—",
+            "smtp_port": cfg.get("SMTP_PORT") or 587,
+            "producao_render": producao,
+            "gmail_api": False,
+            "resend": bool(chaves["resend"]),
+            "brevo": bool(chaves["brevo"]),
+            "status": "pronto",
+            "detalhe": f"Envio automático por HTTPS ({meio}). O plano Free do Render bloqueia SMTP; a API não usa a porta 587.",
+        }
+    if smtp_ok and producao:
+        return {
+            "smtp_user": True,
+            "smtp_password": True,
+            "smtp_host": cfg.get("SMTP_HOST") or "smtp.gmail.com",
+            "smtp_port": cfg.get("SMTP_PORT") or 587,
+            "producao_render": True,
+            "gmail_api": False,
+            "resend": False,
+            "brevo": False,
+            "status": "bloqueado",
+            "detalhe": (
+                "SMTP_USER e SMTP_PASSWORD estão certos, mas o plano Free do Render bloqueia "
+                "as portas 25, 465 e 587 (por isso aparece timed out). "
+                "Para o e-mail sair sozinho: cadastre BREVO_API_KEY no Environment "
+                "ou suba o serviço para um plano pago."
+            ),
+        }
     return {
         "smtp_user": bool(cfg.get("SMTP_USER")),
         "smtp_password": bool(cfg.get("SMTP_PASSWORD")),
         "smtp_host": cfg.get("SMTP_HOST") or "—",
         "smtp_port": cfg.get("SMTP_PORT") or 587,
-        "producao_render": ambiente_producao(),
+        "producao_render": producao,
         "gmail_api": False,
         "resend": False,
         "brevo": False,
         "status": "pronto" if smtp_ok else "faltando",
         "detalhe": (
-            "O servidor envia sozinho com SMTP_USER e SMTP_PASSWORD do Render. Ninguém é redirecionado ao Google."
+            "O servidor envia sozinho com SMTP_USER e SMTP_PASSWORD."
             if smtp_ok
-            else "Faltam SMTP_USER e SMTP_PASSWORD no Environment do Render."
+            else "Faltam SMTP_USER e SMTP_PASSWORD, ou BREVO_API_KEY para envio por HTTPS."
         ),
     }
 
 
-def _smtp_ipv4(host, porta, timeout=12):
+def _smtp_ipv4(host, porta, timeout=8):
     import socket
     original = socket.getaddrinfo
 
@@ -252,7 +300,7 @@ def _smtp_ipv4(host, porta, timeout=12):
         socket.getaddrinfo = original
 
 
-def _smtp_ssl_ipv4(host, porta, timeout=12):
+def _smtp_ssl_ipv4(host, porta, timeout=8):
     import socket
     original = socket.getaddrinfo
 
@@ -269,7 +317,24 @@ def _smtp_ssl_ipv4(host, porta, timeout=12):
         socket.getaddrinfo = original
 
 
-def _tentar_smtp_gmail(cfg, msg):
+def _mensagem_smtp(erro):
+    texto = str(erro or "").lower()
+    codigo = getattr(erro, "errno", None)
+    if (
+        "timed out" in texto
+        or "timeout" in texto
+        or "network is unreachable" in texto
+        or codigo in {101, 110, 111, 113}
+    ):
+        return (
+            "O plano Free do Render bloqueia SMTP (portas 25, 465 e 587), então o Gmail dá timed out. "
+            "A senha de app está certa. Cadastre BREVO_API_KEY no Environment para enviar por HTTPS, "
+            "ou suba o serviço para um plano pago."
+        )
+    return str(erro)
+
+
+def _tentar_smtp_gmail(cfg, msg, timeout=None):
     usuario = (cfg.get("SMTP_USER") or "").strip()
     senha_bruta = cfg.get("SMTP_PASSWORD") or ""
     host = (cfg.get("SMTP_HOST") or "smtp.gmail.com").strip() or "smtp.gmail.com"
@@ -277,6 +342,8 @@ def _tentar_smtp_gmail(cfg, msg):
     for item in (senha_bruta, senha_smtp_normalizada(senha_bruta)):
         if item and item not in senhas:
             senhas.append(item)
+    if timeout is None:
+        timeout = 4 if ambiente_producao() else 12
     try:
         porta_cfg = int(cfg.get("SMTP_PORT") or 587)
     except (TypeError, ValueError):
@@ -290,7 +357,11 @@ def _tentar_smtp_gmail(cfg, msg):
     for senha in senhas:
         for usar_ssl, porta in tentativas:
             try:
-                smtp = _smtp_ssl_ipv4(host, porta) if usar_ssl else _smtp_ipv4(host, porta)
+                smtp = (
+                    _smtp_ssl_ipv4(host, porta, timeout=timeout)
+                    if usar_ssl
+                    else _smtp_ipv4(host, porta, timeout=timeout)
+                )
                 with smtp:
                     if not usar_ssl:
                         smtp.starttls()
@@ -306,7 +377,7 @@ def _tentar_smtp_gmail(cfg, msg):
             "O Gmail recusou a senha de app. Confira SMTP_USER e SMTP_PASSWORD no Environment do Render."
         ) from ultimo
     if ultimo:
-        raise ultimo
+        raise RuntimeError(_mensagem_smtp(ultimo)) from ultimo
     raise RuntimeError("Não foi possível conectar ao Gmail para enviar o e-mail.")
 
 
@@ -327,6 +398,127 @@ def _montar_mensagem(remetente, destinos, assunto, corpo, html=None, anexos=None
     return msg
 
 
+def _anexos_api(anexos):
+    import base64
+    itens = []
+    for anexo in anexos or []:
+        dados = anexo.get("dados") or b""
+        if not dados:
+            continue
+        itens.append(
+            {
+                "nome": anexo.get("nome") or "documento.pdf",
+                "tipo": anexo.get("tipo") or "application/pdf",
+                "conteudo": base64.b64encode(dados).decode("ascii"),
+            }
+        )
+    return itens
+
+
+def _enviar_via_brevo(chave, remetente, destinos, assunto, corpo, html=None, anexos=None):
+    import requests
+    payload = {
+        "sender": {"email": remetente, "name": "Gestão Escolar"},
+        "to": [{"email": item} for item in destinos],
+        "subject": assunto,
+        "textContent": corpo or "",
+    }
+    if html:
+        payload["htmlContent"] = html
+    arquivos = _anexos_api(anexos)
+    if arquivos:
+        payload["attachment"] = [{"name": item["nome"], "content": item["conteudo"]} for item in arquivos]
+    resp = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        json=payload,
+        headers={"accept": "application/json", "api-key": chave, "content-type": "application/json"},
+        timeout=20,
+    )
+    if resp.status_code >= 300:
+        raise RuntimeError(f"Brevo recusou o envio ({resp.status_code}): {resp.text[:400]}")
+    return destinos
+
+
+def _enviar_via_resend(chave, remetente, destinos, assunto, corpo, html=None, anexos=None):
+    import requests
+    payload = {
+        "from": f"Gestão Escolar <{remetente}>",
+        "to": list(destinos),
+        "subject": assunto,
+        "text": corpo or "",
+    }
+    if html:
+        payload["html"] = html
+    arquivos = _anexos_api(anexos)
+    if arquivos:
+        payload["attachments"] = [{"filename": item["nome"], "content": item["conteudo"]} for item in arquivos]
+    resp = requests.post(
+        "https://api.resend.com/emails",
+        json=payload,
+        headers={"Authorization": f"Bearer {chave}", "Content-Type": "application/json"},
+        timeout=20,
+    )
+    if resp.status_code >= 300:
+        raise RuntimeError(f"Resend recusou o envio ({resp.status_code}): {resp.text[:400]}")
+    return destinos
+
+
+def _enviar_via_sendgrid(chave, remetente, destinos, assunto, corpo, html=None, anexos=None):
+    import requests
+    conteudo = [{"type": "text/plain", "value": corpo or ""}]
+    if html:
+        conteudo.append({"type": "text/html", "value": html})
+    payload = {
+        "personalizations": [{"to": [{"email": item} for item in destinos]}],
+        "from": {"email": remetente, "name": "Gestão Escolar"},
+        "subject": assunto,
+        "content": conteudo,
+    }
+    arquivos = _anexos_api(anexos)
+    if arquivos:
+        payload["attachments"] = [
+            {
+                "content": item["conteudo"],
+                "filename": item["nome"],
+                "type": item["tipo"],
+                "disposition": "attachment",
+            }
+            for item in arquivos
+        ]
+    resp = requests.post(
+        "https://api.sendgrid.com/v3/mail/send",
+        json=payload,
+        headers={"Authorization": f"Bearer {chave}", "Content-Type": "application/json"},
+        timeout=20,
+    )
+    if resp.status_code >= 300:
+        raise RuntimeError(f"SendGrid recusou o envio ({resp.status_code}): {resp.text[:400]}")
+    return destinos
+
+
+def _enviar_via_https(remetente, destinos, assunto, corpo, html=None, anexos=None):
+    chaves = _chaves_api_email()
+    erros = []
+    if chaves["brevo"]:
+        try:
+            return _enviar_via_brevo(chaves["brevo"], remetente, destinos, assunto, corpo, html=html, anexos=anexos)
+        except Exception as e:
+            erros.append(str(e))
+    if chaves["resend"]:
+        try:
+            return _enviar_via_resend(chaves["resend"], remetente, destinos, assunto, corpo, html=html, anexos=anexos)
+        except Exception as e:
+            erros.append(str(e))
+    if chaves["sendgrid"]:
+        try:
+            return _enviar_via_sendgrid(chaves["sendgrid"], remetente, destinos, assunto, corpo, html=html, anexos=anexos)
+        except Exception as e:
+            erros.append(str(e))
+    if erros:
+        raise RuntimeError(" | ".join(erros))
+    raise RuntimeError("Nenhuma chave HTTPS de e-mail (BREVO_API_KEY, RESEND_API_KEY ou SENDGRID_API_KEY).")
+
+
 def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=None):
     lista = []
     for item in destinos or []:
@@ -336,28 +528,75 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
         raise RuntimeError("Nenhum e-mail válido para envio. Cadastre o e-mail do responsável, professor ou destinatário.")
 
     cfg = carregar_config()
-    smtp = {
-        "SMTP_HOST": (cfg.get("SMTP_HOST") or os.environ.get("SMTP_HOST") or "smtp.gmail.com").strip(),
-        "SMTP_PORT": cfg.get("SMTP_PORT") or int(os.environ.get("SMTP_PORT") or 587),
-        "SMTP_USER": (cfg.get("SMTP_USER") or os.environ.get("SMTP_USER") or "").strip(),
-        "SMTP_PASSWORD": cfg.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD") or "",
-        "SMTP_FROM": (cfg.get("SMTP_FROM") or os.environ.get("SMTP_FROM") or cfg.get("SMTP_USER") or "").strip(),
-        "SMTP_TLS": True,
-    }
-    smtp = corrigir_smtp(smtp)
-    if not smtp_configurado(smtp):
-        raise RuntimeError("Faltam SMTP_USER e SMTP_PASSWORD no Environment do Render.")
-    msg = _montar_mensagem(
-        smtp.get("SMTP_FROM") or smtp.get("SMTP_USER"),
-        lista,
-        assunto,
-        corpo,
-        html=html,
-        anexos=anexos,
+    smtp = corrigir_smtp(
+        {
+            "SMTP_HOST": (cfg.get("SMTP_HOST") or os.environ.get("SMTP_HOST") or "smtp.gmail.com").strip(),
+            "SMTP_PORT": cfg.get("SMTP_PORT") or int(os.environ.get("SMTP_PORT") or 587),
+            "SMTP_USER": (cfg.get("SMTP_USER") or os.environ.get("SMTP_USER") or "").strip(),
+            "SMTP_PASSWORD": cfg.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD") or "",
+            "SMTP_FROM": (cfg.get("SMTP_FROM") or os.environ.get("SMTP_FROM") or cfg.get("SMTP_USER") or "").strip(),
+            "SMTP_TLS": True,
+        }
     )
-    _tentar_smtp_gmail(smtp, msg)
-    print(f"e-mail enviado via SMTP para {lista}")
-    return lista
+    remetente = (smtp.get("SMTP_FROM") or smtp.get("SMTP_USER") or "").strip()
+    if not remetente:
+        remetente = lista[0]
+    erros = []
+    producao = ambiente_producao()
+    https_ok = _tem_envio_https(cfg)
+    smtp_ok = smtp_configurado(smtp)
+
+    def tentar_https():
+        return _enviar_via_https(remetente, lista, assunto, corpo, html=html, anexos=anexos)
+
+    def tentar_smtp():
+        if not smtp_ok:
+            raise RuntimeError("Faltam SMTP_USER e SMTP_PASSWORD.")
+        msg = _montar_mensagem(remetente, lista, assunto, corpo, html=html, anexos=anexos)
+        _tentar_smtp_gmail(smtp, msg)
+        return lista
+
+    def tentar_gmail_api():
+        token = access_token
+        de = remetente
+        if not token:
+            token, de_api = obter_access_token_gmail()
+            de = de or de_api
+        if not token:
+            raise RuntimeError("Gmail API sem token.")
+        return enviar_via_gmail_api(token, lista, assunto, corpo, remetente=de, anexos=anexos, html=html)
+
+    ordem = []
+    if producao:
+        if https_ok:
+            ordem.append(("HTTPS", tentar_https))
+        if smtp_ok:
+            ordem.append(("SMTP", tentar_smtp))
+        ordem.append(("Gmail API", tentar_gmail_api))
+    else:
+        if smtp_ok:
+            ordem.append(("SMTP", tentar_smtp))
+        if https_ok:
+            ordem.append(("HTTPS", tentar_https))
+        ordem.append(("Gmail API", tentar_gmail_api))
+
+    for nome, fn in ordem:
+        try:
+            fn()
+            print(f"e-mail enviado via {nome} para {lista}")
+            return lista
+        except Exception as e:
+            detalhe = _mensagem_smtp(e) if nome == "SMTP" else str(e)
+            if nome == "Gmail API" and "sem token" in detalhe.lower():
+                continue
+            erros.append(detalhe)
+            print(f"{nome}: {detalhe}")
+
+    if erros:
+        raise RuntimeError(" | ".join(erros))
+    raise RuntimeError(
+        "Sem meio de envio. No Render Free cadastre BREVO_API_KEY; em plano pago use SMTP_USER e SMTP_PASSWORD."
+    )
 
 
 def bytes_pdf(buffer):

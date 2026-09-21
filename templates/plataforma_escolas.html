@@ -15,6 +15,7 @@
         .alert { padding:12px; border-radius:8px; margin-bottom:16px; }
         .alert-danger { background:#f8d7da; color:#721c24; }
         .alert-success { background:#d4edda; color:#155724; }
+        .alert-warning { background:#fff3cd; color:#856404; }
         .hint { color:#64748b; font-size:.85rem; line-height:1.45; }
         .top { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
         .escola { border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-top:14px; }
@@ -48,11 +49,13 @@
             <h3>Envio automático de e-mail</h3>
             {% if diagnostico and diagnostico.status == 'pronto' %}
             <p class="alert alert-success">{{ diagnostico.detalhe }}</p>
+            {% elif diagnostico and diagnostico.status == 'bloqueado' %}
+            <p class="alert alert-warning">{{ diagnostico.detalhe }}</p>
             {% elif diagnostico %}
             <p class="alert alert-danger">{{ diagnostico.detalhe }}</p>
             {% endif %}
             <p class="hint">
-                Ao cadastrar ou reenviar, o servidor envia sozinho por SMTP (porta 587) com as variáveis do Render.
+                O plano Free do Render bloqueia SMTP. Com BREVO_API_KEY o servidor envia sozinho por HTTPS.
                 O código só chega no e-mail do destinatário.
             </p>
         </div>
