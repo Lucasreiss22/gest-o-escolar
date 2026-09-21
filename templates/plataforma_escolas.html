@@ -39,12 +39,29 @@
             </div>
             <a class="btn" href="{{ url_for('logout') }}">Sair</a>
         </div>
-        {% if google_login %}
-        <p class="hint" style="margin-bottom:16px;">Para o e-mail sair de verdade: <a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Permitir envio de e-mail</a> (abre o Google; não cria senha neste sistema).</p>
-        {% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
+
+        <div class="card-box">
+            <h3>Envio de e-mail</h3>
+            <p class="hint">O código da escola já aparece na lista abaixo. Para o Gmail receber o convite, cole o Gmail da plataforma e a <strong>senha de app</strong> (16 letras, não a senha normal). Depois clique em Reenviar e-mail na escola.</p>
+            <p style="margin-bottom:14px;"><a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Permitir envio de e-mail (Google)</a></p>
+            <form method="POST">
+                <input type="hidden" name="acao" value="salvar_smtp">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Gmail que envia</label>
+                        <input type="email" name="smtp_user" value="{{ smtp.smtp_user or smtp.smtp_from or '' }}" placeholder="seu@gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Senha de app (16 letras)</label>
+                        <input type="password" name="smtp_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off">
+                    </div>
+                </div>
+                <p style="margin-top:14px;"><button class="btn" type="submit">Salvar envio de e-mail</button></p>
+            </form>
+        </div>
 
         <div class="card-box">
             <h3>Nova escola</h3>
@@ -81,8 +98,11 @@
                     {% if not e.ativo %}Pausada
                     {% elif e.senha_definida %}Ativa
                     {% else %}Aguardando senha{% endif %}
-                    {% if e.convite_codigo and e.ativo %}
-                    <br>Código atual: <strong>{{ e.convite_codigo }}</strong>
+                    {% if e.convite_codigo %}
+                    <br>Código: <strong>{{ e.convite_codigo }}</strong>
+                    {% endif %}
+                    {% if e.convite_token %}
+                    <br>Link de senha: <a href="{{ url_for('ativar_escola', token=e.convite_token, _external=True) }}">abrir ativação</a>
                     {% endif %}
                 </div>
                 <div class="acoes">
@@ -96,7 +116,7 @@
                         <input type="hidden" name="escola_id" value="{{ e.id }}">
                         <button class="btn-sm btn-ambar" type="submit">Redefinir senha</button>
                     </form>
-                    {% if not e.senha_definida and e.convite_token and e.ativo %}
+                    {% if e.convite_token and e.ativo %}
                     <form method="POST">
                         <input type="hidden" name="acao" value="reenviar_convite">
                         <input type="hidden" name="token" value="{{ e.convite_token }}">

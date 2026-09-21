@@ -823,11 +823,6 @@ def _iniciar_sessao(usuario, email):
     session["usuario_id"] = usuario["id"]
     session["usuario_nome"] = usuario.get("nome") or usuario.get("nome_completo")
     session["usuario_papel"] = normalizar_papel(usuario.get("papel") or usuario.get("cargo") or "admin")
-    try:
-        garantir_tabelas_folha()
-        garantir_tabelas_pedagogicas()
-    except Exception as e:
-        print(f"Tabelas da escola no login: {e}")
     conexao = obter_conexao()
     if conexao:
         try:
@@ -874,25 +869,36 @@ def _entrar_escola(usuario, email, escola, origem_plataforma=False, plataforma_e
 def _usuario_admin_escola(escola):
     token = definir_banco_escola(escola["db_nome"])
     try:
-        garantir_tabelas_pedagogicas()
         conexao = obter_conexao()
         if not conexao:
-            raise RuntimeError("Não conectou no banco da escola.")
+            raise RuntimeError("Não conectou no espaço da escola.")
         try:
             with conexao.cursor() as cursor:
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS usuarios (
+                        id SERIAL PRIMARY KEY,
+                        nome VARCHAR(150) NOT NULL,
+                        email VARCHAR(150) UNIQUE NOT NULL,
+                        senha VARCHAR(255),
+                        papel VARCHAR(40) DEFAULT 'admin'
+                    )
+                    """
+                )
                 cursor.execute(
                     "SELECT * FROM usuarios WHERE LOWER(email) = %s",
                     (escola["email_admin"],),
                 )
                 usuario = cursor.fetchone()
-                if usuario:
-                    return usuario
-                cursor.execute(
-                    "INSERT INTO usuarios (nome, email, senha, papel) VALUES (%s, %s, %s, 'admin') RETURNING *",
-                    (escola["nome"], escola["email_admin"], secrets.token_urlsafe(12)),
-                )
-                usuario = cursor.fetchone()
+                if not usuario:
+                    cursor.execute(
+                        "INSERT INTO usuarios (nome, email, senha, papel) VALUES (%s, %s, %s, 'admin') RETURNING *",
+                        (escola["nome"], escola["email_admin"], secrets.token_urlsafe(12)),
+                    )
+                    usuario = cursor.fetchone()
             conexao.commit()
+            if not usuario:
+                raise RuntimeError("Não foi possível criar o usuário admin da escola.")
             return usuario
         finally:
             conexao.close()
@@ -1209,7 +1215,7 @@ def plataforma_autorizar_gmail():
     if not session.get("super_admin"):
         return redirect(url_for("login"))
     if not _registrar_oauth():
-        flash("Para enviar e-mail pelo Google, o envio ainda precisa ser autorizado na conta da plataforma.", "danger")
+                flash("Para enviar pelo Google, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no Render (Environment) e tente de novo. Enquanto isso, use Gmail + senha de app na caixa Envio de e-mail.", "danger")
         return redirect(url_for("plataforma_escolas"))
     redirect_uri = url_for("login_google_callback", _external=True)
     return oauth.google.authorize_redirect(
@@ -1311,10 +1317,20 @@ def plataforma_escolas():
             escola = buscar_escola_por_token(token)
             if not escola:
                 flash("Escola não encontrada.", "danger")
+            elif not escola.get("convite_codigo"):
+                flash(
+                    f"A escola {escola['nome']} já definiu senha, então o código antigo foi apagado. "
+                    "Use Redefinir senha para gerar um código novo, ou Acessar dados para entrar no perfil.",
+                    "danger",
+                )
             else:
                 ok, erro, link = _enviar_convite_escola(escola)
                 if erro:
-                    flash(f"O e-mail não chegou em {escola['email_admin']} ({erro}).", "danger")
+                    flash(
+                        f"O e-mail não chegou em {escola['email_admin']} ({erro}). "
+                        f"Código: {escola['convite_codigo']}. Link: {link}",
+                        "danger",
+                    )
                 else:
                     flash(f"E-mail com o código enviado para {escola['email_admin']}.", "success")
         elif acao == "alterar_email":

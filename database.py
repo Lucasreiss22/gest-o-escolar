@@ -381,19 +381,41 @@ def _tabela_existe(cursor, tabela):
     return bool(cursor.fetchone())
 
 
-def _garantir_coluna(cursor, tabela, coluna, spec):
-    if not _tabela_existe(cursor, tabela):
-        return
+def _mapa_colunas(cursor):
     cursor.execute(
         """
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s
-        """,
-        (tabela, coluna),
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+        """
     )
-    if cursor.fetchone():
-        return
+    mapa = {}
+    for row in cursor.fetchall() or []:
+        tabela = row["table_name"] if isinstance(row, dict) else row[0]
+        coluna = row["column_name"] if isinstance(row, dict) else row[1]
+        mapa.setdefault(tabela, set()).add(coluna)
+    return mapa
+
+
+def _garantir_coluna(cursor, tabela, coluna, spec, mapa=None):
+    if mapa is None:
+        if not _tabela_existe(cursor, tabela):
+            return
+        cursor.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s
+            """,
+            (tabela, coluna),
+        )
+        if cursor.fetchone():
+            return
+    else:
+        if tabela not in mapa or coluna in mapa.get(tabela, ()):
+            return
     cursor.execute(f'ALTER TABLE "{tabela}" ADD COLUMN {coluna} {spec}')
+    if mapa is not None:
+        mapa.setdefault(tabela, set()).add(coluna)
 
 
 def garantir_tabelas_pedagogicas():
@@ -470,8 +492,8 @@ def garantir_tabelas_pedagogicas():
                 );
                 """
             )
+            mapa = _mapa_colunas(cursor)
             for tabela, coluna, spec in (
-                ("calendario_eventos", "horario", "TIME"),
                 ("turmas", "professor_responsavel_id", "INT"),
                 ("turmas", "sala_id", "INT"),
                 ("turmas", "ano_letivo", "INT"),
@@ -494,32 +516,28 @@ def garantir_tabelas_pedagogicas():
                 ("disciplinas", "grade_json", "TEXT DEFAULT '[]'"),
                 ("turma_disciplinas", "grade_json", "TEXT DEFAULT '[]'"),
             ):
-                _garantir_coluna(cursor, tabela, coluna, spec)
-            if _tabela_existe(cursor, "frequencia"):
-                cursor.execute("UPDATE frequencia SET disciplina = '' WHERE disciplina IS NULL;")
-                cursor.execute(
-                    """
-                    SELECT conname FROM pg_constraint
-                    WHERE conrelid = 'frequencia'::regclass AND contype = 'u'
-                    """
-                )
-                for row in cursor.fetchall() or []:
-                    nome = row["conname"] if isinstance(row, dict) else row[0]
-                    if nome != "frequencia_aluno_dia_disc_key":
-                        cursor.execute(f'ALTER TABLE frequencia DROP CONSTRAINT IF EXISTS "{nome}"')
+                _garantir_coluna(cursor, tabela, coluna, spec, mapa)
+            if "frequencia" in mapa:
+                try:
+                    cursor.execute("UPDATE frequencia SET disciplina = '' WHERE disciplina IS NULL;")
+                except Exception:
+                    pass
                 cursor.execute(
                     """
                     SELECT 1 FROM pg_constraint WHERE conname = 'frequencia_aluno_dia_disc_key'
                     """
                 )
                 if not cursor.fetchone():
-                    cursor.execute(
-                        """
-                        ALTER TABLE frequencia
-                        ADD CONSTRAINT frequencia_aluno_dia_disc_key
-                        UNIQUE (aluno_id, data_aula, disciplina)
-                        """
-                    )
+                    try:
+                        cursor.execute(
+                            """
+                            ALTER TABLE frequencia
+                            ADD CONSTRAINT frequencia_aluno_dia_disc_key
+                            UNIQUE (aluno_id, data_aula, disciplina)
+                            """
+                        )
+                    except Exception:
+                        pass
             conexao.commit()
     except Exception as e:
         try:
@@ -615,6 +633,7 @@ def garantir_tabelas_folha():
                 );
                 """
             )
+            mapa = _mapa_colunas(cursor)
             for tabela, coluna, spec in (
                 ("funcionarios", "salario", "NUMERIC(12,2) DEFAULT 0"),
                 ("funcionarios", "tipo_contrato", "VARCHAR(30) DEFAULT 'clt_mensalista'"),
@@ -697,19 +716,13 @@ def garantir_tabelas_folha():
                 ("configuracoes", "smtp_from", "VARCHAR(150)"),
                 ("configuracoes", "smtp_tls", "BOOLEAN DEFAULT TRUE"),
             ):
-                _garantir_coluna(cursor, tabela, coluna, spec)
-            if _tabela_existe(cursor, "alunos"):
+                _garantir_coluna(cursor, tabela, coluna, spec, mapa)
+            if "alunos" in mapa:
                 try:
                     cursor.execute("ALTER TABLE alunos ALTER COLUMN sexo TYPE VARCHAR(20)")
                 except Exception:
                     pass
-                cursor.execute(
-                    """
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = current_schema() AND table_name = 'alunos' AND column_name = 'status'
-                    """
-                )
-                if cursor.fetchone():
+                if "status" in mapa.get("alunos", ()):
                     cursor.execute(
                         """
                         UPDATE alunos
