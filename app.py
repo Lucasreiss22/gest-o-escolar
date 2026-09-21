@@ -6,6 +6,7 @@ try:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
+from urllib.parse import quote
 from flask import Flask, flash, redirect, render_template, request, url_for, session, send_file
 from markupsafe import escape
 from werkzeug.exceptions import HTTPException
@@ -1105,6 +1106,50 @@ def _enviar_convite_escola(escola, access_token=None, link=None):
     return ok, erro, link
 
 
+def _gmail_manual_url(escola, link=None):
+    dest = (escola.get("email_admin") or "").strip()
+    token = escola.get("convite_token") or ""
+    if not dest or not token:
+        return ""
+    if not link:
+        link = url_for("ativar_escola", token=token, _external=True)
+    codigo = escola.get("convite_codigo") or ""
+    nome = escola.get("nome") or ""
+    assunto = f"Código de acesso da escola {nome}"
+    corpo = (
+        f"Olá,\n\n"
+        f"A escola {nome} foi cadastrada na Gestão Escolar.\n\n"
+        f"Seu código é: {codigo}\n\n"
+        f"Abra o link abaixo e digite só esse código:\n{link}\n\n"
+        f"Na página você escolhe a senha de entrada. O sistema não gera senha.\n"
+    )
+    return (
+        "https://mail.google.com/mail/?view=cm&fs=1&tf=1"
+        f"&to={quote(dest)}"
+        f"&su={quote(assunto)}"
+        f"&body={quote(corpo)}"
+    )
+
+
+def _avisar_envio(escola, ok, erro, acao="cadastro"):
+    dest = escola.get("email_admin") or ""
+    session.pop("gmail_manual", None)
+    if ok:
+        if acao == "cadastro":
+            flash(f"Escola {escola.get('nome')} cadastrada. Código enviado automaticamente para {dest}.", "success")
+        else:
+            flash(f"Código enviado automaticamente para {dest}.", "success")
+        return
+    url = _gmail_manual_url(escola)
+    if url:
+        session["gmail_manual"] = url
+    flash(
+        f"O envio automático não concluiu ({erro}). "
+        "Abaixo aparece a terceira opção, só para envio manual pelo Gmail.",
+        "danger",
+    )
+
+
 @app.route("/plataforma/autorizar-gmail")
 def plataforma_autorizar_gmail():
     if not session.get("super_admin"):
@@ -1192,18 +1237,7 @@ def plataforma_escolas():
                     excluir_escola(antiga["id"])
                 escola = cadastrar_escola(request.form.get("nome"), email_novo)
                 ok, erro, _link = _enviar_convite_escola(escola)
-                if ok:
-                    flash(
-                        f"Escola {escola['nome']} cadastrada. O código de acesso foi enviado para {escola['email_admin']}.",
-                        "success",
-                    )
-                else:
-                    flash(
-                        f"Escola {escola['nome']} cadastrada, mas o e-mail não saiu. "
-                        "Conecte o Gmail da plataforma uma vez e clique em Reenviar e-mail. "
-                        f"({erro})",
-                        "danger",
-                    )
+                _avisar_envio(escola, ok, erro, acao="cadastro")
             except Exception as e:
                 flash(f"Não foi possível cadastrar a escola: {e}", "danger")
         elif acao == "reenviar_convite":
@@ -1219,10 +1253,7 @@ def plataforma_escolas():
                 )
             else:
                 ok, erro, _link = _enviar_convite_escola(escola)
-                if ok:
-                    flash(f"Código enviado para {escola['email_admin']}.", "success")
-                else:
-                    flash(f"O e-mail não saiu para {escola['email_admin']}. Conecte o Gmail da plataforma. ({erro})", "danger")
+                _avisar_envio(escola, ok, erro, acao="reenviar")
         elif acao == "alterar_email":
             try:
                 escola = atualizar_email_admin_escola(
@@ -1230,14 +1261,7 @@ def plataforma_escolas():
                     request.form.get("email_admin"),
                 )
                 ok, erro, _link = _enviar_convite_escola(escola)
-                if ok:
-                    flash(f"Código enviado para {escola['email_admin']}.", "success")
-                else:
-                    flash(
-                        f"E-mail atualizado para {escola['email_admin']}, mas o envio falhou. "
-                        f"Conecte o Gmail da plataforma. ({erro})",
-                        "danger",
-                    )
+                _avisar_envio(escola, ok, erro, acao="reenviar")
             except Exception as e:
                 flash(f"Não foi possível alterar o e-mail: {e}", "danger")
         elif acao == "pausar_escola":
@@ -1265,17 +1289,7 @@ def plataforma_escolas():
             try:
                 escola = regenerar_convite_escola(request.form.get("escola_id"))
                 ok, erro, _link = _enviar_convite_escola(escola)
-                if ok:
-                    flash(
-                        f"A senha antiga da escola {escola['nome']} deixou de valer. "
-                        f"O código novo foi enviado para {escola['email_admin']}.",
-                        "success",
-                    )
-                else:
-                    flash(
-                        f"Senha invalidada, mas o e-mail não saiu. Conecte o Gmail da plataforma e clique em Reenviar. ({erro})",
-                        "danger",
-                    )
+                _avisar_envio(escola, ok, erro, acao="reenviar")
             except Exception as e:
                 flash(f"Não foi possível redefinir a senha: {e}", "danger")
         elif acao == "acessar_escola":
@@ -1333,11 +1347,13 @@ def plataforma_escolas():
             "resend": False,
             "brevo": False,
         }
+    gmail_manual = session.pop("gmail_manual", None)
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
         smtp=smtp,
         diagnostico=diagnostico,
+        gmail_manual=gmail_manual,
         google_login=_google_habilitado(),
         google_autorizado=bool((smtp or {}).get("google_refresh_token") if isinstance(smtp, dict) else getattr(smtp, "google_refresh_token", None)),
         google_redirect=url_for("login_google_callback", _external=True),

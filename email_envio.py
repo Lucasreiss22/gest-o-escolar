@@ -332,22 +332,42 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
         raise RuntimeError("Nenhum e-mail válido para envio. Cadastre o e-mail do responsável, professor ou destinatário.")
 
     cfg = carregar_smtp()
-    if not smtp_configurado(cfg):
-        raise RuntimeError(
-            "Faltam SMTP_USER e SMTP_PASSWORD no Environment do Render."
-        )
-    cfg = corrigir_smtp(cfg)
-    msg = _montar_mensagem(
-        cfg.get("SMTP_FROM") or cfg.get("SMTP_USER"),
-        lista,
-        assunto,
-        corpo,
-        html=html,
-        anexos=anexos,
-    )
-    _tentar_smtp_gmail(cfg, msg)
-    print(f"e-mail enviado via SMTP para {lista}")
-    return lista
+    erros = []
+    if smtp_configurado(cfg):
+        try:
+            cfg = corrigir_smtp(cfg)
+            msg = _montar_mensagem(
+                cfg.get("SMTP_FROM") or cfg.get("SMTP_USER"),
+                lista,
+                assunto,
+                corpo,
+                html=html,
+                anexos=anexos,
+            )
+            _tentar_smtp_gmail(cfg, msg)
+            print(f"e-mail enviado via SMTP para {lista}")
+            return lista
+        except Exception as e:
+            erros.append(f"SMTP: {e}")
+            print(erros[-1])
+    try:
+        token = access_token
+        remetente = (cfg.get("SMTP_FROM") if smtp_configurado(cfg) else "") or ""
+        if not token:
+            token, remetente_api = obter_access_token_gmail()
+            remetente = remetente or remetente_api
+        if token:
+            enviar_via_gmail_api(
+                token, lista, assunto, corpo, remetente=remetente, anexos=anexos, html=html
+            )
+            print(f"e-mail enviado via Gmail API para {lista}")
+            return lista
+    except Exception as e:
+        erros.append(f"Gmail API: {e}")
+        print(erros[-1])
+    if erros:
+        raise RuntimeError(" | ".join(erros))
+    raise RuntimeError("Faltam SMTP_USER e SMTP_PASSWORD no Environment do Render.")
 
 
 def bytes_pdf(buffer):
