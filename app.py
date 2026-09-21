@@ -66,7 +66,6 @@ from plataforma import (
     listar_escolas,
     salvar_google_oauth,
     salvar_google_refresh,
-    salvar_gmail_remetente,
     salvar_senha_plataforma,
     salvar_smtp_plataforma,
     localizar_escola_do_email,
