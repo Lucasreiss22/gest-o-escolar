@@ -227,6 +227,10 @@ def _tem_envio_https(cfg=None):
     return any(_chaves_api_email(cfg).values())
 
 
+def _forcar_smtp():
+    return (os.environ.get("SMTP_FORCE") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def diagnostico_envio():
     cfg = carregar_config()
     smtp_ok = smtp_configurado()
@@ -567,12 +571,16 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
         return enviar_via_gmail_api(token, lista, assunto, corpo, remetente=de, anexos=anexos, html=html)
 
     ordem = []
-    if producao:
-        if https_ok:
-            ordem.append(("HTTPS", tentar_https))
-        if smtp_ok:
-            ordem.append(("SMTP", tentar_smtp))
-        ordem.append(("Gmail API", tentar_gmail_api))
+    if producao and not _forcar_smtp():
+        if not https_ok:
+            print("envio: BREVO_API_KEY ausente no processo do Render")
+            raise RuntimeError(
+                "BREVO_API_KEY não está neste processo. No Render: Environment → "
+                "Add Environment Variable, KEY exatamente BREVO_API_KEY, "
+                "cole a chave xkeysib-..., Save Changes e espere o deploy acabar. "
+                "Depois use Reenviar e-mail (não cadastre a escola de novo)."
+            )
+        ordem.append(("HTTPS", tentar_https))
     else:
         if smtp_ok:
             ordem.append(("SMTP", tentar_smtp))

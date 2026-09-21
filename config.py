@@ -2,7 +2,7 @@ import os
 
 try:
     from dotenv import load_dotenv
-    load_dotenv(override=True)
+    load_dotenv(override=False)
 except ImportError:
     pass
 
@@ -24,6 +24,14 @@ def _int_env(nome, padrao):
 
 def ambiente_producao():
     return _bool("RENDER") or (os.environ.get("FLASK_ENV") or "").lower() == "production"
+
+
+def _chave_api(*nomes):
+    for nome in nomes:
+        bruto = (os.environ.get(nome) or "").strip().strip('"').strip("'")
+        if bruto:
+            return bruto
+    return ""
 
 
 def carregar_config():
@@ -51,9 +59,9 @@ def carregar_config():
         "SMTP_PASSWORD": smtp_pass,
         "SMTP_FROM": smtp_from,
         "SMTP_TLS": _bool("SMTP_TLS", True),
-        "BREVO_API_KEY": (os.environ.get("BREVO_API_KEY") or "").strip(),
-        "RESEND_API_KEY": (os.environ.get("RESEND_API_KEY") or "").strip(),
-        "SENDGRID_API_KEY": (os.environ.get("SENDGRID_API_KEY") or "").strip(),
+        "BREVO_API_KEY": _chave_api("BREVO_API_KEY", "BREVO_KEY", "SIB_API_KEY"),
+        "RESEND_API_KEY": _chave_api("RESEND_API_KEY"),
+        "SENDGRID_API_KEY": _chave_api("SENDGRID_API_KEY"),
         "PREFERRED_URL_SCHEME": "https" if ambiente_producao() else "http",
         "SUPER_ADMIN_EMAIL": super_email,
     }
