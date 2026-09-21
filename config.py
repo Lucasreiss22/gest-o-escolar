@@ -28,10 +28,11 @@ def ambiente_producao():
 
 def carregar_config():
     secret = os.environ.get("SECRET_KEY") or "chave_secreta_gestao_escolar"
-    smtp_user = os.environ.get("SMTP_USER", "").strip()
-    smtp_pass = (os.environ.get("SMTP_PASSWORD") or "").replace(" ", "").strip()
+    smtp_user = (os.environ.get("SMTP_USER") or os.environ.get("MAIL_USERNAME") or "").strip()
+    smtp_pass = (os.environ.get("SMTP_PASSWORD") or os.environ.get("MAIL_PASSWORD") or "").replace(" ", "").strip()
     super_email = (os.environ.get("SUPER_ADMIN_EMAIL") or "lucaslagoasreis@gmail.com").strip().lower()
     smtp_user = smtp_user or (super_email if smtp_pass else "")
+    smtp_from = (os.environ.get("SMTP_FROM") or os.environ.get("MAIL_DEFAULT_SENDER") or smtp_user).strip()
     return {
         "SECRET_KEY": secret,
         "DATABASE_URL": "".join((os.environ.get("DATABASE_URL") or "").split()).replace("[", "").replace("]", ""),
@@ -44,11 +45,11 @@ def carregar_config():
         "GOOGLE_CLIENT_ID": os.environ.get("GOOGLE_CLIENT_ID", "").strip(),
         "GOOGLE_CLIENT_SECRET": os.environ.get("GOOGLE_CLIENT_SECRET", "").strip(),
         "ADMIN_EMAILS": os.environ.get("ADMIN_EMAILS", "").strip(),
-        "SMTP_HOST": os.environ.get("SMTP_HOST", "").strip() or ("smtp.gmail.com" if smtp_pass else ""),
-        "SMTP_PORT": _int_env("SMTP_PORT", 587),
+        "SMTP_HOST": (os.environ.get("SMTP_HOST") or os.environ.get("MAIL_SERVER") or "").strip() or ("smtp.gmail.com" if smtp_pass else ""),
+        "SMTP_PORT": _int_env("SMTP_PORT", _int_env("MAIL_PORT", 587)),
         "SMTP_USER": smtp_user,
         "SMTP_PASSWORD": smtp_pass,
-        "SMTP_FROM": (os.environ.get("SMTP_FROM") or smtp_user).strip(),
+        "SMTP_FROM": smtp_from,
         "SMTP_TLS": _bool("SMTP_TLS", True),
         "PREFERRED_URL_SCHEME": "https" if ambiente_producao() else "http",
         "SUPER_ADMIN_EMAIL": super_email,

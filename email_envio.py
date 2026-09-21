@@ -214,21 +214,79 @@ def obter_access_token_gmail():
         return None, remetente
 
 
+def diagnostico_envio():
+    cfg = carregar_config()
+    smtp_ok = smtp_configurado()
+    return {
+        "smtp_user": bool(cfg.get("SMTP_USER")),
+        "smtp_password": bool(cfg.get("SMTP_PASSWORD")),
+        "smtp_host": cfg.get("SMTP_HOST") or "—",
+        "smtp_port": cfg.get("SMTP_PORT") or 587,
+        "producao_render": ambiente_producao(),
+        "gmail_api": False,
+        "resend": False,
+        "brevo": False,
+        "status": "pronto" if smtp_ok else "faltando",
+        "detalhe": (
+            "O servidor envia sozinho com SMTP_USER e SMTP_PASSWORD do Render. Ninguém é redirecionado ao Google."
+            if smtp_ok
+            else "Faltam SMTP_USER e SMTP_PASSWORD no Environment do Render."
+        ),
+    }
+
+
+def _smtp_ipv4(host, porta, timeout=12):
+    import socket
+    original = socket.getaddrinfo
+
+    def so_ipv4(hostname, port, family=0, type=0, proto=0, flags=0):
+        infos = original(hostname, port, socket.AF_INET, type, proto, flags)
+        if infos:
+            return infos
+        return original(hostname, port, family, type, proto, flags)
+
+    socket.getaddrinfo = so_ipv4
+    try:
+        return smtplib.SMTP(host, porta, timeout=timeout)
+    finally:
+        socket.getaddrinfo = original
+
+
+def _smtp_ssl_ipv4(host, porta, timeout=12):
+    import socket
+    original = socket.getaddrinfo
+
+    def so_ipv4(hostname, port, family=0, type=0, proto=0, flags=0):
+        infos = original(hostname, port, socket.AF_INET, type, proto, flags)
+        if infos:
+            return infos
+        return original(hostname, port, family, type, proto, flags)
+
+    socket.getaddrinfo = so_ipv4
+    try:
+        return smtplib.SMTP_SSL(host, porta, timeout=timeout)
+    finally:
+        socket.getaddrinfo = original
+
+
 def _tentar_smtp_gmail(cfg, msg):
     usuario = (cfg.get("SMTP_USER") or "").strip()
     senha_bruta = cfg.get("SMTP_PASSWORD") or ""
+    host = (cfg.get("SMTP_HOST") or "smtp.gmail.com").strip() or "smtp.gmail.com"
     senhas = []
     for item in (senha_bruta, senha_smtp_normalizada(senha_bruta)):
         if item and item not in senhas:
             senhas.append(item)
+    try:
+        porta_cfg = int(cfg.get("SMTP_PORT") or 587)
+    except (TypeError, ValueError):
+        porta_cfg = 587
+    tentativas = [(False, porta_cfg or 587), (True, 465)] if porta_cfg != 465 else [(True, 465), (False, 587)]
     ultimo = None
     for senha in senhas:
-        for usar_ssl, porta in ((False, 587),):
+        for usar_ssl, porta in tentativas:
             try:
-                if usar_ssl:
-                    smtp = smtplib.SMTP_SSL("smtp.gmail.com", porta, timeout=8)
-                else:
-                    smtp = smtplib.SMTP("smtp.gmail.com", porta, timeout=8)
+                smtp = _smtp_ssl_ipv4(host, porta) if usar_ssl else _smtp_ipv4(host, porta)
                 with smtp:
                     if not usar_ssl:
                         smtp.starttls()
@@ -239,18 +297,9 @@ def _tentar_smtp_gmail(cfg, msg):
                 ultimo = e
             except (OSError, smtplib.SMTPException) as e:
                 ultimo = e
-                if getattr(e, "errno", None) in {11001, 11002, 8} or "getaddrinfo" in str(e).lower():
-                    raise RuntimeError(
-                        "Sem internet ou o Gmail não foi encontrado. Confira a conexão e tente de novo."
-                    ) from e
-                if getattr(e, "errno", None) in {11001, 11002, 8} or "getaddrinfo" in str(e).lower():
-                    raise RuntimeError(
-                        "Sem internet ou o Gmail não foi encontrado. Confira a conexão e tente de novo."
-                    ) from e
     if isinstance(ultimo, smtplib.SMTPAuthenticationError):
         raise RuntimeError(
-            "O Gmail recusou o envio automático. Isso não é senha criada neste sistema: "
-            "é o Google bloqueando o disparo. Use Permitir envio de e-mail na tela da plataforma."
+            "O Gmail recusou a senha de app. Confira SMTP_USER e SMTP_PASSWORD no Environment do Render."
         ) from ultimo
     if ultimo:
         raise ultimo
@@ -282,24 +331,10 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
     if not lista:
         raise RuntimeError("Nenhum e-mail válido para envio. Cadastre o e-mail do responsável, professor ou destinatário.")
 
-    token, remetente_api = obter_access_token_gmail()
-    token = access_token or token
-    remetente = (remetente_api or carregar_config().get("SMTP_FROM") or carregar_config().get("SMTP_USER") or "").strip()
-    if token:
-        enviar_via_gmail_api(
-            token, lista, assunto, corpo, remetente=remetente, anexos=anexos, html=html
-        )
-        return lista
-
-    if ambiente_producao():
-        raise RuntimeError(
-            "O servidor não envia SMTP. O Gmail abre com o código pronto para você clicar em Enviar."
-        )
-
     cfg = carregar_smtp()
     if not smtp_configurado(cfg):
         raise RuntimeError(
-            "Não foi possível enviar o e-mail. Autorize o Gmail da plataforma (Permitir envio de e-mail) e tente de novo."
+            "Faltam SMTP_USER e SMTP_PASSWORD no Environment do Render."
         )
     cfg = corrigir_smtp(cfg)
     msg = _montar_mensagem(
@@ -311,6 +346,7 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
         anexos=anexos,
     )
     _tentar_smtp_gmail(cfg, msg)
+    print(f"e-mail enviado via SMTP para {lista}")
     return lista
 
 
