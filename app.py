@@ -129,6 +129,12 @@ def _qualquer_erro(e):
         return e
     return _pagina_erro(e)
 
+
+@app.route("/ping")
+@app.route("/health")
+def ping():
+    return "ok", 200, {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"}
+
 oauth = None
 try:
     from authlib.integrations.flask_client import OAuth as _OAuth
@@ -339,7 +345,7 @@ def inject_acl():
     google_login = False
     smtp_ok = bool((_CFG.get("SMTP_PASSWORD") and _CFG.get("SMTP_USER")) or session.get("gmail_envio"))
     login_publico = (request.endpoint or "") in {
-        "login", "logout", "login_google", "login_google_callback",
+        "login", "logout", "ping", "login_google", "login_google_callback",
         "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
         "plataforma_escolas", "plataforma_autorizar_gmail", "plataforma_voltar",
     }
@@ -373,7 +379,7 @@ def encerrar_tenant(_erro):
 def proteger_rotas():
     endpoint = request.endpoint
     publicos = {
-        None, "login", "logout", "static", "login_google", "login_google_callback",
+        None, "login", "logout", "static", "ping", "login_google", "login_google_callback",
         "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
     }
     if endpoint in publicos:
