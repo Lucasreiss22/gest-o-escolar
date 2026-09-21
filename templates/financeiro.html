@@ -133,7 +133,7 @@
                         <option value="Atrasado" {% if status == 'Atrasado' %}selected{% endif %}>Atrasado</option>
                     </select>
                 </div>
-                {% endif %}
+            {% endif %}
                 <button type="submit" class="btn btn-primary">Ver mês</button>
             </form>
             <div class="fin-reports">
@@ -611,7 +611,7 @@
                     <button type="submit" class="btn btn-warning" style="width: 100%;">Gerar Lote de Mensalidades</button>
                 </form>
             </div>
-            </div>
+        </div>
             </div>
         </details>
 
@@ -620,7 +620,7 @@
             <h3 style="font-size: 1.05rem; color: #2c3e50; margin-bottom: 12px;">
                 Cobranças de {{ mes_label }}
                 {% if status %}<span style="font-size: 0.85rem; color: #3498db; font-weight: normal;">({{ status }})</span>{% endif %}
-            </h3>
+                </h3>
 
             <div class="fin-mobile-list">
                 {% if lancamentos %}
@@ -629,7 +629,7 @@
                         <div class="fin-item-top">
                             <strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong>
                             <strong>R$ {{ "%.2f"|format(item.valor|float if item.valor else 0) }}</strong>
-                        </div>
+                    </div>
                         <div class="fin-item-meta">
                             {{ item.descricao or '-' }} · vence
                             {{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}
@@ -641,7 +641,7 @@
                             {% else %}
                                 <span class="badge badge-atrasado">Atrasado</span>
                             {% endif %}
-                        </div>
+                    </div>
                         <div class="fin-item-acoes">
                             {% if item.status != 'Pago' %}
                             <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center; flex: 1;">
@@ -654,7 +654,7 @@
                                     <option value="Cartão de Crédito">Cartão</option>
                                     <option value="Boleto">Boleto</option>
                                     <option value="Transferência">TED</option>
-                                </select>
+                        </select>
                                 <button type="submit" class="btn btn-success" style="padding: 6px 10px; font-size: 0.8rem;">Baixa</button>
                             </form>
                             {% endif %}

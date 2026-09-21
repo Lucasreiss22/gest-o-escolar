@@ -16,7 +16,7 @@
 <body class="login-page">
     <div class="login-card">
         <h2>Gestão Escolar</h2>
-        <p class="hint">Entre com um e-mail válido. O administrador da plataforma confirma o acesso com código enviado ao Gmail.</p>
+        <p class="hint">Entre com um e-mail válido. O código de confirmação chega só no e-mail, nunca nesta tela.</p>
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}

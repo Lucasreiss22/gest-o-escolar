@@ -29,7 +29,6 @@
         .btn-vermelho { background:#b91c1c; color:#fff; }
         a.btn-sm { text-decoration:none; display:inline-block; line-height:1.25; }
         .check { display:flex; gap:8px; align-items:flex-start; margin-top:12px; font-size:.85rem; }
-        .btn-gmail { display:inline-block; margin-top:8px; padding:10px 16px; background:#15803d; color:#fff; border-radius:6px; text-decoration:none; font-weight:600; }
     </style>
 </head>
 <body>
@@ -44,32 +43,23 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
-        {% if abrir_gmail %}
-        <div class="alert alert-success">
-            O Gmail abre com o código já preenchido para o cliente. Clique em <strong>Enviar</strong> na janela do Gmail.
-            <br>
-            <a id="abrir-gmail" class="btn-gmail" href="{{ abrir_gmail }}" target="_blank" rel="noopener">Enviar código pelo Gmail agora</a>
-        </div>
-        <script>
-            (function () {
-                var url = {{ abrir_gmail|tojson }};
-                window.open(url, "_blank");
-            })();
-        </script>
-        {% endif %}
 
         <div class="card-box">
-            <h3>Envio de e-mail</h3>
+            <h3>Envio automático de e-mail</h3>
+            {% if diagnostico and diagnostico.status == 'pronto' %}
+            <p class="alert alert-success">{{ diagnostico.detalhe }}</p>
+            {% elif diagnostico %}
+            <p class="alert alert-danger">{{ diagnostico.detalhe }}</p>
+            {% endif %}
             <p class="hint">
-                Ao <strong>cadastrar</strong>, <strong>reenviar</strong> ou <strong>redefinir senha</strong>,
-                o Gmail abre sozinho com o código e o link prontos. Não precisa autorizar envio à parte:
-                basta clicar em Enviar na janela do Gmail para o código chegar na caixa do cliente.
+                O servidor envia sozinho com <code>SMTP_USER</code> e <code>SMTP_PASSWORD</code> do Render (senha de app).
+                Não abre o Google. O código de segurança só chega no e-mail do destinatário.
             </p>
         </div>
 
         <div class="card-box">
             <h3>Nova escola</h3>
-            <p class="hint">Depois de cadastrar, o Gmail abre sozinho com o código para o e-mail da escola.</p>
+            <p class="hint">Ao cadastrar, o código vai para o e-mail da escola. O cliente informa o código e cria a senha.</p>
             <form method="POST">
                 <input type="hidden" name="acao" value="criar_escola">
                 <div class="form-grid">
@@ -79,7 +69,7 @@
                     </div>
                     <div class="form-group">
                         <label>E-mail que recebe o código</label>
-                        <input type="email" name="email_admin" required placeholder="lucaslagoasreis222@gmail.com">
+                        <input type="email" name="email_admin" required placeholder="escola@gmail.com">
                     </div>
                 </div>
                 <label class="check">
@@ -101,13 +91,7 @@
                     Status:
                     {% if not e.ativo %}Pausada
                     {% elif e.senha_definida %}Ativa
-                    {% else %}Aguardando senha{% endif %}
-                    {% if e.convite_codigo %}
-                    <br>Código: <strong>{{ e.convite_codigo }}</strong>
-                    {% endif %}
-                    {% if e.convite_token %}
-                    <br>Link de senha: <a href="{{ url_for('ativar_escola', token=e.convite_token, _external=True) }}">abrir ativação</a>
-                    {% endif %}
+                    {% else %}Aguardando senha (código no e-mail){% endif %}
                 </div>
                 <div class="acoes">
                     <form method="POST">
@@ -120,9 +104,7 @@
                         <input type="hidden" name="escola_id" value="{{ e.id }}">
                         <button class="btn-sm btn-ambar" type="submit">Redefinir senha</button>
                     </form>
-                    {% if e.gmail_compose %}
-                    <a class="btn-sm btn-verde" href="{{ e.gmail_compose }}" target="_blank" rel="noopener">Reenviar e-mail</a>
-                    {% elif e.convite_token and e.ativo %}
+                    {% if e.convite_token and e.ativo %}
                     <form method="POST">
                         <input type="hidden" name="acao" value="reenviar_convite">
                         <input type="hidden" name="token" value="{{ e.convite_token }}">
