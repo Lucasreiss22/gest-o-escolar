@@ -86,7 +86,7 @@ def _destino_postgres(dsn, dbname, sslmode):
         password=password,
         sslmode=sslmode or "require",
         cursor_factory=psycopg2.extras.RealDictCursor,
-        connect_timeout=15,
+        connect_timeout=8,
     )
 
 

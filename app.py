@@ -389,7 +389,7 @@ def proteger_rotas():
         return None
     if session.get("escola_id"):
         escola = buscar_escola_por_id(session.get("escola_id"))
-        if not escola or not escola.get("ativo", True):
+        if escola is not None and not escola.get("ativo", True):
             session.clear()
             flash("Esta escola está pausada ou foi removida. O acesso ao sistema está bloqueado.", "danger")
             return redirect(url_for("login"))
@@ -821,27 +821,9 @@ def nome_mes_extenso(mes_filtro):
 
 def _iniciar_sessao(usuario, email):
     session["usuario_id"] = usuario["id"]
-    session["usuario_nome"] = usuario.get("nome") or usuario.get("nome_completo")
+    session["usuario_nome"] = usuario.get("nome") or usuario.get("nome_completo") or email
     session["usuario_papel"] = normalizar_papel(usuario.get("papel") or usuario.get("cargo") or "admin")
-    conexao = obter_conexao()
-    if conexao:
-        try:
-            with conexao.cursor() as cursor:
-                cursor.execute(
-                    "SELECT id FROM funcionarios WHERE usuario_id = %s OR LOWER(email) = LOWER(%s) LIMIT 1",
-                    (usuario["id"], email),
-                )
-                func = cursor.fetchone()
-                if func:
-                    session["funcionario_id"] = func["id"] if isinstance(func, dict) else func[0]
-        except Exception as e:
-            print(f"Funcionario no login: {e}")
-            try:
-                conexao.rollback()
-            except Exception:
-                pass
-        finally:
-            conexao.close()
+    session["usuario_email"] = email
 
 
 def _entrar_plataforma(admin):
@@ -863,7 +845,6 @@ def _entrar_escola(usuario, email, escola, origem_plataforma=False, plataforma_e
         session["origem_plataforma"] = True
         session["plataforma_email"] = plataforma_email or email_super_admin()
     _iniciar_sessao(usuario, email)
-    session["usuario_email"] = email
 
 
 def _usuario_admin_escola(escola):
@@ -1136,41 +1117,43 @@ def _login_senha(email):
         if criar and not session.get("otp_ok"):
             flash("Confirme o código enviado ao e-mail antes de criar ou redefinir a senha.", "danger")
             return redirect(url_for("login_conectar_gmail"))
-    escola = None if eh_super_admin(email) else (buscar_escola_por_email(email) or localizar_escola_do_email(email))
-    if request.method == "POST":
-        senha = (request.form.get("senha") or "").strip()
-        senha2 = (request.form.get("senha2") or "").strip()
-        if criar:
-            if senha != senha2:
-                flash("As senhas não coincidem.", "danger")
-                return render_template("login_senha.html", email=email, criar=True)
-            if len(senha) < 6:
-                flash("A senha deve ter pelo menos 6 caracteres.", "danger")
-                return render_template("login_senha.html", email=email, criar=True)
-            admin = salvar_senha_plataforma(email, senha)
-            session.pop("otp_ok", None)
-            session.pop("redefinir_senha", None)
+    if request.method != "POST":
+        return render_template("login_senha.html", email=email, criar=criar)
+    senha = (request.form.get("senha") or "").strip()
+    senha2 = (request.form.get("senha2") or "").strip()
+    if criar:
+        if senha != senha2:
+            flash("As senhas não coincidem.", "danger")
+            return render_template("login_senha.html", email=email, criar=True)
+        if len(senha) < 6:
+            flash("A senha deve ter pelo menos 6 caracteres.", "danger")
+            return render_template("login_senha.html", email=email, criar=True)
+        admin = salvar_senha_plataforma(email, senha)
+        session.pop("otp_ok", None)
+        session.pop("redefinir_senha", None)
+        _entrar_plataforma(admin)
+        return redirect(url_for("plataforma_escolas"))
+    if eh_super_admin(email):
+        admin = buscar_admin_plataforma(email)
+        armazenada = (admin.get("senha") if admin else "") or ""
+        if admin and armazenada.strip() == senha:
             _entrar_plataforma(admin)
             return redirect(url_for("plataforma_escolas"))
-        if eh_super_admin(email):
-            admin = buscar_admin_plataforma(email)
-            armazenada = (admin.get("senha") if admin else "") or ""
-            if admin and armazenada.strip() == senha:
-                _entrar_plataforma(admin)
-                return redirect(url_for("plataforma_escolas"))
-            flash("Senha incorreta. Use a senha que você criou neste sistema (não a do Gmail e não 123456, a menos que tenha escolhido essa).", "danger")
-        elif escola:
-            if not escola.get("ativo", True):
-                flash("Esta escola está pausada. O acesso está bloqueado.", "danger")
-                return redirect(url_for("login"))
-            usuario, escola = usuario_da_escola(email, senha, escola)
-            if usuario:
-                _entrar_escola(usuario, email, escola)
-                return redirect(url_for("dashboard"))
-            flash("Senha incorreta.", "danger")
-        else:
-            flash("E-mail ou senha incorretos.", "danger")
-    return render_template("login_senha.html", email=email, criar=criar)
+        flash("Senha incorreta. Use a senha que você criou neste sistema (não a do Gmail e não 123456, a menos que tenha escolhido essa).", "danger")
+        return render_template("login_senha.html", email=email, criar=False)
+    escola = buscar_escola_por_email(email)
+    if not escola:
+        flash("E-mail ou senha incorretos.", "danger")
+        return render_template("login_senha.html", email=email, criar=False)
+    if not escola.get("ativo", True):
+        flash("Esta escola está pausada. O acesso está bloqueado.", "danger")
+        return redirect(url_for("login"))
+    usuario, escola = usuario_da_escola(email, senha, escola)
+    if usuario:
+        _entrar_escola(usuario, email, escola)
+        return redirect(url_for("dashboard"))
+    flash("Senha incorreta.", "danger")
+    return render_template("login_senha.html", email=email, criar=False)
 
 
 def _enviar_convite_escola(escola, access_token=None, link=None):
@@ -1787,12 +1770,6 @@ def dashboard():
         return redirect(url_for("login"))
 
     metrics = {"total_alunos": 0, "total_professores": 0, "total_turmas": 0, "total_usuarios": 0, "total_funcionarios": 0}
-    try:
-        garantir_tabelas_folha()
-        garantir_tabelas_pedagogicas()
-    except Exception as e:
-        print(f"Dashboard tabelas: {e}")
-
     conexao = obter_conexao()
     if conexao:
         try:

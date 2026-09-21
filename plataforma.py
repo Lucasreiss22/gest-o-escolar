@@ -102,7 +102,6 @@ def garantir_plataforma():
 
 
 def buscar_admin_plataforma(email):
-    garantir_plataforma()
     conexao = obter_conexao(master=True)
     if not conexao:
         return None
@@ -140,7 +139,6 @@ def salvar_senha_plataforma(email, senha, nome=None):
 
 
 def buscar_escola_por_email(email):
-    garantir_plataforma()
     conexao = obter_conexao(master=True)
     if not conexao:
         return None
@@ -151,12 +149,14 @@ def buscar_escola_por_email(email):
                 (normalizar_email(email),),
             )
             return cursor.fetchone()
+    except Exception as e:
+        print(f"buscar_escola_por_email: {e}")
+        return None
     finally:
         conexao.close()
 
 
 def listar_escolas():
-    garantir_plataforma()
     conexao = obter_conexao(master=True)
     if not conexao:
         return []
@@ -169,7 +169,6 @@ def listar_escolas():
 
 
 def buscar_escola_por_id(escola_id):
-    garantir_plataforma()
     conexao = obter_conexao(master=True)
     if not conexao:
         return None
