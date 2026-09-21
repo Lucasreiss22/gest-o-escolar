@@ -45,7 +45,7 @@
 
         <div class="card-box">
             <h3>Envio de e-mail</h3>
-            <p class="hint">O código da escola já aparece na lista abaixo. Para o Gmail receber o convite, cole o Gmail da plataforma e a <strong>senha de app</strong> (16 letras, não a senha normal). Depois clique em Reenviar e-mail na escola.</p>
+            <p class="hint">O Render <strong>não envia Gmail por SMTP</strong> (erro Network is unreachable). O código da escola aparece na lista. Para o e-mail chegar de verdade é preciso <strong>Permitir envio de e-mail (Google)</strong> com Client ID no Environment do Render.</p>
             <p style="margin-bottom:14px;"><a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Permitir envio de e-mail (Google)</a></p>
             <form method="POST">
                 <input type="hidden" name="acao" value="salvar_smtp">

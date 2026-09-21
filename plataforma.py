@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import psycopg2
 
 from config import carregar_config
-from database import definir_banco_escola, limpar_banco_escola, obter_conexao
+from database import definir_banco_escola, limpar_banco_escola, obter_conexao, obter_conexao_nova
 from email_envio import enviar_email, exigencia_email, normalizar_email, smtp_configurado
 
 
@@ -210,17 +210,20 @@ def excluir_escola(escola_id):
     finally:
         conexao.close()
     if re.fullmatch(r"[a-z][a-z0-9_]{1,62}", db_nome or ""):
-        admin = obter_conexao(master=True)
-        if admin:
-            try:
+        admin = None
+        try:
+            admin = obter_conexao_nova()
+            admin.autocommit = True
+            with admin.cursor() as cursor:
+                cursor.execute(f'DROP SCHEMA IF EXISTS "{db_nome}" CASCADE')
+        except Exception as e:
+            print(f"DROP SCHEMA {db_nome}: {e}")
+        finally:
+            if admin:
                 try:
-                    admin.set_session(autocommit=True)
+                    admin.close()
                 except Exception:
-                    admin.autocommit = True
-                with admin.cursor() as cursor:
-                    cursor.execute(f'DROP SCHEMA IF EXISTS "{db_nome}" CASCADE')
-            finally:
-                admin.close()
+                    pass
     return escola
 
 
@@ -382,7 +385,6 @@ def credenciais_google():
     cid = (cfg.get("GOOGLE_CLIENT_ID") or "").strip()
     secret = (cfg.get("GOOGLE_CLIENT_SECRET") or "").strip()
     refresh = ""
-    garantir_plataforma()
     conexao = obter_conexao(master=True)
     if conexao:
         try:
@@ -478,14 +480,12 @@ def _conectar_postgres():
 def criar_banco_escola(db_nome):
     if not re.fullmatch(r"[a-z][a-z0-9_]{1,62}", db_nome):
         raise ValueError("Nome de banco inválido.")
-    conexao = obter_conexao(master=True)
-    if not conexao:
-        raise RuntimeError("Sem conexão com o Postgres para criar o espaço da escola.")
     try:
-        try:
-            conexao.set_session(autocommit=True)
-        except Exception:
-            conexao.autocommit = True
+        conexao = obter_conexao_nova()
+    except Exception as e:
+        raise RuntimeError("Sem conexão com o Postgres para criar o espaço da escola.") from e
+    try:
+        conexao.autocommit = True
         with conexao.cursor() as cursor:
             cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{db_nome}"')
     except Exception as e:
@@ -494,7 +494,10 @@ def criar_banco_escola(db_nome):
             f"Detalhe: {e}"
         ) from e
     finally:
-        conexao.close()
+        try:
+            conexao.close()
+        except Exception:
+            pass
 
 
 def bootstrap_banco_escola(nome_escola, email_admin):

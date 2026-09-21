@@ -56,8 +56,54 @@ def erro_conexao_atual():
     return ultimo_erro_pg
 
 
+_params_pg = None
+_raw_pg = None
+_tabelas_ok = set()
+
+
+class _ConexaoReuso:
+    """close() devolve a conexão ao worker em vez de derrubar o SSL com o Supabase."""
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def cursor(self, *args, **kwargs):
+        return self._raw.cursor(*args, **kwargs)
+
+    def commit(self):
+        return self._raw.commit()
+
+    def rollback(self):
+        try:
+            return self._raw.rollback()
+        except Exception:
+            return None
+
+    def close(self):
+        try:
+            self._raw.rollback()
+        except Exception:
+            pass
+
+    def set_session(self, *args, **kwargs):
+        return self._raw.set_session(*args, **kwargs)
+
+    @property
+    def autocommit(self):
+        return self._raw.autocommit
+
+    @autocommit.setter
+    def autocommit(self, valor):
+        self._raw.autocommit = valor
+
+    @property
+    def closed(self):
+        return self._raw.closed
+
+
 def _destino_postgres(dsn, dbname, sslmode):
     """Converte host Direct (IPv6) do Supabase para Session pooler (IPv4)."""
+    global _params_pg
     if dsn.startswith("postgres://"):
         dsn = "postgresql://" + dsn[len("postgres://"):]
     parsed = urlparse(dsn)
@@ -77,7 +123,6 @@ def _destino_postgres(dsn, dbname, sslmode):
             user = f"postgres.{ref}"
     if "yqkptzxrkfreisydyir" in (user or ""):
         user = user.replace("yqkptzxrkfreisydyir", "yqkptzkxrklreisydyir")
-    print(f"Postgres alvo: {host} user={user}")
     return dict(
         host=host,
         port=port,
@@ -86,7 +131,11 @@ def _destino_postgres(dsn, dbname, sslmode):
         password=password,
         sslmode=sslmode or "require",
         cursor_factory=psycopg2.extras.RealDictCursor,
-        connect_timeout=8,
+        connect_timeout=5,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=3,
     )
 
 
@@ -118,11 +167,39 @@ def _aplicar_schema(conexao, schema):
             cursor.execute(f'SET search_path TO "{nome}", public')
 
 
-def obter_conexao(master=False):
-    """Abre conexão no mesmo Postgres (Supabase não cria DATABASE). Escola usa schema próprio."""
-    global ultimo_erro_pg
-    ultimo_erro_pg = ""
+def _params_conexao():
+    global _params_pg
+    if _params_pg:
+        return dict(_params_pg)
     cfg = carregar_config()
+    dsn = cfg.get("DATABASE_URL") or ""
+    master_nome = nome_banco_master()
+    if dsn:
+        params = _destino_postgres(dsn, master_nome, cfg.get("DB_SSLMODE") or "require")
+    else:
+        params = dict(
+            host=cfg["DB_HOST"],
+            port=cfg["DB_PORT"],
+            dbname=master_nome,
+            user=cfg["DB_USER"],
+            password=cfg["DB_PASSWORD"],
+            sslmode=cfg.get("DB_SSLMODE") or "prefer",
+            cursor_factory=psycopg2.extras.RealDictCursor,
+            connect_timeout=5,
+        )
+    _params_pg = dict(params)
+    return dict(params)
+
+
+def obter_conexao_nova():
+    """Conexão solta (CREATE/DROP SCHEMA). Quem chama precisa fechar de verdade."""
+    return psycopg2.connect(**_params_conexao())
+
+
+def obter_conexao(master=False):
+    """Reusa uma conexão SSL por worker. Escola só troca o search_path."""
+    global ultimo_erro_pg, _raw_pg
+    ultimo_erro_pg = ""
     master_nome = nome_banco_master()
     if master:
         schema = "public"
@@ -133,30 +210,28 @@ def obter_conexao(master=False):
         if not _schema_seguro(schema):
             print(f"Schema de escola inválido: {schema}")
             return None
-    try:
-        dsn = cfg.get("DATABASE_URL") or ""
-        if dsn:
-            params = _destino_postgres(dsn, master_nome, cfg.get("DB_SSLMODE") or "require")
-        else:
-            params = dict(
-                host=cfg["DB_HOST"],
-                port=cfg["DB_PORT"],
-                dbname=master_nome,
-                user=cfg["DB_USER"],
-                password=cfg["DB_PASSWORD"],
-                sslmode=cfg.get("DB_SSLMODE") or "prefer",
-                cursor_factory=psycopg2.extras.RealDictCursor,
-            )
-        if schema == "public":
-            params["options"] = "-csearch_path=public"
-        else:
-            params["options"] = f"-csearch_path={schema},public"
-        conexao = psycopg2.connect(**params)
-        return conexao
-    except Exception as erro:
-        ultimo_erro_pg = str(erro)
-        print(f"Erro ao conectar ao PostgreSQL ({master_nome}/{schema}): {erro}")
-        return None
+    for _tentativa in (1, 2):
+        try:
+            if _raw_pg is None or _raw_pg.closed:
+                _raw_pg = psycopg2.connect(**_params_conexao())
+            try:
+                _raw_pg.rollback()
+            except Exception:
+                pass
+            _aplicar_schema(_raw_pg, schema)
+            return _ConexaoReuso(_raw_pg)
+        except Exception as erro:
+            ultimo_erro_pg = str(erro)
+            try:
+                if _raw_pg:
+                    _raw_pg.close()
+            except Exception:
+                pass
+            _raw_pg = None
+            if _tentativa == 2:
+                print(f"Erro ao conectar ao PostgreSQL ({master_nome}/{schema}): {erro}")
+                return None
+    return None
 
 
 def criar_estrutura_inicial():
@@ -420,7 +495,11 @@ def _garantir_coluna(cursor, tabela, coluna, spec, mapa=None):
 
 def garantir_tabelas_pedagogicas():
     """Cria tabelas de frequência, boletins anexos e vínculos de disciplina."""
-    if not _nome_banco_atual(master=False):
+    schema = _nome_banco_atual(master=False)
+    if not schema:
+        return
+    chave = f"{schema}:ped"
+    if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
     if not conexao:
@@ -539,6 +618,7 @@ def garantir_tabelas_pedagogicas():
                     except Exception:
                         pass
             conexao.commit()
+            _tabelas_ok.add(chave)
     except Exception as e:
         try:
             conexao.rollback()
@@ -550,7 +630,11 @@ def garantir_tabelas_pedagogicas():
 
 
 def garantir_tabelas_folha():
-    if not _nome_banco_atual(master=False):
+    schema = _nome_banco_atual(master=False)
+    if not schema:
+        return
+    chave = f"{schema}:folha"
+    if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
     if not conexao:
@@ -731,6 +815,7 @@ def garantir_tabelas_folha():
                         """
                     )
             conexao.commit()
+            _tabelas_ok.add(chave)
     except Exception as e:
         try:
             conexao.rollback()

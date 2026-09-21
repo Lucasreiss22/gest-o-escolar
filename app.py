@@ -338,16 +338,12 @@ def inject_acl():
     login_publico = (request.endpoint or "") in {
         "login", "logout", "login_google", "login_google_callback",
         "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
+        "plataforma_escolas", "plataforma_autorizar_gmail", "plataforma_voltar",
     }
-    if not login_publico:
-        try:
-            smtp_ok = smtp_configurado()
-        except Exception:
-            smtp_ok = False
-        try:
-            google_login = _google_habilitado()
-        except Exception:
-            google_login = False
+    if not login_publico and not session.get("super_admin"):
+        cid = (_CFG.get("GOOGLE_CLIENT_ID") or "").strip()
+        google_login = bool(oauth and cid and "googleusercontent.com" in cid and "@" not in cid)
+        smtp_ok = bool(_CFG.get("SMTP_PASSWORD") and _CFG.get("SMTP_USER"))
     return {
         "papel_atual": papel,
         "rotulo_papel": rotulo_papel(papel),
@@ -387,12 +383,10 @@ def proteger_rotas():
         return None
     if endpoint == "plataforma_voltar" and session.get("origem_plataforma"):
         return None
-    if session.get("escola_id"):
-        escola = buscar_escola_por_id(session.get("escola_id"))
-        if escola is not None and not escola.get("ativo", True):
-            session.clear()
-            flash("Esta escola está pausada ou foi removida. O acesso ao sistema está bloqueado.", "danger")
-            return redirect(url_for("login"))
+    if session.get("escola_id") and session.get("escola_bloqueada"):
+        session.clear()
+        flash("Esta escola está pausada ou foi removida. O acesso ao sistema está bloqueado.", "danger")
+        return redirect(url_for("login"))
     if "usuario_id" not in session:
         return redirect(url_for("login"))
     if not session.get("escola_db"):
@@ -1198,7 +1192,11 @@ def plataforma_autorizar_gmail():
     if not session.get("super_admin"):
         return redirect(url_for("login"))
     if not _registrar_oauth():
-                flash("Para enviar pelo Google, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no Render (Environment) e tente de novo. Enquanto isso, use Gmail + senha de app na caixa Envio de e-mail.", "danger")
+        flash(
+            "O Render bloqueia SMTP. Para o e-mail sair, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET "
+            "no Environment e clique de novo em Permitir envio de e-mail. Enquanto isso use o código na lista.",
+            "danger",
+        )
         return redirect(url_for("plataforma_escolas"))
     redirect_uri = url_for("login_google_callback", _external=True)
     return oauth.google.authorize_redirect(

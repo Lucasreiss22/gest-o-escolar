@@ -3,7 +3,7 @@ import re
 import smtplib
 from email.message import EmailMessage
 
-from config import carregar_config
+from config import ambiente_producao, carregar_config
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
@@ -207,7 +207,7 @@ def obter_access_token_gmail():
             }
         ).encode("utf-8")
         req = urllib.request.Request("https://oauth2.googleapis.com/token", data=dados, method="POST")
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         return (payload.get("access_token") or "").strip() or None, remetente
     except Exception:
@@ -275,7 +275,6 @@ def _montar_mensagem(remetente, destinos, assunto, corpo, html=None, anexos=None
 
 
 def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=None):
-    cfg = carregar_smtp()
     lista = []
     for item in destinos or []:
         if email_valido(item):
@@ -285,21 +284,24 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
 
     token, remetente_api = obter_access_token_gmail()
     token = access_token or token
-    remetente = (remetente_api or cfg.get("SMTP_FROM") or cfg.get("SMTP_USER") or "").strip()
+    remetente = (remetente_api or carregar_config().get("SMTP_FROM") or carregar_config().get("SMTP_USER") or "").strip()
     if token:
-        try:
-            enviar_via_gmail_api(
-                token, lista, assunto, corpo, remetente=remetente, anexos=anexos, html=html
-            )
-            return lista
-        except Exception:
-            pass
+        enviar_via_gmail_api(
+            token, lista, assunto, corpo, remetente=remetente, anexos=anexos, html=html
+        )
+        return lista
 
+    if ambiente_producao():
+        raise RuntimeError(
+            "O Render bloqueia SMTP (Network is unreachable). "
+            "O código já está na tela desta página. Para o e-mail chegar, use Permitir envio de e-mail (Google)."
+        )
+
+    cfg = carregar_smtp()
     if not smtp_configurado(cfg):
         raise RuntimeError(
             "Não foi possível enviar o e-mail. Autorize o Gmail da plataforma (Permitir envio de e-mail) e tente de novo."
         )
-
     cfg = corrigir_smtp(cfg)
     msg = _montar_mensagem(
         cfg.get("SMTP_FROM") or cfg.get("SMTP_USER"),
@@ -351,7 +353,7 @@ def enviar_via_gmail_api(access_token, destinos, assunto, corpo, remetente=None,
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             resp.read()
     except urllib.error.HTTPError as e:
         detalhe = e.read().decode("utf-8", errors="replace")
