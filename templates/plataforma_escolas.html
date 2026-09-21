@@ -45,22 +45,37 @@
 
         <div class="card-box">
             <h3>Envio de e-mail</h3>
-            <p class="hint">O Render <strong>não envia Gmail por SMTP</strong> (erro Network is unreachable). O código da escola aparece na lista. Para o e-mail chegar de verdade é preciso <strong>Permitir envio de e-mail (Google)</strong> com Client ID no Environment do Render.</p>
-            <p style="margin-bottom:14px;"><a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Permitir envio de e-mail (Google)</a></p>
+            <p class="hint">
+                Não é bloqueio da senha de app. O <strong>Render barra SMTP</strong> (porta 587 do Gmail).
+                A senha de 16 letras <strong>não envia daqui</strong>. O caminho que funciona é a <strong>API do Gmail (HTTPS)</strong>.
+            </p>
+            {% if google_autorizado %}
+            <p class="alert alert-success">Gmail já autorizado. Reenviar e-mail agora usa a API e deve chegar na caixa (e no Spam).</p>
+            {% else %}
+            <ol class="hint" style="padding-left:18px;">
+                <li>Abra <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener">Gmail API</a> e clique em Ativar.</li>
+                <li>Em APIs e serviços → Credenciais → Criar credenciais → ID do cliente OAuth → tipo <strong>Aplicativo da Web</strong>.</li>
+                <li>Em URIs de redirecionamento autorizado cole exatamente:<br>
+                    <code>{{ google_redirect }}</code>
+                </li>
+                <li>Cole o Client ID e o Client Secret abaixo, salve, depois <strong>Permitir envio de e-mail</strong> com o Gmail da plataforma ({{ session.get('usuario_email') or 'lucaslagoasreis@gmail.com' }}).</li>
+            </ol>
+            {% endif %}
             <form method="POST">
-                <input type="hidden" name="acao" value="salvar_smtp">
+                <input type="hidden" name="acao" value="salvar_google">
                 <div class="form-grid">
                     <div class="form-group">
-                        <label>Gmail que envia</label>
-                        <input type="email" name="smtp_user" value="{{ smtp.smtp_user or smtp.smtp_from or '' }}" placeholder="seu@gmail.com">
+                        <label>Google Client ID</label>
+                        <input name="google_client_id" value="{{ smtp.google_client_id or '' }}" placeholder="....apps.googleusercontent.com">
                     </div>
                     <div class="form-group">
-                        <label>Senha de app (16 letras)</label>
-                        <input type="password" name="smtp_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off">
+                        <label>Google Client Secret</label>
+                        <input type="password" name="google_client_secret" placeholder="Cole o secret" autocomplete="off">
                     </div>
                 </div>
-                <p style="margin-top:14px;"><button class="btn" type="submit">Salvar envio de e-mail</button></p>
+                <p style="margin-top:14px;"><button class="btn" type="submit">Salvar credenciais Google</button></p>
             </form>
+            <p style="margin-top:12px;"><a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Permitir envio de e-mail (Google)</a></p>
         </div>
 
         <div class="card-box">

@@ -1049,6 +1049,7 @@ def login_google_callback():
         admin = buscar_admin_plataforma(email)
         if admin and admin.get("senha") and admin.get("email_confirmado"):
             _entrar_plataforma(admin)
+            flash("Gmail autorizado para envio. Clique em Reenviar e-mail na escola para o código chegar na caixa.", "success")
             return redirect(url_for("plataforma_escolas"))
         return _enviar_codigo_plataforma(email, access_token=access_token)
     escola = buscar_escola_por_email(email)
@@ -1262,6 +1263,15 @@ def plataforma_escolas():
                 flash(f"Não foi possível salvar o SMTP: {e}", "danger")
             if conexao:
                 conexao.close()
+        elif acao == "salvar_google":
+            try:
+                salvar_google_oauth(
+                    request.form.get("google_client_id"),
+                    request.form.get("google_client_secret"),
+                )
+                flash("Client ID do Google salvo. Agora clique em Permitir envio de e-mail e entre com o Gmail da plataforma.", "success")
+            except Exception as e:
+                flash(f"Não foi possível salvar o Google: {e}", "danger")
         elif acao == "criar_escola":
             if conexao:
                 try:
@@ -1415,6 +1425,8 @@ def plataforma_escolas():
         escolas=escolas,
         smtp=smtp,
         google_login=_google_habilitado(),
+        google_autorizado=bool((smtp or {}).get("google_refresh_token") if isinstance(smtp, dict) else getattr(smtp, "google_refresh_token", None)),
+        google_redirect=url_for("login_google_callback", _external=True),
     )
 
 
