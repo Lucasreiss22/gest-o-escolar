@@ -293,8 +293,7 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
 
     if ambiente_producao():
         raise RuntimeError(
-            "O Render bloqueia SMTP (Network is unreachable). "
-            "O código já está na tela desta página. Para o e-mail chegar, use Permitir envio de e-mail (Google)."
+            "O servidor não envia SMTP. O Gmail abre com o código pronto para você clicar em Enviar."
         )
 
     cfg = carregar_smtp()

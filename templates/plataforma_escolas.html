@@ -27,7 +27,9 @@
         .btn-ambar { background:#d97706; color:#fff; }
         .btn-verde { background:#15803d; color:#fff; }
         .btn-vermelho { background:#b91c1c; color:#fff; }
+        a.btn-sm { text-decoration:none; display:inline-block; line-height:1.25; }
         .check { display:flex; gap:8px; align-items:flex-start; margin-top:12px; font-size:.85rem; }
+        .btn-gmail { display:inline-block; margin-top:8px; padding:10px 16px; background:#15803d; color:#fff; border-radius:6px; text-decoration:none; font-weight:600; }
     </style>
 </head>
 <body>
@@ -42,45 +44,32 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
+        {% if abrir_gmail %}
+        <div class="alert alert-success">
+            O Gmail abre com o código já preenchido para o cliente. Clique em <strong>Enviar</strong> na janela do Gmail.
+            <br>
+            <a id="abrir-gmail" class="btn-gmail" href="{{ abrir_gmail }}" target="_blank" rel="noopener">Enviar código pelo Gmail agora</a>
+        </div>
+        <script>
+            (function () {
+                var url = {{ abrir_gmail|tojson }};
+                window.open(url, "_blank");
+            })();
+        </script>
+        {% endif %}
 
         <div class="card-box">
             <h3>Envio de e-mail</h3>
             <p class="hint">
-                Não é bloqueio da senha de app. O <strong>Render barra SMTP</strong> (porta 587 do Gmail).
-                A senha de 16 letras <strong>não envia daqui</strong>. O caminho que funciona é a <strong>API do Gmail (HTTPS)</strong>.
+                Ao <strong>cadastrar</strong>, <strong>reenviar</strong> ou <strong>redefinir senha</strong>,
+                o Gmail abre sozinho com o código e o link prontos. Não precisa autorizar envio à parte:
+                basta clicar em Enviar na janela do Gmail para o código chegar na caixa do cliente.
             </p>
-            {% if google_autorizado %}
-            <p class="alert alert-success">Gmail já autorizado. Reenviar e-mail agora usa a API e deve chegar na caixa (e no Spam).</p>
-            {% else %}
-            <ol class="hint" style="padding-left:18px;">
-                <li>Abra <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener">Gmail API</a> e clique em Ativar.</li>
-                <li>Em APIs e serviços → Credenciais → Criar credenciais → ID do cliente OAuth → tipo <strong>Aplicativo da Web</strong>.</li>
-                <li>Em URIs de redirecionamento autorizado cole exatamente:<br>
-                    <code>{{ google_redirect }}</code>
-                </li>
-                <li>Cole o Client ID e o Client Secret abaixo, salve, depois <strong>Permitir envio de e-mail</strong> com o Gmail da plataforma ({{ session.get('usuario_email') or 'lucaslagoasreis@gmail.com' }}).</li>
-            </ol>
-            {% endif %}
-            <form method="POST">
-                <input type="hidden" name="acao" value="salvar_google">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>Google Client ID</label>
-                        <input name="google_client_id" value="{{ smtp.google_client_id or '' }}" placeholder="....apps.googleusercontent.com">
-                    </div>
-                    <div class="form-group">
-                        <label>Google Client Secret</label>
-                        <input type="password" name="google_client_secret" placeholder="Cole o secret" autocomplete="off">
-                    </div>
-                </div>
-                <p style="margin-top:14px;"><button class="btn" type="submit">Salvar credenciais Google</button></p>
-            </form>
-            <p style="margin-top:12px;"><a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Permitir envio de e-mail (Google)</a></p>
         </div>
 
         <div class="card-box">
             <h3>Nova escola</h3>
-            <p class="hint">A escola aparece na lista com o código. O e-mail pode não sair no Render; envie o código e o link ao admin da escola.</p>
+            <p class="hint">Depois de cadastrar, o Gmail abre sozinho com o código para o e-mail da escola.</p>
             <form method="POST">
                 <input type="hidden" name="acao" value="criar_escola">
                 <div class="form-grid">
@@ -131,7 +120,9 @@
                         <input type="hidden" name="escola_id" value="{{ e.id }}">
                         <button class="btn-sm btn-ambar" type="submit">Redefinir senha</button>
                     </form>
-                    {% if e.convite_token and e.ativo %}
+                    {% if e.gmail_compose %}
+                    <a class="btn-sm btn-verde" href="{{ e.gmail_compose }}" target="_blank" rel="noopener">Reenviar e-mail</a>
+                    {% elif e.convite_token and e.ativo %}
                     <form method="POST">
                         <input type="hidden" name="acao" value="reenviar_convite">
                         <input type="hidden" name="token" value="{{ e.convite_token }}">

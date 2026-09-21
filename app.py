@@ -6,6 +6,7 @@ try:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
+from urllib.parse import quote
 from flask import Flask, flash, redirect, render_template, request, url_for, session, send_file
 from markupsafe import escape
 from werkzeug.exceptions import HTTPException
@@ -1188,6 +1189,80 @@ def _enviar_convite_escola(escola, access_token=None, link=None):
     return ok, erro, link
 
 
+def _gmail_compose_url(escola, link=None):
+    dest = (escola.get("email_admin") or "").strip()
+    if not dest:
+        return ""
+    if not link:
+        token = escola.get("convite_token") or ""
+        if not token:
+            return ""
+        link = url_for("ativar_escola", token=token, _external=True)
+    codigo = escola.get("convite_codigo") or ""
+    nome = escola.get("nome") or ""
+    assunto = f"Código de acesso da escola {nome}"
+    corpo = (
+        f"Olá,\n\n"
+        f"A escola {nome} foi cadastrada na Gestão Escolar.\n\n"
+        f"Seu código é: {codigo}\n\n"
+        f"Abra o link abaixo e digite só esse código:\n{link}\n\n"
+        f"Na página você escolhe a senha de entrada. O sistema não gera senha.\n"
+    )
+    return (
+        "https://mail.google.com/mail/?view=cm&fs=1&tf=1"
+        f"&to={quote(dest)}"
+        f"&su={quote(assunto)}"
+        f"&body={quote(corpo)}"
+    )
+
+
+def _abrir_gmail_convite(escola, link=None):
+    url = _gmail_compose_url(escola, link)
+    if url:
+        session["abrir_gmail"] = url
+    return url
+
+
+def _tentar_enviar_ou_abrir_gmail(escola, link=None, access_token=None):
+    token = access_token
+    if token is None:
+        try:
+            token = session.get("google_access_token")
+        except Exception:
+            token = None
+    if token or not ambiente_producao():
+        ok, erro, link = _enviar_convite_escola(escola, access_token=token, link=link)
+        if ok:
+            return True, erro, link
+        _abrir_gmail_convite(escola, link)
+        return False, erro, link
+    if not link:
+        link = url_for("ativar_escola", token=escola["convite_token"], _external=True)
+    _abrir_gmail_convite(escola, link)
+    return False, None, link
+
+
+def _flash_convite(escola, link, ok, erro, acao="cadastro"):
+    codigo = escola.get("convite_codigo") or ""
+    dest = escola.get("email_admin") or ""
+    if ok:
+        flash(f"Código enviado para {dest}. Código: {codigo}.", "success")
+        return
+    _abrir_gmail_convite(escola, link)
+    if acao == "cadastro":
+        flash(
+            f"Escola {escola.get('nome')} cadastrada. Código para {dest}: {codigo}. "
+            "O Gmail abre sozinho com o e-mail pronto — clique em Enviar.",
+            "success",
+        )
+    else:
+        flash(
+            f"Código para {dest}: {codigo}. "
+            "O Gmail abre sozinho com o e-mail pronto — clique em Enviar.",
+            "success",
+        )
+
+
 @app.route("/plataforma/autorizar-gmail")
 def plataforma_autorizar_gmail():
     if not session.get("super_admin"):
@@ -1265,11 +1340,17 @@ def plataforma_escolas():
                 conexao.close()
         elif acao == "salvar_google":
             try:
-                salvar_google_oauth(
-                    request.form.get("google_client_id"),
-                    request.form.get("google_client_secret"),
-                )
-                flash("Client ID do Google salvo. Agora clique em Permitir envio de e-mail e entre com o Gmail da plataforma.", "success")
+                cid = (request.form.get("google_client_id") or "").strip()
+                secret = (request.form.get("google_client_secret") or "").strip()
+                if "@" in cid:
+                    salvar_smtp_plataforma("smtp.gmail.com", 587, cid, secret, cid)
+                    flash(
+                        "Gmail da plataforma salvo. Ao cadastrar ou reenviar, o Gmail abre sozinho com o código.",
+                        "success",
+                    )
+                else:
+                    salvar_google_oauth(cid, secret)
+                    flash("Credenciais Google salvas.", "success")
             except Exception as e:
                 flash(f"Não foi possível salvar o Google: {e}", "danger")
         elif acao == "criar_escola":
@@ -1285,22 +1366,8 @@ def plataforma_escolas():
                     antiga = buscar_escola_por_email(email_novo)
                     excluir_escola(antiga["id"])
                 escola = cadastrar_escola(request.form.get("nome"), email_novo)
-                link = url_for("ativar_escola", token=escola["convite_token"], _external=True)
-                token_gmail = session.get("google_access_token")
-                ok, erro, link = _enviar_convite_escola(escola, access_token=token_gmail, link=link)
-                if ok:
-                    flash(
-                        f"Escola {escola['nome']} cadastrada. Código para {escola['email_admin']}: "
-                        f"{escola['convite_codigo']}. E-mail enviado. Link: {link}",
-                        "success",
-                    )
-                else:
-                    flash(
-                        f"Escola {escola['nome']} cadastrada. O e-mail não saiu ({erro}). "
-                        f"Código para {escola['email_admin']}: {escola['convite_codigo']}. "
-                        f"Link: {link}. Em Permitir envio de e-mail, autorize o Gmail da plataforma e clique em Reenviar.",
-                        "danger",
-                    )
+                ok, erro, link = _tentar_enviar_ou_abrir_gmail(escola)
+                _flash_convite(escola, link, ok, erro, acao="cadastro")
             except Exception as e:
                 flash(f"Não foi possível cadastrar a escola: {e}", "danger")
         elif acao == "reenviar_convite":
@@ -1315,30 +1382,16 @@ def plataforma_escolas():
                     "danger",
                 )
             else:
-                ok, erro, link = _enviar_convite_escola(escola)
-                if erro:
-                    flash(
-                        f"O e-mail não chegou em {escola['email_admin']} ({erro}). "
-                        f"Código: {escola['convite_codigo']}. Link: {link}",
-                        "danger",
-                    )
-                else:
-                    flash(f"E-mail com o código enviado para {escola['email_admin']}.", "success")
+                ok, erro, link = _tentar_enviar_ou_abrir_gmail(escola)
+                _flash_convite(escola, link, ok, erro, acao="reenviar")
         elif acao == "alterar_email":
             try:
                 escola = atualizar_email_admin_escola(
                     request.form.get("token"),
                     request.form.get("email_admin"),
                 )
-                ok, erro, link = _enviar_convite_escola(escola)
-                if erro:
-                    flash(
-                        f"E-mail atualizado para {escola['email_admin']}, mas o envio falhou ({erro}). "
-                        f"Link: {link} — código {escola['convite_codigo']}",
-                        "danger",
-                    )
-                else:
-                    flash(f"Código enviado para {escola['email_admin']}.", "success")
+                ok, erro, link = _tentar_enviar_ou_abrir_gmail(escola)
+                _flash_convite(escola, link, ok, erro, acao="reenviar")
             except Exception as e:
                 flash(f"Não foi possível alterar o e-mail: {e}", "danger")
         elif acao == "pausar_escola":
@@ -1365,19 +1418,8 @@ def plataforma_escolas():
         elif acao == "redefinir_senha":
             try:
                 escola = regenerar_convite_escola(request.form.get("escola_id"))
-                ok, erro, link = _enviar_convite_escola(escola)
-                if erro:
-                    flash(
-                        f"Senha da escola {escola['nome']} foi invalidada. Código: {escola['convite_codigo']}. "
-                        f"O e-mail não saiu ({erro}). Link: {link}",
-                        "danger",
-                    )
-                else:
-                    flash(
-                        f"Código para nova senha enviado a {escola['email_admin']}. "
-                        f"A senha antiga deixa de valer.",
-                        "success",
-                    )
+                ok, erro, link = _tentar_enviar_ou_abrir_gmail(escola)
+                _flash_convite(escola, link, ok, erro, acao="reenviar")
             except Exception as e:
                 flash(f"Não foi possível redefinir a senha: {e}", "danger")
         elif acao == "acessar_escola":
@@ -1417,13 +1459,19 @@ def plataforma_escolas():
                     smtp = cursor.fetchone() or {}
             finally:
                 conexao.close()
-        escolas = listar_escolas()
+        for item in listar_escolas() or []:
+            escola = dict(item)
+            if escola.get("convite_token") and escola.get("convite_codigo"):
+                escola["gmail_compose"] = _gmail_compose_url(escola)
+            escolas.append(escola)
     except Exception as e:
         flash(f"Não foi possível carregar as escolas: {e}", "danger")
+    abrir_gmail = session.pop("abrir_gmail", None)
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
         smtp=smtp,
+        abrir_gmail=abrir_gmail,
         google_login=_google_habilitado(),
         google_autorizado=bool((smtp or {}).get("google_refresh_token") if isinstance(smtp, dict) else getattr(smtp, "google_refresh_token", None)),
         google_redirect=url_for("login_google_callback", _external=True),
