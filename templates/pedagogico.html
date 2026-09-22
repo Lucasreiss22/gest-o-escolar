@@ -35,6 +35,9 @@
         .turma-tile-meta { font-size: .78rem; color: #64748b; margin-top: 6px; }
         .turma-detail { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
         .turma-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
+        .vinculo-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; margin-bottom:16px; }
+        .vinculo-lista { display:flex; flex-direction:column; gap:8px; max-height:260px; overflow:auto; }
+        .vinculo-item { display:flex; justify-content:space-between; align-items:center; gap:10px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; margin:0; }
     </style>
 </head>
 <body>
@@ -497,24 +500,45 @@
                 {% endif %}
 
                 {% if painel == 'alunos' %}
-                {% if pode('pedagogico_cadastro') %}
-                <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mb-3">
-                    <input type="hidden" name="acao" value="vincular_aluno">
-                    <input type="hidden" name="turma_id" value="{{ turma.id }}">
-                    {{ ctx_turma('alunos') }}
-                    <div class="col-md-9">
-                        <select name="aluno_id" class="form-select form-select-sm" required>
-                            <option value="">Selecione um aluno para matricular nesta turma...</option>
-                            {% for aluno in alunos_cadastrados %}
-                                <option value="{{ aluno.id }}">{{ aluno.nome_completo }} {% if aluno.matricula %}(Mat: {{ aluno.matricula }}){% endif %}</option>
-                            {% endfor %}
-                        </select>
+                {% set lista_alunos_turma = alunos_por_turma.get(turma.id, []) %}
+                {% set ids_na_turma = lista_alunos_turma | map(attribute='id') | list %}
+                <div class="vinculo-box">
+                    <strong>Alunos desta turma</strong>
+                    <p class="small text-muted mb-2">O vínculo usa o cadastro em Gestão de Alunos. Tirar da turma não apaga o aluno.</p>
+                    {% if pode('pedagogico_cadastro') %}
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        <a class="btn btn-primary btn-sm" href="{{ url_for('pagina_alunos', turma_id=turma.id, novo=1, voltar=1) }}">Cadastrar aluno já nesta turma</a>
                     </div>
-                    <div class="col-md-3 d-grid">
-                        <button type="submit" class="btn btn-primary btn-sm">Matricular Aluno</button>
+                    <div class="mb-2">
+                        <input type="search" class="form-control form-control-sm js-filtro-aluno" placeholder="Buscar aluno cadastrado por nome ou matrícula...">
                     </div>
-                </form>
-                {% endif %}
+                    <div class="vinculo-lista mb-3">
+                        {% set ns_disp = namespace(qtd=0) %}
+                        {% for aluno in alunos_cadastrados %}
+                            {% if aluno.id not in ids_na_turma and (aluno.status or 'ativo')|lower != 'inativo' %}
+                            {% set ns_disp.qtd = ns_disp.qtd + 1 %}
+                            <form method="POST" class="vinculo-item" data-busca="{{ (aluno.nome_completo or '')|lower }} {{ aluno.matricula or '' }}">
+                                <input type="hidden" name="acao" value="vincular_aluno">
+                                <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                                <input type="hidden" name="aluno_id" value="{{ aluno.id }}">
+                                {{ ctx_turma('alunos') }}
+                                <div>
+                                    <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}">{{ aluno.nome_completo }}</a>
+                                    <div class="small text-muted">
+                                        {% if aluno.matricula %}Mat. {{ aluno.matricula }}{% endif %}
+                                        {% if aluno.turmas_atuais %} · já em {{ aluno.turmas_atuais }}{% else %} · sem turma{% endif %}
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" type="submit">Vincular</button>
+                            </form>
+                            {% endif %}
+                        {% endfor %}
+                        {% if ns_disp.qtd == 0 %}
+                        <p class="small text-muted mb-0">Nenhum aluno cadastrado disponível. Cadastre em Gestão de Alunos ou todos já estão nesta turma.</p>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
 
                 <div class="p-3 mb-3 bg-light rounded border">
                     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -579,7 +603,6 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% set lista_alunos_turma = alunos_por_turma.get(turma.id, []) %}
                             {% if lista_alunos_turma %}
                                 {% for al in lista_alunos_turma %}
                                 {% set st = presenca_aluno.get(al.id) %}
@@ -599,20 +622,22 @@
                                         </form>
                                     </td>
                                     <td class="text-end">
-                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}#notas" title="Notas">N</a>
-                                        <a class="btn btn-sm btn-outline-danger" href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}#faltas" title="Faltas">F</a>
-                                        <a class="btn btn-sm btn-outline-success" href="{{ url_for('calendario_escolar', aluno_id=al.id, turma_id=turma.id) }}" title="Calendário">C</a>
-                                        <form action="{{ url_for('excluir_aluno_rota', id=al.id) }}" method="POST" style="display:inline;">
-                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Remover aluno desta turma?');" title="Remover">
-                                                <i class="bi bi-x-lg"></i>
-                                            </button>
+                                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}">Cadastro</a>
+                                        {% if pode('pedagogico_cadastro') %}
+                                        <form method="POST" style="display:inline;">
+                                            <input type="hidden" name="acao" value="desvincular_aluno">
+                                            <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                                            <input type="hidden" name="aluno_id" value="{{ al.id }}">
+                                            {{ ctx_turma('alunos') }}
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Tirar este aluno desta turma? O cadastro dele permanece.');">Tirar da turma</button>
                                         </form>
+                                        {% endif %}
                                     </td>
                                 </tr>
                                 {% endfor %}
                             {% else %}
                                 <tr>
-                                    <td colspan="4" class="text-center py-3 text-muted">Nenhum aluno matriculado nesta turma ainda. (<a href="{{ url_for('pagina_alunos') }}">Cadastrar novo aluno</a>)</td>
+                                    <td colspan="4" class="text-center py-3 text-muted">Nenhum aluno nesta turma. Vincule um cadastro acima ou <a href="{{ url_for('pagina_alunos', turma_id=turma.id, novo=1, voltar=1) }}">cadastre um aluno já na turma</a>.</td>
                                 </tr>
                             {% endif %}
                         </tbody>
@@ -640,6 +665,17 @@
     });
     var det = document.getElementById("turma-detalhe");
     if (det) det.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelectorAll(".js-filtro-aluno").forEach(function (inp) {
+        inp.addEventListener("input", function () {
+            var q = (inp.value || "").toLowerCase();
+            var box = inp.closest(".vinculo-box");
+            if (!box) return;
+            box.querySelectorAll(".vinculo-item").forEach(function (el) {
+                var busca = el.getAttribute("data-busca") || "";
+                el.hidden = q && busca.indexOf(q) < 0;
+            });
+        });
+    });
     document.querySelectorAll(".js-add-bloco").forEach(function (btn) {
         btn.addEventListener("click", function () {
             var wrap = btn.parentElement.querySelector(".grade-blocos");

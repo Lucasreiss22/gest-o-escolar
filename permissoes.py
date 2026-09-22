@@ -44,6 +44,7 @@ ENDPOINTS = {
     "contracheque": "contracheque",
     "pdf_contracheque_rota": "contracheque",
     "enviar_contracheques_mes": "financeiro",
+    "aluno_vincular_turma": "pedagogico_cadastro",
 }
 
 

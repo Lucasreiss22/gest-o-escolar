@@ -308,6 +308,20 @@ def _cargo_do_papel(papel):
     return mapa.get(normalizar_papel(papel), "Auxiliar")
 
 
+def _disciplina_visivel(valor):
+    texto = (valor or "").strip()
+    if not texto or texto.lower() in {"gerais", "geral", "n/a", "-", "nao se aplica", "não se aplica"}:
+        return ""
+    return texto
+
+
+def _especialidade_form():
+    texto = (request.form.get("especialidade") or "").strip()
+    if texto.lower() in {"gerais", "geral", "n/a", "-"}:
+        return ""
+    return texto[:150]
+
+
 def _cargo_do_form(papel=None):
     cargo = (request.form.get("cargo") or "").strip()
     if cargo == "Outro":
@@ -480,7 +494,7 @@ def proteger_rotas():
     papel = session.get("usuario_papel")
     if endpoint == "pagina_pedagogico" and request.method == "POST":
         acao = request.form.get("acao") or ""
-        if acao in ("criar_turma", "nova_turma", "vincular_aluno", "incluir_aluno") and not pode_modulo(papel, "pedagogico_cadastro"):
+        if acao in ("criar_turma", "nova_turma", "vincular_aluno", "incluir_aluno", "desvincular_aluno") and not pode_modulo(papel, "pedagogico_cadastro"):
             flash("❌ Sem permissão para cadastrar turma ou matricular aluno (secretaria).", "danger")
             return redirect(url_for("pagina_pedagogico"))
     if not pode_endpoint(papel, endpoint):
@@ -1914,7 +1928,7 @@ def gerenciar_usuarios():
                     inicio_contrato = limpar_campo("data_inicio_contrato") or limpar_campo("data_contratacao") or datetime.now().strftime("%Y-%m-%d")
                     valores_folha = (
                         nome, cpf, nasc, cargo, telefone, email,
-                        limpar_campo("especialidade"), _formacao_do_form(),
+                        _especialidade_form(), _formacao_do_form(),
                         limpar_campo("rg"), limpar_campo("cep"), limpar_campo("rua"),
                         limpar_campo("numero"), limpar_campo("bairro"), limpar_campo("cidade"),
                         (limpar_campo("estado") or "")[:2] or None,
@@ -2095,7 +2109,7 @@ def gerenciar_usuarios():
                         "data_nascimento": _data_iso(frow.get("data_nascimento")),
                         "telefone": frow.get("telefone") or "",
                         "cargo": frow.get("cargo") or _cargo_do_papel(urow.get("papel")),
-                        "especialidade": frow.get("especialidade") or "",
+                        "especialidade": _disciplina_visivel(frow.get("especialidade") or ""),
                         "formacao": frow.get("formacao") or "",
                         "cep": frow.get("cep") or "",
                         "rua": frow.get("rua") or "",
@@ -3013,6 +3027,9 @@ def pagina_alunos():
             except Exception as e:
                 flash(f"Erro de banco de dados: {e}", "danger")
 
+        voltar_turma = request.form.get("voltar_turma")
+        if voltar_turma:
+            return redirect(url_for("pagina_pedagogico", aba="turmas", turma_sel=voltar_turma, painel="alunos"))
         return redirect(url_for("pagina_alunos"))
 
     termo_busca = request.args.get("q", "").strip()
@@ -3022,13 +3039,30 @@ def pagina_alunos():
     if conexao_t:
         try:
             with conexao_t.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("SELECT id, nome FROM turmas ORDER BY nome")
+                cursor.execute(
+                    """
+                    SELECT t.id, t.nome, t.ano_letivo, t.turno, f.nome_completo AS professor
+                    FROM turmas t
+                    LEFT JOIN funcionarios f ON t.professor_responsavel_id = f.id
+                    ORDER BY t.nome
+                    """
+                )
                 turmas = cursor.fetchall()
         except Exception:
             turmas = []
         finally:
             conexao_t.close()
-    return render_template("alunos.html", alunos=alunos, termo_busca=termo_busca, turmas=turmas)
+    turma_pre = request.args.get("turma_id") or ""
+    abrir_cadastro = bool(request.args.get("novo") or turma_pre)
+    return render_template(
+        "alunos.html",
+        alunos=alunos,
+        termo_busca=termo_busca,
+        turmas=turmas,
+        turma_pre=turma_pre,
+        abrir_cadastro=abrir_cadastro,
+        voltar_turma=turma_pre if request.args.get("voltar") else "",
+    )
 
 
 @app.route("/cadastrar_aluno", methods=["POST"])
@@ -3047,6 +3081,7 @@ def detalhes_aluno(aluno_id):
     aluno, responsaveis, turmas_aluno, financeiro_aluno, pessoas_autorizadas, provas_notas = None, [], [], [], [], []
     frequencias, boletins_anexos = [], []
     disciplinas_por_turma = {}
+    todas_turmas = []
     resumo_frequencia = {"presente": 0, "falta": 0, "justificada": 0}
 
     garantir_tabelas_folha()
@@ -3139,6 +3174,15 @@ def detalhes_aluno(aluno_id):
                 disciplinas_por_turma = {}
                 for row in cursor.fetchall():
                     disciplinas_por_turma.setdefault(row["turma_id"], []).append(row["nome"])
+                cursor.execute(
+                    """
+                    SELECT t.id, t.nome, t.ano_letivo, t.turno, f.nome_completo AS professor
+                    FROM turmas t
+                    LEFT JOIN funcionarios f ON f.id = t.professor_responsavel_id
+                    ORDER BY t.nome
+                    """
+                )
+                todas_turmas = cursor.fetchall()
         finally:
             conexao.close()
 
@@ -3168,7 +3212,46 @@ def detalhes_aluno(aluno_id):
         disciplinas_por_turma=disciplinas_por_turma,
         disciplinas_aluno=disciplinas_aluno,
         hoje=date.today().isoformat(),
+        todas_turmas=todas_turmas,
     )
+
+
+@app.route("/alunos/<int:aluno_id>/turma", methods=["POST"])
+def aluno_vincular_turma(aluno_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if not pode_modulo(session.get("usuario_papel"), "pedagogico_cadastro"):
+        flash("Sem permissão para enturmar aluno.", "danger")
+        return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+    turma_id = request.form.get("turma_id")
+    acao = request.form.get("acao") or "vincular"
+    conexao = obter_conexao()
+    if conexao and turma_id:
+        try:
+            with conexao.cursor() as cursor:
+                if acao == "desvincular":
+                    cursor.execute(
+                        "DELETE FROM turma_alunos WHERE turma_id = %s AND aluno_id = %s",
+                        (turma_id, aluno_id),
+                    )
+                    flash("Aluno saiu da turma. O cadastro foi mantido.", "success")
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO turma_alunos (turma_id, aluno_id)
+                        VALUES (%s, %s)
+                        ON CONFLICT (turma_id, aluno_id) DO NOTHING
+                        """,
+                        (turma_id, aluno_id),
+                    )
+                    flash("Aluno vinculado à turma a partir do cadastro.", "success")
+            conexao.commit()
+        except Exception as e:
+            conexao.rollback()
+            flash(f"Não foi possível atualizar a turma: {e}", "danger")
+        finally:
+            conexao.close()
+    return redirect(url_for("detalhes_aluno", aluno_id=aluno_id) + "#turmas")
 
 
 @app.route("/alunos/<int:aluno_id>/editar", methods=["POST"])
@@ -3541,15 +3624,26 @@ def pagina_professores():
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute("""
                     SELECT f.id, f.nome_completo, f.especialidade as disciplina, f.email, f.telefone, f.salario,
-                           f.cargo, f.tipo_contrato,
+                           f.cargo, f.tipo_contrato, u.papel,
                            STRING_AGG(t.nome, ', ') AS turmas_lecionadas
                     FROM funcionarios f
                     LEFT JOIN turmas t ON t.professor_responsavel_id = f.id
+                    LEFT JOIN LATERAL (
+                        SELECT papel FROM usuarios
+                        WHERE id = f.usuario_id OR LOWER(COALESCE(email, '')) = LOWER(COALESCE(f.email, ''))
+                        ORDER BY CASE WHEN id = f.usuario_id THEN 0 ELSE 1 END
+                        LIMIT 1
+                    ) u ON TRUE
                     WHERE COALESCE(f.ativo, TRUE) = TRUE
-                    GROUP BY f.id, f.nome_completo, f.especialidade, f.email, f.telefone, f.salario, f.cargo, f.tipo_contrato
+                    GROUP BY f.id, f.nome_completo, f.especialidade, f.email, f.telefone, f.salario,
+                             f.cargo, f.tipo_contrato, u.papel
                     ORDER BY f.nome_completo ASC;
                 """)
                 professores_cadastrados = cursor.fetchall()
+                for p in professores_cadastrados:
+                    p["disciplina"] = _disciplina_visivel(p.get("disciplina"))
+                    if not (p.get("cargo") or "").strip():
+                        p["cargo"] = _cargo_do_papel(p.get("papel"))
         finally:
             conexao.close()
 
@@ -3561,9 +3655,15 @@ def pagina_professores():
             or termo in (p.get("email") or "").lower()
             or termo in (p.get("disciplina") or "").lower()
             or termo in (p.get("cargo") or "").lower()
+            or termo in rotulo_papel(p.get("papel")).lower()
         ]
 
-    return render_template("professores.html", professores=professores_cadastrados, busca_prof=busca_prof)
+    return render_template(
+        "professores.html",
+        professores=professores_cadastrados,
+        busca_prof=busca_prof,
+        nome_do_papel=rotulo_papel,
+    )
 
 
 @app.route("/professores/<int:professor_id>", methods=["GET", "POST"])
@@ -3717,12 +3817,20 @@ def pagina_pedagogico():
                             """
                             INSERT INTO turma_alunos (turma_id, aluno_id)
                             VALUES (%s, %s)
-                            ON CONFLICT DO NOTHING;
+                            ON CONFLICT (turma_id, aluno_id) DO NOTHING;
                             """,
                             (limpar_campo("turma_id"), limpar_campo("aluno_id")),
                         )
                         conexao.commit()
-                        flash("✅ Aluno vinculado à turma com sucesso!", "success")
+                        flash("Aluno vinculado à turma. O cadastro dele continua o mesmo.", "success")
+
+                    elif acao == "desvincular_aluno":
+                        cursor.execute(
+                            "DELETE FROM turma_alunos WHERE turma_id = %s AND aluno_id = %s",
+                            (limpar_campo("turma_id"), limpar_campo("aluno_id")),
+                        )
+                        conexao.commit()
+                        flash("Aluno saiu desta turma. O cadastro em Alunos foi mantido.", "success")
 
                     elif acao in ("criar_disciplina", "criar_disciplina_turma"):
                         nome_disc = limpar_campo("nome_disciplina")
@@ -3982,7 +4090,18 @@ def pagina_pedagogico():
                 """)
                 professores = cursor.fetchall()
 
-                cursor.execute("SELECT id, nome_completo, matricula FROM alunos ORDER BY nome_completo ASC;")
+                cursor.execute(
+                    """
+                    SELECT a.id, a.nome_completo, a.matricula,
+                           COALESCE(NULLIF(TRIM(a.status), ''), 'ativo') AS status,
+                           STRING_AGG(t.nome, ', ') AS turmas_atuais
+                    FROM alunos a
+                    LEFT JOIN turma_alunos ta ON ta.aluno_id = a.id
+                    LEFT JOIN turmas t ON t.id = ta.turma_id
+                    GROUP BY a.id
+                    ORDER BY a.nome_completo ASC
+                    """
+                )
                 alunos_cadastrados = cursor.fetchall()
 
                 cursor.execute(

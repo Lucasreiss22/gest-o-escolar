@@ -50,7 +50,7 @@
             <p style="color:#64748b; font-size:0.9rem; margin-bottom:14px;">
                 Todo funcionário criado em
                 <a href="{{ url_for('gerenciar_usuarios') }}">Gerenciar Usuários</a>
-                aparece aqui, com cargo de professor, secretaria, auxiliar ou outro.
+                aparece aqui com o <strong>mesmo cargo</strong> do cadastro. O perfil de acesso (professor, secretaria…) também vem de lá.
             </p>
             <form method="GET" class="form-grid">
                 <div class="form-group" style="grid-column: span 2;">
@@ -72,6 +72,7 @@
                         <tr>
                             <th>Nome</th>
                             <th>Cargo</th>
+                            <th>Acesso</th>
                             <th>Disciplina</th>
                             <th>E-mail</th>
                             <th>Telefone</th>
@@ -85,7 +86,8 @@
                             <tr>
                                 <td>{{ prof.nome_completo }}</td>
                                 <td>{{ prof.cargo or 'Equipe' }}</td>
-                                <td>{{ prof.disciplina if prof.disciplina else prof.especialidade }}</td>
+                                <td>{{ nome_do_papel(prof.papel) if prof.papel else '—' }}</td>
+                                <td>{{ prof.disciplina or '—' }}</td>
                                 <td>{{ prof.email }}</td>
                                 <td>{{ prof.telefone if prof.telefone else '-' }}</td>
                                 <td>R$ {{ "%.2f"|format(prof.salario|float if prof.salario else 0) }}</td>
@@ -100,7 +102,7 @@
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="7" style="text-align: center; color: #777;">Nenhum colaborador cadastrado. Crie em Gerenciar Usuários.</td>
+                                <td colspan="8" style="text-align: center; color: #777;">Nenhum colaborador cadastrado. Crie em Gerenciar Usuários.</td>
                             </tr>
                         {% endif %}
                     </tbody>
@@ -113,7 +115,8 @@
                         <h3>{{ prof.nome_completo }}</h3>
                         <div class="meta">
                             {{ prof.cargo or 'Equipe' }}
-                            {% if prof.disciplina or prof.especialidade %} · {{ prof.disciplina if prof.disciplina else prof.especialidade }}{% endif %}<br>
+                            {% if prof.papel %} · {{ nome_do_papel(prof.papel) }}{% endif %}
+                            {% if prof.disciplina %} · {{ prof.disciplina }}{% endif %}<br>
                             {{ prof.email or 'Sem e-mail' }}
                             {% if prof.telefone %}<br>{{ prof.telefone }}{% endif %}
                         </div>
