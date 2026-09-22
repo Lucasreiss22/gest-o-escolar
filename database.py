@@ -636,7 +636,7 @@ def garantir_tabelas_folha():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:folha:fotos"
+    chave = f"{schema}:folha:simples"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -687,6 +687,14 @@ def garantir_tabelas_folha():
                     competencia VARCHAR(7) NOT NULL,
                     enviado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (funcionario_id, competencia)
+                );
+                CREATE TABLE IF NOT EXISTS simples_competencias (
+                    competencia VARCHAR(7) PRIMARY KEY,
+                    receita_bruta NUMERIC(14,2) DEFAULT 0,
+                    folha_encargos NUMERIC(14,2) DEFAULT 0,
+                    origem VARCHAR(20) DEFAULT 'manual',
+                    observacao VARCHAR(255),
+                    atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS folha_ajustes (
                     funcionario_id INT NOT NULL,

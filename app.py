@@ -6,7 +6,7 @@ try:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
-from flask import Flask, flash, redirect, render_template, request, url_for, session, send_file
+from flask import Flask, Response, flash, redirect, render_template, request, url_for, session, send_file
 from markupsafe import escape
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -25,7 +25,23 @@ from email_envio import (
     aviso_caixa_entrada,
 )
 from psycopg2.extras import RealDictCursor
-from alunos import cadastrar_aluno, listar_alunos, atualizar_responsavel, deletar_responsavel
+from alunos import (
+    cadastrar_aluno,
+    cadastrar_alunos_lote,
+    importar_planilha_alunos,
+    listar_alunos,
+    atualizar_responsavel,
+    deletar_responsavel,
+)
+from simples_nacional import (
+    montar_quadro_simples,
+    upsert_competencia,
+    importar_competencias,
+    gravar_importacao,
+    carregar_sistema,
+    janela_competencias,
+    folha_sistema_mes,
+)
 from database import obter_conexao, garantir_tabelas_pedagogicas, garantir_tabelas_folha, definir_banco_escola, limpar_banco_escola, resetar_tenant, erro_conexao_atual, host_postgres_configurado
 from tributacao import (
     apurar_simples,
@@ -33,7 +49,6 @@ from tributacao import (
     apurar_lucro_presumido,
     folha_mensal_fator_r,
     janela_12_meses_anteriores,
-    meses_de_atividade,
     parse_mes,
 )
 from relatorios_pdf import (
@@ -1202,23 +1217,16 @@ def listar_lancamentos_mes(cursor, mes_filtro, status=None):
 
 
 def calcular_apuracao_simples(cursor, mes_filtro):
+    quadro = montar_quadro_simples(cursor, mes_filtro)
+    n_meses = quadro["meses_validos"] or 1
+    colaboradores, _folha_mes = montar_folha_colaboradores(cursor)
+    apuracao = apurar_simples(quadro["rbt12"], quadro["fs12"], n_meses, quadro["receita_mes"])
     ano, mes = parse_mes(mes_filtro)
     inicio_janela, fim_janela = janela_12_meses_anteriores(ano, mes)
-    inicio_escola = data_inicio_atividade(cursor)
-    n_meses, _inicio_real = meses_de_atividade(inicio_escola, inicio_janela, fim_janela)
-    if n_meses == 0:
-        n_meses = 1
-    rbt_acumulado = receita_por_periodo(cursor, inicio_janela, fim_janela)
-    colaboradores, folha_mes = montar_folha_colaboradores(cursor)
-    fs_acumulado = 0.0
-    for colab in colaboradores:
-        n_colab, _ = meses_de_atividade(colab.get("data_contratacao") or inicio_escola, inicio_janela, fim_janela)
-        fs_acumulado += colab["total"] * max(n_colab, 0)
-    receita_mes = receita_do_mes(cursor, mes_filtro)
-    apuracao = apurar_simples(rbt_acumulado, fs_acumulado, n_meses, receita_mes)
     apuracao["inicio_janela"] = inicio_janela
     apuracao["fim_janela"] = fim_janela
-    apuracao["inicio_escola"] = inicio_escola
+    apuracao["inicio_escola"] = quadro.get("primeira")
+    apuracao["quadro"] = quadro
     return apuracao, colaboradores
 
 
@@ -3036,6 +3044,56 @@ def pagina_alunos():
                         conexao.close()
                 return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
 
+        if acao == "importar_alunos":
+            arquivo = request.files.get("planilha_alunos")
+            if not arquivo or not arquivo.filename:
+                flash("Selecione uma planilha CSV ou Excel com os alunos.", "danger")
+                return redirect(url_for("pagina_alunos"))
+            try:
+                itens = importar_planilha_alunos(arquivo)
+                if not itens:
+                    flash("A planilha não trouxe nenhum aluno válido.", "danger")
+                    return redirect(url_for("pagina_alunos"))
+                ok, erros = cadastrar_alunos_lote(itens)
+            except Exception as e:
+                flash(f"Não foi possível importar a planilha: {e}", "danger")
+                return redirect(url_for("pagina_alunos"))
+            if ok:
+                conexao_lote = obter_conexao()
+                if conexao_lote:
+                    try:
+                        with conexao_lote.cursor() as cursor:
+                            for row in ok:
+                                dados = row["aluno"]
+                                valor = float(dados.get("valor_mensalidade") or 0)
+                                if valor <= 0:
+                                    continue
+                                inicio = dados.get("contrato_inicio") or datetime.now().strftime("%Y-%m-%d")
+                                meses_c = int(dados.get("contrato_meses") or 12)
+                                _gerar_mensalidades_contrato(
+                                    cursor,
+                                    row["aluno_id"],
+                                    valor,
+                                    inicio,
+                                    meses_c,
+                                    dados.get("turnos_mensalidade") or "manha",
+                                )
+                        conexao_lote.commit()
+                    except Exception as e:
+                        conexao_lote.rollback()
+                        flash(f"Alunos salvos, mas as mensalidades do lote falharam: {e}", "danger")
+                    finally:
+                        conexao_lote.close()
+            msg = f"{len(ok)} aluno(s) cadastrado(s) pela planilha."
+            if erros:
+                extra = " | ".join(erros[:8])
+                if len(erros) > 8:
+                    extra += f" (+{len(erros) - 8})"
+                flash(f"{msg} Falhas: {extra}", "danger" if not ok else "success")
+            else:
+                flash(msg, "success")
+            return redirect(url_for("pagina_alunos"))
+
         if acao == "cadastrar_aluno":
             valor_mensalidade = _parse_moeda(request.form.get("valor_mensalidade"), 0.0)
             desconto_valor = _parse_moeda(request.form.get("desconto_valor"), 0.0)
@@ -3193,6 +3251,39 @@ def pagina_alunos():
         turma_pre=turma_pre,
         abrir_cadastro=abrir_cadastro,
         voltar_turma=turma_pre if request.args.get("voltar") else "",
+    )
+
+
+@app.route("/alunos/modelo.csv")
+def modelo_alunos_csv():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    cab = (
+        "nome_completo;data_nascimento;cpf;rg;sexo;telefone;email;cep;rua;numero;bairro;cidade;estado;"
+        "mensalidade;turno;contrato_meses;contrato_inicio;turma;resp1_nome;resp1_cpf;resp1_parentesco;resp1_telefone;resp1_email\n"
+        "Maria Silva;15/03/2018;;;F;(11) 99999-0000;responsavel@escola.com;01310-100;Av Paulista;1000;Bela Vista;São Paulo;SP;"
+        "850,00;manha;12;01/02/2026;Infantil I;Ana Silva;000.000.000-00;mãe;(11) 98888-0000;ana@email.com\n"
+    )
+    return Response(
+        "\ufeff" + cab,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=modelo_alunos.csv"},
+    )
+
+
+@app.route("/financeiro/simples/modelo.csv")
+def modelo_simples_csv():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    cab = (
+        "competencia;receita_bruta;folha_encargos\n"
+        "2025-09;120000,00;38000,00\n"
+        "2025-10;125000,00;38200,00\n"
+    )
+    return Response(
+        "\ufeff" + cab,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=modelo_simples_rbt12.csv"},
     )
 
 
@@ -4370,6 +4461,8 @@ def pagina_financeiro():
 
     if request.method == "POST":
         acao = request.form.get("acao")
+        if acao and str(acao).startswith("simples"):
+            aba_redir = "simples"
         conexao = obter_conexao()
         if conexao:
             try:
@@ -4612,6 +4705,62 @@ def pagina_financeiro():
                                 _inserir_custo(data_ini if tipo == "servico" else data_base, valor_lancar, 1, 1, uuid.uuid4().hex[:12])
                                 conexao.commit()
                                 flash("Custo registrado.", "success")
+
+                    elif acao == "simples_salvar_quadro":
+                        competencias = request.form.getlist("competencia")
+                        for comp in competencias:
+                            rec = _parse_moeda(request.form.get(f"receita_{comp}"), 0.0)
+                            folha = _parse_moeda(request.form.get(f"folha_{comp}"), 0.0)
+                            upsert_competencia(cursor, comp, rec, folha, "manual", "Lançamento manual")
+                        conexao.commit()
+                        flash("Competências do Simples Nacional salvas.", "success")
+
+                    elif acao == "simples_salvar_mes":
+                        comp = request.form.get("competencia") or mes_redir
+                        rec = _parse_moeda(request.form.get("receita_bruta"), 0.0)
+                        folha = _parse_moeda(request.form.get("folha_encargos"), 0.0)
+                        upsert_competencia(cursor, comp, rec, folha, "manual", "Lançamento manual")
+                        conexao.commit()
+                        flash(f"Competência {comp} salva no Simples Nacional.", "success")
+
+                    elif acao == "simples_importar":
+                        arquivo = request.files.get("arquivo_simples")
+                        origem = request.form.get("origem_import") or "planilha"
+                        if origem not in ("planilha", "pgdas"):
+                            origem = "planilha"
+                        if not arquivo or not arquivo.filename:
+                            flash("Selecione um arquivo CSV, Excel ou extrato PGDAS.", "danger")
+                        else:
+                            try:
+                                itens = importar_competencias(arquivo, origem)
+                                gravar_importacao(cursor, itens)
+                                conexao.commit()
+                                flash(f"Importadas {len(itens)} competência(s) ({origem}).", "success")
+                            except ValueError as e:
+                                flash(str(e), "danger")
+
+                    elif acao == "simples_carregar_sistema":
+                        qtd = carregar_sistema(cursor, mes_redir)
+                        conexao.commit()
+                        flash(f"Carregadas {qtd} competência(s) a partir das mensalidades e da folha.", "success")
+
+                    elif acao == "simples_carregar_folha":
+                        regime_carga = "simples_nacional"
+                        cursor.execute("SELECT regime_tributario FROM configuracoes WHERE id = 1")
+                        cfg_carga = cursor.fetchone() or {}
+                        if cfg_carga.get("regime_tributario"):
+                            regime_carga = cfg_carga["regime_tributario"]
+                        qtd = 0
+                        for comp in janela_competencias(mes_redir) + [mes_redir]:
+                            folha = folha_sistema_mes(cursor, comp)
+                            if not folha:
+                                _det, totais_c = montar_folha_contratos(cursor, regime_carga, comp)
+                                folha = float(totais_c.get("custo_escola") or 0)
+                            if folha:
+                                upsert_competencia(cursor, comp, None, folha, "folha", "Folha e encargos do sistema")
+                                qtd += 1
+                        conexao.commit()
+                        flash(f"Folha e encargos carregados em {qtd} competência(s).", "success")
             except Exception as e:
                 conexao.rollback()
                 flash(f"❌ Erro ao processar financeiro: {e}", "danger")
@@ -4641,6 +4790,7 @@ def pagina_financeiro():
     apuracao_simples = None
     apuracao_pis_cofins = None
     apuracao_presumido = None
+    quadro_simples = None
     nome_escola = "Gestão Escolar"
 
     busca = request.args.get("busca", "").strip()
@@ -4714,6 +4864,7 @@ def pagina_financeiro():
 
                 if regime_tributario == "simples_nacional":
                     apuracao_simples, _colabs_fator_r = calcular_apuracao_simples(cursor, mes_filtro)
+                    quadro_simples = apuracao_simples.get("quadro")
                     totais["tributos"] = apuracao_simples["das"]
                     totais["receita_bruta_mes"] = apuracao_simples["receita_mes"]
                     totais["liquido"] = totais["recebido"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
@@ -4763,6 +4914,10 @@ def pagina_financeiro():
 
                 cursor.execute("SELECT id, nome_completo, valor_mensalidade FROM alunos ORDER BY nome_completo ASC;")
                 alunos = cursor.fetchall()
+                if aba == "simples" and quadro_simples is None:
+                    quadro_simples = montar_quadro_simples(cursor, mes_filtro)
+                    if apuracao_simples is None:
+                        apuracao_simples, _colabs_fator_r = calcular_apuracao_simples(cursor, mes_filtro)
         finally:
             conexao.close()
 
@@ -4793,6 +4948,7 @@ def pagina_financeiro():
         mes_atual=mes_filtro,
         data_hoje=datetime.now().strftime('%Y-%m-%d'),
         apuracao_simples=apuracao_simples,
+        quadro_simples=quadro_simples,
         apuracao_pis_cofins=apuracao_pis_cofins,
         apuracao_presumido=apuracao_presumido,
         nome_escola=nome_escola,

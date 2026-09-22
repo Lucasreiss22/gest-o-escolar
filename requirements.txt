@@ -6,3 +6,4 @@ fpdf2>=2.7.0
 Authlib
 requests
 Werkzeug
+openpyxl

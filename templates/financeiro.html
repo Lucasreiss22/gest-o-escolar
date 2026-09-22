@@ -105,6 +105,11 @@
         .colab-pick a.sel, .colab-pick a:hover { border-color: #9b59b6; background: #f5eef8; }
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
         [hidden] { display: none !important; }
+        .simples-fora td { color: #94a3b8; }
+        .simples-apuracao { background: #fff7ed; }
+        .simples-acoes { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 12px 0; }
+        .simples-acoes .form-group { min-width: 180px; }
+        .simples-hint { font-size: 0.8rem; color: #64748b; line-height: 1.45; margin: 0 0 12px; }
     </style>
 </head>
 <body>
@@ -223,7 +228,110 @@
             <a class="{% if aba == 'receitas' %}ativa{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='receitas', busca=busca, status=status) }}">Mensalidades</a>
             <a class="{% if aba == 'folha' %}ativa{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='folha') }}">Folha e contratos</a>
             <a class="{% if aba == 'custos' %}ativa{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='custos') }}">Outros custos</a>
+            <a class="{% if aba == 'simples' %}ativa{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='simples') }}">Simples Nacional</a>
         </div>
+
+        {% if aba == 'simples' %}
+        <div class="card-box">
+            <h3 style="margin-top:0;">RBT12 e Fator R</h3>
+            <p class="simples-hint">
+                A RBT12 soma a receita bruta dos <strong>12 meses anteriores</strong> ao mês de apuração ({{ mes_label }}).
+                O mês vigente não entra nessa soma — ele é a base do DAS.
+                Quando o primeiro mês de apuração do sistema sai da janela da PGDAS, ele deixa de contar sozinho.
+                {% if quadro_simples and quadro_simples.primeira %}Primeiro mês lançado no sistema: <strong>{{ quadro_simples.primeira }}</strong>.{% endif %}
+            </p>
+            {% if apuracao_simples %}
+            <div class="resumo-grid" style="margin-bottom:18px;">
+                <div class="card-resumo"><h4>RBT12</h4><div class="valor">R$ {{ "%.2f"|format(apuracao_simples.rbt12) }}</div></div>
+                <div class="card-resumo folha"><h4>FS12</h4><div class="valor">R$ {{ "%.2f"|format(apuracao_simples.fs12) }}</div></div>
+                <div class="card-resumo"><h4>Fator R</h4><div class="valor">{{ "%.2f"|format(apuracao_simples.fator_r_pct) }}%</div><span class="hint">Anexo {{ apuracao_simples.anexo }}</span></div>
+                <div class="card-resumo tributos"><h4>DAS do mês</h4><div class="valor">R$ {{ "%.2f"|format(apuracao_simples.das) }}</div><span class="hint">{{ "%.4f"|format(apuracao_simples.aliquota_efetiva_pct) }}%</span></div>
+            </div>
+            {% endif %}
+
+            <div class="simples-acoes">
+                <form method="POST" action="{{ url_for('pagina_financeiro') }}">
+                    <input type="hidden" name="acao" value="simples_carregar_sistema">
+                    <input type="hidden" name="mes" value="{{ mes_atual }}">
+                    <input type="hidden" name="aba" value="simples">
+                    <button class="btn btn-primary" type="submit">Carregar receitas e folhas do sistema</button>
+                </form>
+                <form method="POST" action="{{ url_for('pagina_financeiro') }}">
+                    <input type="hidden" name="acao" value="simples_carregar_folha">
+                    <input type="hidden" name="mes" value="{{ mes_atual }}">
+                    <input type="hidden" name="aba" value="simples">
+                    <button class="btn btn-warning" type="submit">Carregar só folhas e encargos (12 meses)</button>
+                </form>
+                <a class="btn btn-success" href="{{ url_for('modelo_simples_csv') }}">Baixar modelo da planilha</a>
+            </div>
+
+            <form method="POST" action="{{ url_for('pagina_financeiro') }}" enctype="multipart/form-data" class="simples-acoes">
+                <input type="hidden" name="acao" value="simples_importar">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <input type="hidden" name="aba" value="simples">
+                <div class="form-group">
+                    <label>Planilha ou extrato PGDAS</label>
+                    <input type="file" name="arquivo_simples" accept=".csv,.txt,.xlsx,.xls" required>
+                </div>
+                <div class="form-group">
+                    <label>Origem</label>
+                    <select name="origem_import">
+                        <option value="planilha">Planilha</option>
+                        <option value="pgdas">Extrato PGDAS</option>
+                    </select>
+                </div>
+                <button class="btn btn-success" type="submit">Importar competências</button>
+            </form>
+            <p class="simples-hint">Aceita CSV/Excel com colunas competência e receita (e folha, se houver). No extrato PGDAS o sistema procura o mês e o valor de receita bruta em cada linha.</p>
+
+            <form method="POST" action="{{ url_for('pagina_financeiro') }}">
+                <input type="hidden" name="acao" value="simples_salvar_quadro">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <input type="hidden" name="aba" value="simples">
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Competência</th>
+                                <th>Entra no RBT12</th>
+                                <th>Receita bruta do mês</th>
+                                <th>Folha e encargos</th>
+                                <th>Origem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for linha in (quadro_simples.linhas if quadro_simples else []) %}
+                            <tr class="{% if not linha.entra_rbt12 %}simples-fora{% endif %}">
+                                <td>
+                                    <input type="hidden" name="competencia" value="{{ linha.competencia }}">
+                                    {{ linha.rotulo }}
+                                </td>
+                                <td>{% if linha.entra_rbt12 %}Sim{% else %}Não{% endif %}</td>
+                                <td><input type="text" name="receita_{{ linha.competencia }}" inputmode="decimal" data-moeda value="{{ linha.receita_bruta|moeda_campo }}" placeholder="0,00"></td>
+                                <td><input type="text" name="folha_{{ linha.competencia }}" inputmode="decimal" data-moeda value="{{ linha.folha_encargos|moeda_campo }}" placeholder="0,00"></td>
+                                <td>{{ linha.origem or '-' }}</td>
+                            </tr>
+                            {% endfor %}
+                            {% if quadro_simples and quadro_simples.linha_apuracao %}
+                            {% set ap = quadro_simples.linha_apuracao %}
+                            <tr class="simples-apuracao">
+                                <td>
+                                    <input type="hidden" name="competencia" value="{{ ap.competencia }}">
+                                    {{ ap.rotulo }} · apuração
+                                </td>
+                                <td>Não (DAS)</td>
+                                <td><input type="text" name="receita_{{ ap.competencia }}" inputmode="decimal" data-moeda value="{{ ap.receita_bruta|moeda_campo }}" placeholder="0,00"></td>
+                                <td><input type="text" name="folha_{{ ap.competencia }}" inputmode="decimal" data-moeda value="{{ ap.folha_encargos|moeda_campo }}" placeholder="0,00"></td>
+                                <td>{{ ap.origem or '-' }}</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+                <button class="btn btn-primary" type="submit" style="margin-top:12px;">Salvar lançamentos manuais</button>
+            </form>
+        </div>
+        {% endif %}
 
         {% if aba == 'resumo' %}
         <div class="fin-chart">

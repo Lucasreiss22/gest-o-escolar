@@ -14,11 +14,16 @@
 
     <!-- Conteúdo Principal -->
     <div class="content">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
             <h2 class="fw-bold text-dark">👨‍🎓 Gestão de Alunos</h2>
-            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoAluno">
-                <i class="bi bi-plus-lg"></i> Cadastrar Novo Aluno
-            </button>
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalImportarAlunos">
+                    <i class="bi bi-file-earmark-spreadsheet"></i> Importar planilha
+                </button>
+                <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoAluno">
+                    <i class="bi bi-plus-lg"></i> Cadastrar Novo Aluno
+                </button>
+            </div>
         </div>
 
         <!-- Mensagens Flash -->
@@ -137,6 +142,33 @@
                         <p class="text-muted">Nenhum aluno cadastrado no momento.</p>
                     {% endif %}
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalImportarAlunos" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Cadastrar alunos por planilha</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('pagina_alunos') }}" method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="acao" value="importar_alunos">
+                    <div class="modal-body">
+                        <p class="text-muted">Envie um CSV ou Excel com uma linha por aluno. A matrícula é gerada automaticamente. Se a coluna turma existir e o nome bater com uma turma cadastrada, o aluno já entra nela. Mensalidade e início de contrato geram as cobranças do período.</p>
+                        <p class="small">Colunas reconhecidas: <code>nome_completo</code>, <code>data_nascimento</code>, <code>cpf</code>, <code>telefone</code>, <code>email</code>, endereço, <code>mensalidade</code>, <code>turno</code>, <code>contrato_meses</code>, <code>contrato_inicio</code>, <code>turma</code>, <code>resp1_nome</code>, <code>resp1_cpf</code>, <code>resp1_email</code>.</p>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Arquivo</label>
+                            <input type="file" name="planilha_alunos" class="form-control" accept=".csv,.txt,.xlsx,.xls" required>
+                        </div>
+                        <a href="{{ url_for('modelo_alunos_csv') }}" class="btn btn-outline-success btn-sm">Baixar planilha modelo</a>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">Importar alunos</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
