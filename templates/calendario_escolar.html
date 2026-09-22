@@ -227,35 +227,42 @@
                         <p style="color:#b91c1c; margin:0;">Feriado / recesso — não há chamada neste dia.</p>
                     {% elif dia_normal %}
                         {% if contexto_turma %}
-                            <form method="POST" action="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=dia_selecionado, **cal_params) }}">
+                            {% if lista_frequencia_dia %}
+                            <table>
+                                <thead><tr><th>Aluno</th><th>Situação</th></tr></thead>
+                                <tbody>
+                                {% for al in lista_frequencia_dia %}
+                                    <tr>
+                                        <td>{{ al.nome_completo }}</td>
+                                        <td>
+                                            {% if pode_alterar('calendario') %}
+                                            <select name="status_{{ al.id }}" form="formChamadaDia">
+                                                <option value="presente" {% if al.status == 'presente' or not al.status %}selected{% endif %}>Presente</option>
+                                                <option value="falta" {% if al.status == 'falta' %}selected{% endif %}>Falta</option>
+                                                <option value="justificada" {% if al.status == 'justificada' %}selected{% endif %}>Justificada</option>
+                                            </select>
+                                            {% else %}
+                                            {% if al.status == 'falta' %}Falta{% elif al.status == 'justificada' %}Justificada{% elif al.status == 'presente' %}Presente{% else %}Sem lançamento{% endif %}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                            {% if pode_alterar('calendario') %}
+                            <form id="formChamadaDia" method="POST" action="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=dia_selecionado, **cal_params) }}">
                                 <input type="hidden" name="acao" value="marcar_frequencia">
                                 <input type="hidden" name="turma_id" value="{{ contexto_turma.id }}">
                                 <input type="hidden" name="data_aula" value="{{ dia_selecionado }}">
-                                {% if lista_frequencia_dia %}
-                                <table>
-                                    <thead><tr><th>Aluno</th><th>Situação</th></tr></thead>
-                                    <tbody>
-                                    {% for al in lista_frequencia_dia %}
-                                        <tr>
-                                            <td>{{ al.nome_completo }}</td>
-                                            <td>
-                                                <select name="status_{{ al.id }}">
-                                                    <option value="presente" {% if al.status == 'presente' or not al.status %}selected{% endif %}>Presente</option>
-                                                    <option value="falta" {% if al.status == 'falta' %}selected{% endif %}>Falta</option>
-                                                    <option value="justificada" {% if al.status == 'justificada' %}selected{% endif %}>Justificada</option>
-                                                </select>
-                                            </td>
-                                        </tr>
-                                    {% endfor %}
-                                    </tbody>
-                                </table>
                                 <button class="btn btn-success" type="submit" style="margin-top: 12px;">Salvar chamada do dia</button>
-                                {% else %}
-                                <p style="color:#b91c1c;">Nenhum aluno matriculado nesta turma.</p>
-                                {% endif %}
                             </form>
+                            {% endif %}
+                            {% else %}
+                            <p style="color:#b91c1c;">Nenhum aluno matriculado nesta turma.</p>
+                            {% endif %}
                         {% elif contexto_aluno %}
-                            <p>Situação atual: <strong>{{ frequencia_aluno_dia.status if frequencia_aluno_dia else 'sem lançamento' }}</strong></p>
+                            <p>Situação atual: <strong>{% if frequencia_aluno_dia and frequencia_aluno_dia.status == 'falta' %}Falta{% elif frequencia_aluno_dia and frequencia_aluno_dia.status == 'justificada' %}Justificada{% elif frequencia_aluno_dia %}Presente{% else %}sem lançamento{% endif %}</strong></p>
+                            {% if pode_alterar('calendario') %}
                             <form method="POST" action="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=dia_selecionado, **cal_params) }}">
                                 <input type="hidden" name="acao" value="marcar_frequencia">
                                 <input type="hidden" name="aluno_id" value="{{ contexto_aluno.id }}">
@@ -271,8 +278,9 @@
                                 </div>
                                 <button class="btn btn-success" type="submit">Salvar presença</button>
                             </form>
+                            {% endif %}
                         {% else %}
-                            <p style="margin-bottom: 8px;">Dia letivo. Escolha a turma para lançar a chamada:</p>
+                            <p style="margin-bottom: 8px;">Dia letivo. Escolha a turma para {% if pode_alterar('calendario') %}lançar{% else %}ver{% endif %} a chamada:</p>
                             <div style="display:flex; flex-wrap:wrap; gap:8px;">
                                 {% for t in turmas %}
                                 <a class="btn btn-primary" href="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=dia_selecionado, turma_id=t.id) }}">{{ t.nome }}</a>
@@ -285,7 +293,7 @@
         </div>
         {% endif %}
 
-        {% if not modo_presenca %}
+        {% if not modo_presenca and pode_alterar('calendario') %}
         <div class="card-box">
             <h3 style="margin-bottom: 12px;">Novo evento da escola</h3>
             <form method="POST">

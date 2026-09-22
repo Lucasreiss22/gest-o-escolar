@@ -257,7 +257,7 @@
             </div>
         </form>
 
-        <details class="card border-0 shadow-sm mb-4" {% if not pode('pedagogico_cadastro') %}hidden{% endif %}>
+        <details class="card border-0 shadow-sm mb-4" {% if not pode_alterar('pedagogico_cadastro') %}hidden{% endif %}>
             <summary class="card-body py-3 fw-bold" style="cursor:pointer;">Cadastrar nova turma</summary>
             <div class="card-body pt-0">
                 <form action="{{ url_for('pagina_pedagogico') }}" method="POST">
@@ -510,7 +510,7 @@
                 <div class="vinculo-box">
                     <strong>Alunos desta turma</strong>
                     <p class="small text-muted mb-2">O vínculo usa o cadastro em Gestão de Alunos. Tirar da turma não apaga o aluno.</p>
-                    {% if pode('pedagogico_cadastro') %}
+                    {% if pode_alterar('pedagogico_cadastro') %}
                     <div class="d-flex flex-wrap gap-2 mb-3">
                         <a class="btn btn-outline-primary btn-sm" href="{{ url_for('pagina_alunos', turma_id=turma.id, novo=1, voltar=1) }}">Cadastrar aluno novo já nesta turma</a>
                     </div>
@@ -589,6 +589,7 @@
                         </div>
                     </form>
                     <div class="d-flex flex-wrap gap-2">
+                        {% if pode_alterar('pedagogico') %}
                         <form method="POST" class="m-0">
                             <input type="hidden" name="acao" value="marcar_presenca_turma">
                             <input type="hidden" name="turma_id" value="{{ turma.id }}">
@@ -605,6 +606,7 @@
                             {{ ctx_turma('alunos') }}
                             <button class="btn btn-sm btn-outline-danger" type="submit" name="status" value="falta">Todos faltaram</button>
                         </form>
+                        {% endif %}
                         <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='chamada', periodo='dia', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF chamada do dia</a>
                         <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='semana', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF da semana</a>
                         <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='mes', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF do mês</a>
@@ -629,6 +631,7 @@
                                     <td><a href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}" class="text-primary text-decoration-none fw-bold">{{ al.nome }}</a></td>
                                     <td>{{ al.matricula or '-' }}</td>
                                     <td>
+                                        {% if pode_alterar('pedagogico') %}
                                         <form method="POST" class="d-inline">
                                             <input type="hidden" name="acao" value="marcar_presenca_aluno">
                                             <input type="hidden" name="turma_id" value="{{ turma.id }}">
@@ -639,10 +642,11 @@
                                             <button class="btn btn-sm {% if st == 'presente' %}btn-success{% else %}btn-outline-success{% endif %}" type="submit" name="status" value="presente">Sim</button>
                                             <button class="btn btn-sm {% if st == 'falta' %}btn-danger{% else %}btn-outline-danger{% endif %}" type="submit" name="status" value="falta">Não</button>
                                         </form>
+                                        {% elif st == 'falta' %}Falta{% elif st == 'presente' %}Presente{% else %}Sem lançamento{% endif %}
                                     </td>
                                     <td class="text-end">
                                         <a class="btn btn-sm btn-outline-primary" href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}">Cadastro</a>
-                                        {% if pode('pedagogico_cadastro') %}
+                                        {% if pode_alterar('pedagogico_cadastro') %}
                                         <form method="POST" style="display:inline;">
                                             <input type="hidden" name="acao" value="desvincular_aluno">
                                             <input type="hidden" name="turma_id" value="{{ turma.id }}">
