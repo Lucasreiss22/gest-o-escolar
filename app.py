@@ -3122,7 +3122,36 @@ def pagina_alunos():
 
     if request.method == "POST":
         acao = request.form.get("acao", "cadastrar_aluno")
-        
+
+        if acao == "excluir_alunos":
+            ids = []
+            for bruto in request.form.getlist("aluno_id"):
+                try:
+                    aluno_id = int(bruto)
+                except (TypeError, ValueError):
+                    continue
+                if aluno_id not in ids:
+                    ids.append(aluno_id)
+            if not ids:
+                flash("Selecione ao menos um aluno para excluir.", "danger")
+                return redirect(url_for("pagina_alunos"))
+            conexao = obter_conexao()
+            if not conexao:
+                flash("Não foi possível conectar ao banco para excluir os alunos.", "danger")
+                return redirect(url_for("pagina_alunos"))
+            try:
+                with conexao.cursor() as cursor:
+                    cursor.execute("DELETE FROM alunos WHERE id = ANY(%s)", (ids,))
+                    apagados = cursor.rowcount
+                conexao.commit()
+                flash(f"{apagados} aluno(s) excluído(s).", "success")
+            except Exception as e:
+                conexao.rollback()
+                flash(f"Erro ao excluir os alunos selecionados: {e}", "danger")
+            finally:
+                conexao.close()
+            return redirect(url_for("pagina_alunos"))
+
         if acao == "editar_aluno":
             aluno_id = request.form.get("aluno_id")
             if aluno_id:

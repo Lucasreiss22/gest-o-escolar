@@ -58,11 +58,20 @@
         <!-- Tabela de Alunos Matriculados -->
         <div class="card border-0 shadow-sm">
             <div class="card-body p-4">
-                <h3 class="fs-5 text-secondary fw-bold mb-3">Alunos Matriculados</h3>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                    <h3 class="fs-5 text-secondary fw-bold mb-0">Alunos Matriculados</h3>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="btnExcluirSel" data-bs-toggle="modal" data-bs-target="#modalExcluirAlunos" disabled>
+                        Excluir selecionados
+                    </button>
+                </div>
+                <form id="formExcluirAlunos" action="{{ url_for('pagina_alunos') }}" method="POST">
+                    <input type="hidden" name="acao" value="excluir_alunos">
+                </form>
                 <div class="table-responsive hide-mobile">
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
+                                <th style="width:42px;"><input type="checkbox" class="form-check-input js-todos-excluir" title="Selecionar todos" aria-label="Selecionar todos"></th>
                                 <th>Matrícula</th>
                                 <th>Nome do Aluno</th>
                                 <th>Telefone</th>
@@ -76,6 +85,7 @@
                             {% if alunos %}
                                 {% for aluno in alunos %}
                                 <tr>
+                                    <td><input class="form-check-input js-excluir-aluno" type="checkbox" name="aluno_id" value="{{ aluno.id }}" form="formExcluirAlunos" aria-label="Selecionar {{ aluno.nome_completo or aluno.nome }}"></td>
                                     <td>{{ aluno.matricula }}</td>
                                     <td>
                                         <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="text-primary text-decoration-none fw-bold d-flex align-items-center gap-2">
@@ -111,7 +121,7 @@
                                 {% endfor %}
                             {% else %}
                                 <tr>
-                                    <td colspan="7" class="text-center py-4 text-muted">Nenhum aluno cadastrado no momento.</td>
+                                    <td colspan="8" class="text-center py-4 text-muted">Nenhum aluno cadastrado no momento.</td>
                                 </tr>
                             {% endif %}
                         </tbody>
@@ -122,6 +132,10 @@
                         {% for aluno in alunos %}
                         {% set st = (aluno.status or aluno.situacao or 'ativo') | lower %}
                         <article class="list-card">
+                            <label class="d-flex align-items-center gap-2 mb-2">
+                                <input class="form-check-input js-excluir-aluno" type="checkbox" name="aluno_id" value="{{ aluno.id }}" form="formExcluirAlunos" aria-label="Selecionar {{ aluno.nome_completo or aluno.nome }}">
+                                <span>Selecionar</span>
+                            </label>
                             <h3 class="d-flex align-items-center gap-2">
                                 {% with foto_atual=aluno.foto_url, foto_nome=aluno.nome_completo or aluno.nome %}{% include '_foto_mini.html' %}{% endwith %}
                                 {{ aluno.nome_completo or aluno.nome }}
@@ -403,9 +417,62 @@
         </div>
     </div>
 
+    <div class="modal fade" id="modalExcluirAlunos" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">Confirmar exclusão</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0" id="textoExcluirAlunos">Selecione os alunos e confirme para excluir.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-danger" form="formExcluirAlunos">Confirmar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap JS Bundle -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var botao = document.getElementById("btnExcluirSel");
+        var texto = document.getElementById("textoExcluirAlunos");
+        function marcados() {
+            var ids = {};
+            document.querySelectorAll(".js-excluir-aluno:checked").forEach(function (el) { ids[el.value] = true; });
+            return Object.keys(ids);
+        }
+        function atualizar() {
+            var n = marcados().length;
+            if (botao) {
+                botao.disabled = n === 0;
+                botao.textContent = n ? "Excluir selecionados (" + n + ")" : "Excluir selecionados";
+            }
+            if (texto) {
+                texto.textContent = n === 1
+                    ? "Excluir 1 aluno selecionado? Essa ação não pode ser desfeita."
+                    : "Excluir " + n + " alunos selecionados? Essa ação não pode ser desfeita.";
+            }
+        }
+        document.querySelectorAll(".js-excluir-aluno").forEach(function (el) {
+            el.addEventListener("change", atualizar);
+        });
+        document.querySelectorAll(".js-todos-excluir").forEach(function (todos) {
+            todos.addEventListener("change", function () {
+                var tabela = todos.closest("table");
+                if (!tabela) return;
+                tabela.querySelectorAll(".js-excluir-aluno").forEach(function (el) { el.checked = todos.checked; });
+                atualizar();
+            });
+        });
+        atualizar();
+    });
+    </script>
     {% if abrir_cadastro %}
     <script>
     document.addEventListener("DOMContentLoaded", function () {
