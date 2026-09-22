@@ -1489,11 +1489,51 @@ def nome_mes_extenso(mes_filtro):
     return f"{meses[mes - 1].capitalize()}/{ano}"
 
 
+def _id_funcionario_da_sessao(email=None):
+    """Liga o login ao cadastro da equipe pelo usuário ou pelo mesmo e-mail."""
+    email = (email or session.get("usuario_email") or "").strip().lower()
+    uid = session.get("usuario_id")
+    conexao = obter_conexao()
+    if not conexao:
+        return None
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            row = None
+            if uid:
+                cursor.execute(
+                    "SELECT id FROM funcionarios WHERE usuario_id = %s ORDER BY id LIMIT 1",
+                    (uid,),
+                )
+                row = cursor.fetchone()
+            if not row and email:
+                cursor.execute(
+                    "SELECT id FROM funcionarios WHERE LOWER(TRIM(email)) = %s ORDER BY id LIMIT 1",
+                    (email,),
+                )
+                row = cursor.fetchone()
+                if row and uid:
+                    cursor.execute(
+                        "UPDATE funcionarios SET usuario_id = %s WHERE id = %s AND usuario_id IS NULL",
+                        (uid, row["id"]),
+                    )
+                    conexao.commit()
+            return row["id"] if row else None
+    except Exception:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        conexao.close()
+
+
 def _iniciar_sessao(usuario, email):
     session["usuario_id"] = usuario["id"]
     session["usuario_nome"] = usuario.get("nome") or usuario.get("nome_completo") or email
     session["usuario_papel"] = normalizar_papel(usuario.get("papel") or usuario.get("cargo") or "admin")
     session["usuario_email"] = email
+    session["funcionario_id"] = _id_funcionario_da_sessao(email)
 
 
 def _entrar_plataforma(admin):
@@ -5704,6 +5744,8 @@ def contracheque():
         _processar_contracheques_escola(enviar=False)
     except Exception:
         pass
+    if not session.get("funcionario_id"):
+        session["funcionario_id"] = _id_funcionario_da_sessao()
     conexao = obter_conexao()
     item = None
     itens = []
@@ -5863,6 +5905,8 @@ def pdf_contracheque_rota():
         return redirect(url_for("login"))
     mes_filtro = request.values.get("mes") or datetime.now().strftime("%Y-%m")
     garantir_tabelas_folha()
+    if not session.get("funcionario_id"):
+        session["funcionario_id"] = _id_funcionario_da_sessao()
     conexao = obter_conexao()
     if not conexao:
         return redirect(url_for("contracheque", mes=mes_filtro))
