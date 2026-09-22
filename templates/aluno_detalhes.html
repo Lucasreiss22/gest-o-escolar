@@ -815,7 +815,7 @@
                             
                             <div class="col-md-6">
                                 <label class="form-label small fw-bold">Valor (R$)</label>
-                                <input type="text" name="valor" class="form-control" value="{{ '%.2f'|format(aluno.valor_mensalidade or aluno.mensalidade_base or 0) }}" data-moeda required>
+                                <input type="text" name="valor" class="form-control" value="{{ aluno.valor_mensalidade|moeda_campo }}" data-moeda placeholder="Digite o valor" inputmode="numeric" required>
                             </div>
                             
                             <div class="col-md-6">
@@ -905,7 +905,7 @@
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label small fw-bold">Mensalidade (R$)</label>
-                                <input type="text" name="valor_mensalidade" class="form-control" data-moeda value="{{ '%.2f'|format(aluno.valor_mensalidade or aluno.mensalidade_base or 0) }}">
+                                <input type="text" name="valor_mensalidade" class="form-control" data-moeda placeholder="Digite o valor" inputmode="numeric" value="{{ (aluno.valor_mensalidade or aluno.mensalidade_base)|moeda_campo }}">
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label small fw-bold">Duração do contrato</label>

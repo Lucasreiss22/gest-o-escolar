@@ -610,3 +610,56 @@ input, select, textarea, button {
     font-size: 0.82rem;
     color: #64748b;
 }
+
+.hora-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.hora-picker-linhas {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.hora-sel {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #475569;
+}
+
+.hora-sel select {
+    min-width: 90px;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    background: #fff;
+}
+
+.hora-atalhos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.hora-atalhos button {
+    border: 1px solid #dbe3ee;
+    background: #f8fafc;
+    color: #1e3a5f;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.hora-atalhos button:hover,
+.hora-atalhos button.sel {
+    background: #dbeafe;
+    border-color: #3b82f6;
+}

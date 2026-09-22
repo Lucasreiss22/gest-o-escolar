@@ -108,15 +108,15 @@
                     <div class="grade-ajuste">
                         <div>
                             <label>Horas extras 50% (dias úteis)</label>
-                            <input name="horas_extras" id="he50" value="{{ '%.2f'|format(item.horas_extras or 0) }}" inputmode="decimal">
+                            {% with hora_name='horas_extras', hora_valor=item.horas_extras or 0, hora_atalhos=[1, 2, 4, 6, 8, 10, 12] %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div>
                             <label>Horas extras 100% (domingo/feriado)</label>
-                            <input name="horas_extras_100" id="he100" value="{{ '%.2f'|format(item.horas_extras_100 or 0) }}" inputmode="decimal">
+                            {% with hora_name='horas_extras_100', hora_valor=item.horas_extras_100 or 0, hora_atalhos=[1, 2, 4, 6, 8, 10, 12] %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div>
-                            <label>Valor da hora extra 50% (0 = automático)</label>
-                            <input name="valor_hora_extra" id="vhe50" data-moeda value="{{ '%.2f'|format(item.valor_hora_extra_cadastro or 0) }}">
+                            <label>Valor da hora extra 50% (vazio = automático)</label>
+                            <input name="valor_hora_extra" id="vhe50" data-moeda placeholder="Digite o valor" value="{{ item.valor_hora_extra_cadastro|moeda_campo }}">
                         </div>
                     </div>
                     <p class="hint" id="he-preview">
@@ -168,19 +168,22 @@
     <script>
     (function () {
         var horaNormal = {{ item.hora_normal if item else 0 }};
-        var he50 = document.getElementById("he50");
-        var he100 = document.getElementById("he100");
+        var form = document.querySelector("#holerite form") || document.querySelector("form");
+        var he50 = form ? form.querySelector("[name='horas_extras']") : null;
+        var he100 = form ? form.querySelector("[name='horas_extras_100']") : null;
         var vhe50 = document.getElementById("vhe50");
         var preview = document.getElementById("he-preview");
         function num(el) {
             if (!el) return 0;
-            return parseFloat(String(el.value || "0").replace(/\./g, "").replace(",", ".")) || parseFloat(el.value) || 0;
+            var s = String(el.value || "0").replace("R$", "").trim();
+            if (s.indexOf(",") >= 0) s = s.replace(/\./g, "").replace(",", ".");
+            return parseFloat(s) || 0;
         }
         function atualizar() {
             if (!preview) return;
-            var h50 = parseFloat((he50 && he50.value || "0").replace(",", ".")) || 0;
-            var h100 = parseFloat((he100 && he100.value || "0").replace(",", ".")) || 0;
-            var informado = parseFloat((vhe50 && vhe50.value || "0").replace(",", ".")) || 0;
+            var h50 = num(he50);
+            var h100 = num(he100);
+            var informado = num(vhe50);
             var v50 = informado > 0 ? informado : horaNormal * 1.5;
             var v100 = horaNormal * 2;
             var a50 = h50 * v50;
@@ -192,9 +195,8 @@
                 + " · DSR extras R$ " + dsr.toFixed(2)
                 + ". Salve para recalcular INSS, IRRF e líquido.";
         }
-        [he50, he100, vhe50].forEach(function (el) {
-            if (el) el.addEventListener("input", atualizar);
-        });
+        if (form) form.addEventListener("change", atualizar);
+        if (vhe50) vhe50.addEventListener("input", atualizar);
         atualizar();
         if ({{ 'true' if item and admin_folha else 'false' }}) {
             var alvo = document.getElementById("holerite");

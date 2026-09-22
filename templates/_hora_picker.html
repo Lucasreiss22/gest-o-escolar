@@ -1,0 +1,31 @@
+{% set _name = hora_name|default('horas_mes') %}
+{% set _valor = hora_valor|default(0) %}
+{% set _h = _valor|hora_h %}
+{% set _m = _valor|hora_m %}
+{% set _atalhos = hora_atalhos|default([8, 16, 20, 40, 60, 80, 100, 120, 160, 176, 220]) %}
+<div class="hora-picker" data-hora-picker>
+    <div class="hora-picker-linhas">
+        <label class="hora-sel">
+            <span>Horas</span>
+            <select data-hora-h>
+                {% for n in range(0, 221) %}
+                <option value="{{ n }}" {% if _h == n %}selected{% endif %}>{{ n }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="hora-sel">
+            <span>Minutos</span>
+            <select data-hora-m>
+                {% for n in [0, 15, 30, 45, 50] %}
+                <option value="{{ n }}" {% if _m == n %}selected{% endif %}>{{ '%02d'|format(n) }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+    <div class="hora-atalhos">
+        {% for n in _atalhos %}
+        <button type="button" data-hora-atalho="{{ n }}">{{ n }}h</button>
+        {% endfor %}
+    </div>
+    <input type="hidden" name="{{ _name }}" value="{% if _valor %}{{ '%.2f'|format(_valor|float) }}{% else %}0{% endif %}">
+</div>

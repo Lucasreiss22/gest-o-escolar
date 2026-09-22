@@ -224,7 +224,7 @@
                         <label data-contratos="clt_mensalista">Salário mensal bruto (R$)</label>
                         <label data-contratos="pj">Valor da NFS-e (R$)</label>
                         <label data-contratos="rpa">Valor bruto do RPA (R$)</label>
-                        <input name="salario" data-obrigatorio data-moeda value="{{ '%.2f'|format(cadastro.salario|float if cadastro.salario else 0) }}">
+                        <input name="salario" data-obrigatorio data-moeda placeholder="Digite o valor" value="{{ cadastro.salario|moeda_campo }}">
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa">
                         <label>PIS / NIT</label>
@@ -237,11 +237,11 @@
                     </div>
                     <div class="form-group" data-contratos="clt_horista">
                         <label>Valor da hora-aula (R$)</label>
-                        <input name="valor_hora" data-obrigatorio data-moeda value="{{ '%.2f'|format(cadastro.valor_hora|float if cadastro.valor_hora else 0) }}">
+                        <input name="valor_hora" data-obrigatorio data-moeda placeholder="Digite o valor" value="{{ cadastro.valor_hora|moeda_campo }}">
                     </div>
                     <div class="form-group" data-contratos="clt_horista">
                         <label>Horas trabalhadas no mês</label>
-                        <input name="horas_mes" data-obrigatorio value="{{ '%.2f'|format(cadastro.horas_mes|float if cadastro.horas_mes else 0) }}">
+                        {% with hora_name='horas_mes', hora_valor=cadastro.horas_mes or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                     </div>
 
                     <div class="regra-box" data-contratos="pj">
@@ -294,15 +294,15 @@
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Horas extras 50% (dias úteis)</label>
-                        <input name="horas_extras" value="{{ '%.2f'|format(cadastro.horas_extras|float if cadastro.horas_extras else 0) }}">
+                        {% with hora_name='horas_extras', hora_valor=cadastro.horas_extras or 0, hora_atalhos=[1, 2, 4, 6, 8, 10, 12] %}{% include '_hora_picker.html' %}{% endwith %}
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Horas extras 100% (domingos e feriados)</label>
-                        <input name="horas_extras_100" value="{{ '%.2f'|format(cadastro.horas_extras_100|float if cadastro.horas_extras_100 else 0) }}">
+                        {% with hora_name='horas_extras_100', hora_valor=cadastro.horas_extras_100 or 0, hora_atalhos=[1, 2, 4, 6, 8, 10, 12] %}{% include '_hora_picker.html' %}{% endwith %}
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
-                        <label>Valor da hora extra 50% (R$). 0 = salário ÷ 220 × 1,5 (CLT)</label>
-                        <input name="valor_hora_extra" data-moeda value="{{ '%.2f'|format(cadastro.valor_hora_extra|float if cadastro.valor_hora_extra else 0) }}">
+                        <label>Valor da hora extra 50% (R$). Vazio = salário ÷ 220 × 1,5 (CLT)</label>
+                        <input name="valor_hora_extra" data-moeda placeholder="Digite o valor" value="{{ cadastro.valor_hora_extra|moeda_campo }}">
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Enviar contra-cheque no dia</label>

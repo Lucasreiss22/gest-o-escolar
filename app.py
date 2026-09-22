@@ -227,6 +227,44 @@ def _float_form(nome, padrao=0.0):
     return _parse_moeda(request.form.get(nome), padrao)
 
 
+@app.template_filter("moeda_campo")
+def moeda_campo(valor):
+    try:
+        n = float(valor or 0)
+    except (TypeError, ValueError):
+        return ""
+    if n <= 0:
+        return ""
+    inteiro, frac = f"{n:.2f}".split(".")
+    grupos = []
+    while inteiro:
+        grupos.append(inteiro[-3:])
+        inteiro = inteiro[:-3]
+    return ".".join(reversed(grupos)) + "," + frac
+
+
+@app.template_filter("hora_h")
+def hora_h(valor):
+    try:
+        n = float(valor or 0)
+    except (TypeError, ValueError):
+        return 0
+    return int(n)
+
+
+@app.template_filter("hora_m")
+def hora_m(valor):
+    try:
+        n = float(valor or 0)
+    except (TypeError, ValueError):
+        return 0
+    minutos = int(round((n - int(n)) * 60))
+    if minutos >= 60:
+        return 0
+    opcoes = (0, 15, 30, 45, 50)
+    return min(opcoes, key=lambda x: abs(x - minutos))
+
+
 def _formacao_do_form():
     flags = [item.strip() for item in request.form.getlist("formacao_flag") if (item or "").strip()]
     curso = (request.form.get("formacao_curso") or request.form.get("formacao") or "").strip()

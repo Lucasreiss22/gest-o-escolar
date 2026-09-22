@@ -280,20 +280,96 @@
     document.addEventListener("blur", function (event) {
         var campo = event.target;
         if (!campo || !campo.hasAttribute("data-moeda")) return;
+        aplicarMascaraMoeda(campo);
+    }, true);
+
+    var NOMES_MOEDA = {
+        salario: 1, valor: 1, valor_hora: 1, valor_mensalidade: 1, desconto_valor: 1,
+        valor_custo: 1, valor_bruto_custo: 1, valor_hora_extra: 1
+    };
+
+    function soDigitos(s) {
+        return String(s || "").replace(/\D/g, "");
+    }
+
+    function formatarMoedaBR(digitos) {
+        var d = String(digitos || "").replace(/^0+/, "");
+        if (!d) return "";
+        if (d.length === 1) d = "0" + d;
+        if (d.length === 2) d = "0" + d;
+        var cent = d.slice(-2);
+        var inteiro = d.slice(0, -2);
+        var grupos = [];
+        while (inteiro.length > 3) {
+            grupos.unshift(inteiro.slice(-3));
+            inteiro = inteiro.slice(0, -3);
+        }
+        if (inteiro) grupos.unshift(inteiro);
+        return grupos.join(".") + "," + cent;
+    }
+
+    function aplicarMascaraMoeda(campo) {
+        if (!campo) return;
         var bruto = (campo.value || "").trim();
         if (!bruto) {
-            campo.value = "0.00";
+            campo.value = "";
             return;
         }
-        var s = bruto.replace("R$", "").replace(/\s/g, "");
-        if (s.indexOf(",") >= 0) s = s.replace(/\./g, "").replace(",", ".");
-        var n = parseFloat(s);
-        if (isNaN(n)) {
-            campo.value = bruto;
+        var d = soDigitos(bruto);
+        if (!d || parseInt(d, 10) === 0) {
+            campo.value = "";
             return;
         }
-        campo.value = n.toFixed(2);
-    }, true);
+        if (d.length > 12) d = d.slice(-12);
+        campo.value = formatarMoedaBR(d);
+    }
+
+    function ligarCamposMoeda() {
+        document.querySelectorAll("input").forEach(function (el) {
+            var nome = el.getAttribute("name") || "";
+            if (NOMES_MOEDA[nome] || el.hasAttribute("data-moeda")) {
+                el.setAttribute("data-moeda", "");
+                el.setAttribute("inputmode", "numeric");
+                if (!el.getAttribute("placeholder")) el.setAttribute("placeholder", "Digite o valor");
+                aplicarMascaraMoeda(el);
+            }
+        });
+    }
+
+    document.addEventListener("input", function (event) {
+        var campo = event.target;
+        if (campo && campo.hasAttribute("data-moeda")) aplicarMascaraMoeda(campo);
+    });
+
+    function ligarHoraPickers() {
+        document.querySelectorAll("[data-hora-picker]").forEach(function (box) {
+            if (box._horaOk) return;
+            box._horaOk = true;
+            var hidden = box.querySelector("input[type='hidden']");
+            var selH = box.querySelector("[data-hora-h]");
+            var selM = box.querySelector("[data-hora-m]");
+            if (!hidden || !selH || !selM) return;
+            function gravar() {
+                var h = parseInt(selH.value, 10) || 0;
+                var m = parseInt(selM.value, 10) || 0;
+                hidden.value = (h + m / 60).toFixed(2);
+                box.querySelectorAll("[data-hora-atalho]").forEach(function (btn) {
+                    btn.classList.toggle("sel", parseInt(btn.getAttribute("data-hora-atalho"), 10) === h && m === 0);
+                });
+            }
+            selH.addEventListener("change", gravar);
+            selM.addEventListener("change", gravar);
+            box.addEventListener("click", function (event) {
+                var btn = event.target.closest("[data-hora-atalho]");
+                if (!btn) return;
+                event.preventDefault();
+                selH.value = String(parseInt(btn.getAttribute("data-hora-atalho"), 10) || 0);
+                selM.value = "0";
+                gravar();
+            });
+            gravar();
+        });
+    }
 
     document.addEventListener("change", function (event) {
         var input = event.target;
@@ -318,10 +394,14 @@
             aplicarCamposContrato();
             aplicarCamposCusto();
             ligarTodosCep();
+            ligarCamposMoeda();
+            ligarHoraPickers();
         });
     } else {
         aplicarCamposContrato();
         aplicarCamposCusto();
         ligarTodosCep();
+        ligarCamposMoeda();
+        ligarHoraPickers();
     }
 })();
