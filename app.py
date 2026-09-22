@@ -24,7 +24,7 @@ from email_envio import (
     normalizar_email,
     aviso_caixa_entrada,
 )
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 from alunos import (
     cadastrar_aluno,
     cadastrar_alunos_lote,
@@ -636,8 +636,56 @@ def _rotulo_turno_mensalidade(turnos):
         "híbrido": "híbrido (manhã e tarde)",
         "integral": "híbrido (manhã e tarde)",
         "dois": "híbrido (manhã e tarde)",
+        "tarde_noite": "tarde e noite",
     }
     return mapa.get((turnos or "manha").strip().lower(), "manhã")
+
+
+def _gerar_mensalidades_lote(cursor, alunos_ok):
+    ids = [row["aluno_id"] for row in alunos_ok if row.get("aluno_id")]
+    if not ids:
+        return 0
+    cursor.execute(
+        """
+        SELECT aluno_id, TO_CHAR(data_vencimento, 'YYYY-MM') AS comp
+        FROM financeiro_mensalidades
+        WHERE aluno_id = ANY(%s)
+        """,
+        (ids,),
+    )
+    existentes = set()
+    for row in cursor.fetchall() or []:
+        existentes.add((row["aluno_id"], row["comp"]))
+    linhas = []
+    for row in alunos_ok:
+        dados = row.get("aluno") or {}
+        valor = float(dados.get("valor_mensalidade") or 0)
+        if valor <= 0 or not row.get("aluno_id"):
+            continue
+        inicio = dados.get("contrato_inicio") or datetime.now().strftime("%Y-%m-%d")
+        meses = max(int(dados.get("contrato_meses") or 12), 1)
+        turnos = dados.get("turnos_mensalidade") or "manha"
+        rotulo = _rotulo_turno_mensalidade(turnos)
+        for i in range(meses):
+            venc = _add_months(inicio, i)
+            comp = venc.strftime("%Y-%m")
+            if (row["aluno_id"], comp) in existentes:
+                continue
+            descricao = f"Mensalidade {venc.strftime('%m/%Y')} ({i + 1}/{meses}) · {rotulo}"
+            linhas.append((row["aluno_id"], descricao, valor, venc, "Pendente", turnos, i + 1))
+    if not linhas:
+        return 0
+    execute_values(
+        cursor,
+        """
+        INSERT INTO financeiro_mensalidades
+            (aluno_id, descricao, valor, data_vencimento, status, turno, parcela_contrato)
+        VALUES %s
+        """,
+        linhas,
+        page_size=500,
+    )
+    return len(linhas)
 
 
 def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos, descricao_base="Mensalidade"):
@@ -3284,7 +3332,7 @@ def pagina_alunos():
                 if not itens:
                     flash("A planilha não trouxe nenhum aluno válido.", "danger")
                     return redirect(url_for("pagina_alunos"))
-                ok, erros = cadastrar_alunos_lote(itens)
+                ok, erros, avisos = cadastrar_alunos_lote(itens)
             except Exception as e:
                 flash(f"Não foi possível importar a planilha: {e}", "danger")
                 return redirect(url_for("pagina_alunos"))
@@ -3292,36 +3340,31 @@ def pagina_alunos():
                 conexao_lote = obter_conexao()
                 if conexao_lote:
                     try:
-                        with conexao_lote.cursor() as cursor:
-                            for row in ok:
-                                dados = row["aluno"]
-                                valor = float(dados.get("valor_mensalidade") or 0)
-                                if valor <= 0:
-                                    continue
-                                inicio = dados.get("contrato_inicio") or datetime.now().strftime("%Y-%m-%d")
-                                meses_c = int(dados.get("contrato_meses") or 12)
-                                _gerar_mensalidades_contrato(
-                                    cursor,
-                                    row["aluno_id"],
-                                    valor,
-                                    inicio,
-                                    meses_c,
-                                    dados.get("turnos_mensalidade") or "manha",
-                                )
+                        with conexao_lote.cursor(cursor_factory=RealDictCursor) as cursor:
+                            _gerar_mensalidades_lote(cursor, ok)
                         conexao_lote.commit()
                     except Exception as e:
                         conexao_lote.rollback()
                         flash(f"Alunos salvos, mas as mensalidades do lote falharam: {e}", "danger")
                     finally:
                         conexao_lote.close()
-            msg = f"{len(ok)} aluno(s) cadastrado(s) pela planilha."
+            novos = sum(1 for row in ok if not row.get("atualizado"))
+            atualizados = len(ok) - novos
+            partes = []
+            if novos:
+                partes.append(f"{novos} aluno(s) cadastrado(s)")
+            if atualizados:
+                partes.append(f"{atualizados} atualizado(s) com os dados da planilha")
+            msg = ", ".join(partes) or "Nenhum aluno importado."
+            if avisos:
+                msg += " Avisos: " + " | ".join(avisos[:6])
             if erros:
                 extra = " | ".join(erros[:8])
                 if len(erros) > 8:
                     extra += f" (+{len(erros) - 8})"
                 flash(f"{msg} Falhas: {extra}", "danger" if not ok else "success")
             else:
-                flash(msg, "success")
+                flash(msg, "success" if ok else "danger")
             return redirect(url_for("pagina_alunos"))
 
         if acao == "cadastrar_aluno":

@@ -1,4 +1,5 @@
 import datetime
+import re
 from database import obter_conexao
 from psycopg2.extras import RealDictCursor
 from simples_nacional import _linhas_arquivo, parse_moeda_livre
@@ -43,14 +44,32 @@ def _sexo_normalizado(sexo_bruto):
 
 
 def _turno_planilha(texto):
-    s = (texto or "").strip().lower()
-    if s in ("tarde",):
-        return "tarde"
-    if s in ("noite",):
-        return "noite"
-    if s in ("hibrido", "híbrido", "hibrida", "híbrida", "integral"):
+    bruto = (texto or "").strip().lower().replace("ã", "a").replace("é", "e").replace("í", "i")
+    tokens = [parte.strip() for parte in re.split(r"[,;/|]+", bruto) if parte.strip()]
+    achados = []
+    for token in tokens:
+        if token in ("manha", "matutino"):
+            codigo = "manha"
+        elif token in ("tarde", "vespertino"):
+            codigo = "tarde"
+        elif token in ("noite", "noturno"):
+            codigo = "noite"
+        elif token in ("hibrido", "hibrida", "integral"):
+            codigo = "hibrido"
+        else:
+            continue
+        if codigo not in achados:
+            achados.append(codigo)
+    if not achados:
+        return "manha"
+    conjunto = set(achados)
+    if "hibrido" in conjunto or conjunto == {"manha", "tarde"}:
         return "hibrido"
-    return "manha"
+    if conjunto == {"tarde", "noite"}:
+        return "tarde_noite"
+    if len(achados) > 1:
+        return "hibrido"
+    return achados[0]
 
 
 def _vazio_para_nulo(valor):
@@ -58,19 +77,150 @@ def _vazio_para_nulo(valor):
     return texto or None
 
 
+def _so_digitos(valor):
+    return re.sub(r"\D", "", str(valor or ""))
+
+
+def _mapa_turmas(cursor):
+    cursor.execute("SELECT id, nome FROM turmas")
+    mapa = {}
+    for row in cursor.fetchall() or []:
+        nome = str((row["nome"] if isinstance(row, dict) else row[1]) or "").strip().lower()
+        tid = row["id"] if isinstance(row, dict) else row[0]
+        if nome:
+            mapa[nome] = tid
+    return mapa
+
+
+def _ids_turmas(texto, mapa):
+    mapa = mapa or {}
+    achados = []
+    faltando = []
+    for parte in re.split(r"[,;/|]+", str(texto or "")):
+        chave = parte.strip().lower()
+        if not chave:
+            continue
+        candidatos = [chave, chave.lstrip("0") or "0", chave.zfill(2)]
+        tid = None
+        for cand in candidatos:
+            if cand in mapa:
+                tid = mapa[cand]
+                break
+        if tid is None:
+            digitos = _so_digitos(chave)
+            for nome, valor in mapa.items():
+                if digitos and _so_digitos(nome) == digitos:
+                    tid = valor
+                    break
+        if tid and tid not in achados:
+            achados.append(tid)
+        elif tid is None:
+            faltando.append(parte.strip())
+    return achados, faltando
+
+
+def _vincular_turma_id(cursor, turma_id, aluno_id):
+    cursor.execute(
+        """
+        INSERT INTO turma_alunos (turma_id, aluno_id)
+        VALUES (%s, %s)
+        ON CONFLICT (turma_id, aluno_id) DO NOTHING
+        """,
+        (turma_id, aluno_id),
+    )
+
+
+def _vincular_turmas_texto(cursor, aluno_id, texto, mapa):
+    ids, faltando = _ids_turmas(texto, mapa)
+    for turma_id in ids:
+        _vincular_turma_id(cursor, turma_id, aluno_id)
+    return faltando
+
+
+def _salvar_responsavel(cursor, aluno_id, tipo, responsavel):
+    if not responsavel or not responsavel.get("nome_completo"):
+        return
+    cursor.execute(
+        "SELECT id FROM responsaveis_aluno WHERE aluno_id = %s AND tipo_responsavel = %s LIMIT 1",
+        (aluno_id, tipo),
+    )
+    existente = cursor.fetchone()
+    valores = (
+        responsavel["nome_completo"],
+        _vazio_para_nulo(responsavel.get("cpf")) or "nao informado",
+        responsavel.get("grau_parentesco") or "responsável",
+        responsavel.get("telefone") or "(00) 0000-0000",
+        _vazio_para_nulo(responsavel.get("email")),
+        _vazio_para_nulo(responsavel.get("local_trabalho")),
+        _vazio_para_nulo(responsavel.get("telefone_trabalho")),
+    )
+    if existente:
+        resp_id = existente["id"] if isinstance(existente, dict) else existente[0]
+        cursor.execute(
+            """
+            UPDATE responsaveis_aluno
+            SET nome_completo = %s, cpf = %s, grau_parentesco = %s, telefone = %s, email = %s,
+                local_trabalho = %s, telefone_trabalho = %s
+            WHERE id = %s
+            """,
+            valores + (resp_id,),
+        )
+        return
+    cursor.execute(
+        """
+        INSERT INTO responsaveis_aluno (
+            aluno_id, tipo_responsavel, nome_completo, cpf, grau_parentesco,
+            telefone, email, local_trabalho, telefone_trabalho, foto_url
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (aluno_id, tipo) + valores + (responsavel.get("foto_url"),),
+    )
+
+
+def _atualizar_aluno_planilha(cursor, aluno_id, dados_aluno, responsavel_1=None, responsavel_2=None):
+    sexo = _sexo_normalizado(dados_aluno.get("sexo"))
+    estado = (dados_aluno.get("estado") or "")[:2].upper() or None
+    cursor.execute(
+        """
+        UPDATE alunos SET
+            nome_completo = %s, rg = %s, data_nascimento = %s, sexo = %s,
+            telefone_principal = %s, email = %s, cep = %s, rua = %s, numero = %s,
+            bairro = %s, cidade = %s, estado = %s, valor_mensalidade = %s,
+            contrato_meses = %s, contrato_inicio = COALESCE(%s::date, contrato_inicio),
+            turnos_mensalidade = %s
+        WHERE id = %s
+        """,
+        (
+            dados_aluno["nome_completo"],
+            _vazio_para_nulo(dados_aluno.get("rg")),
+            dados_aluno.get("data_nascimento") or "2000-01-01",
+            sexo,
+            dados_aluno.get("telefone_principal") or "(00) 0000-0000",
+            _vazio_para_nulo(dados_aluno.get("email")),
+            _vazio_para_nulo(dados_aluno.get("cep")),
+            _vazio_para_nulo(dados_aluno.get("rua")),
+            _vazio_para_nulo(dados_aluno.get("numero")),
+            _vazio_para_nulo(dados_aluno.get("bairro")),
+            _vazio_para_nulo(dados_aluno.get("cidade")),
+            estado,
+            dados_aluno.get("valor_mensalidade", 0) or 0,
+            dados_aluno.get("contrato_meses") or 12,
+            dados_aluno.get("contrato_inicio") or None,
+            dados_aluno.get("turnos_mensalidade") or "manha",
+            aluno_id,
+        ),
+    )
+    faltando = _vincular_turmas_texto(cursor, aluno_id, dados_aluno.get("turma_nome"), dados_aluno.get("_mapa_turmas"))
+    _salvar_responsavel(cursor, aluno_id, 1, responsavel_1)
+    _salvar_responsavel(cursor, aluno_id, 2, responsavel_2)
+    return faltando
+
+
 def _inserir_aluno(cursor, dados_aluno: dict, responsavel_1: dict = None, responsavel_2: dict = None):
-    matricula = gerar_proxima_matricula(cursor)
+    matricula = dados_aluno.get("matricula") or gerar_proxima_matricula(cursor)
     sexo = _sexo_normalizado(dados_aluno.get("sexo"))
     estado = (dados_aluno.get("estado") or "")[:2].upper() or None
     turma_id = dados_aluno.get("turma_id")
-    if not turma_id and dados_aluno.get("turma_nome"):
-        cursor.execute(
-            "SELECT id FROM turmas WHERE LOWER(TRIM(nome)) = LOWER(TRIM(%s)) LIMIT 1",
-            (dados_aluno["turma_nome"],),
-        )
-        turma = cursor.fetchone()
-        if turma:
-            turma_id = turma["id"] if isinstance(turma, dict) else turma[0]
 
     cursor.execute(
         """
@@ -118,35 +268,10 @@ def _inserir_aluno(cursor, dados_aluno: dict, responsavel_1: dict = None, respon
     aluno_id = resultado_aluno["id"] if isinstance(resultado_aluno, dict) else resultado_aluno[0]
 
     if turma_id:
-        cursor.execute(
-            """
-            INSERT INTO turma_alunos (turma_id, aluno_id)
-            VALUES (%s, %s)
-            ON CONFLICT (turma_id, aluno_id) DO NOTHING;
-            """,
-            (turma_id, aluno_id),
-        )
-
-    sql_resp = """
-        INSERT INTO responsaveis_aluno (
-            aluno_id, tipo_responsavel, nome_completo, cpf, grau_parentesco,
-            telefone, email, local_trabalho, telefone_trabalho, foto_url
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-    """
-    for tipo, responsavel in ((1, responsavel_1), (2, responsavel_2)):
-        if not responsavel or not responsavel.get("nome_completo"):
-            continue
-        cursor.execute(sql_resp, (
-            aluno_id, tipo,
-            responsavel["nome_completo"],
-            _vazio_para_nulo(responsavel.get("cpf")) or "nao informado",
-            responsavel.get("grau_parentesco") or "responsável",
-            responsavel.get("telefone") or "(00) 0000-0000",
-            _vazio_para_nulo(responsavel.get("email")),
-            _vazio_para_nulo(responsavel.get("local_trabalho")),
-            _vazio_para_nulo(responsavel.get("telefone_trabalho")),
-            responsavel.get("foto_url"),
-        ))
+        _vincular_turma_id(cursor, turma_id, aluno_id)
+    _vincular_turmas_texto(cursor, aluno_id, dados_aluno.get("turma_nome"), dados_aluno.get("_mapa_turmas"))
+    _salvar_responsavel(cursor, aluno_id, 1, responsavel_1)
+    _salvar_responsavel(cursor, aluno_id, 2, responsavel_2)
     return matricula, aluno_id
 
 
@@ -220,7 +345,7 @@ def importar_planilha_alunos(arquivo):
     linhas = _linhas_arquivo(arquivo)
     if not linhas:
         return []
-    cab = [str(c or "").strip().lower() for c in linhas[0]]
+    cab = [str(c or "").strip().lower().lstrip("\ufeff") for c in linhas[0]]
     col = {
         "nome": _indice_coluna(cab, "nome_completo", "nome do aluno", "aluno", "nome"),
         "nascimento": _indice_coluna(cab, "data_nascimento", "nascimento", "dt_nasc"),
@@ -288,6 +413,26 @@ def importar_planilha_alunos(arquivo):
     return itens
 
 
+def _proximas_matriculas(cursor, quantidade):
+    if quantidade <= 0:
+        return []
+    ano_atual = datetime.datetime.now().year
+    cursor.execute(
+        "SELECT matricula FROM alunos WHERE matricula LIKE %s ORDER BY matricula DESC LIMIT 1",
+        (f"{ano_atual}%",),
+    )
+    ultimo = cursor.fetchone()
+    sequencia = 1
+    if ultimo:
+        texto = str((ultimo["matricula"] if isinstance(ultimo, dict) else ultimo[0]) or "")
+        if len(texto) >= 5:
+            try:
+                sequencia = int(texto[4:]) + 1
+            except ValueError:
+                sequencia = 1
+    return [f"{ano_atual}{sequencia + i:03d}" for i in range(quantidade)]
+
+
 def cadastrar_alunos_lote(itens):
     from database import garantir_tabelas_folha, garantir_tabelas_pedagogicas
     garantir_tabelas_folha()
@@ -295,21 +440,57 @@ def cadastrar_alunos_lote(itens):
     conexao = obter_conexao()
     if not conexao:
         raise Exception("Não foi possível estabelecer conexão com o banco de dados.")
-    ok, erros = [], []
+    ok, erros, avisos = [], [], []
     cursor = None
     try:
         cursor = conexao.cursor(cursor_factory=RealDictCursor)
-        for i, item in enumerate(itens, start=2):
+        mapa = _mapa_turmas(cursor)
+        cursor.execute("SELECT id, matricula, cpf FROM alunos WHERE COALESCE(cpf, '') <> ''")
+        por_cpf = {}
+        for row in cursor.fetchall() or []:
+            chave = _so_digitos(row["cpf"] if isinstance(row, dict) else row[2])
+            if chave:
+                por_cpf[chave] = row
+        novos = 0
+        for item in itens:
             dados = item.get("aluno") or {}
+            if _so_digitos(dados.get("cpf")) not in por_cpf:
+                novos += 1
+        matriculas = _proximas_matriculas(cursor, novos)
+        ponteiro = 0
+        for i, item in enumerate(itens, start=2):
+            dados = dict(item.get("aluno") or {})
             nome = (dados.get("nome_completo") or "").strip()
             if not nome:
                 erros.append(f"Linha {i}: sem nome do aluno.")
                 continue
+            dados["_mapa_turmas"] = mapa
             try:
                 cursor.execute("SAVEPOINT aluno_lote")
-                matricula, aluno_id = _inserir_aluno(cursor, dados, item.get("resp1"), item.get("resp2"))
+                existente = por_cpf.get(_so_digitos(dados.get("cpf")))
+                if existente:
+                    aluno_id = existente["id"] if isinstance(existente, dict) else existente[0]
+                    matricula = existente["matricula"] if isinstance(existente, dict) else existente[1]
+                    faltando = _atualizar_aluno_planilha(cursor, aluno_id, dados, item.get("resp1"), item.get("resp2"))
+                    atualizado = True
+                else:
+                    dados["matricula"] = matriculas[ponteiro]
+                    ponteiro += 1
+                    matricula, aluno_id = _inserir_aluno(cursor, dados, item.get("resp1"), item.get("resp2"))
+                    faltando = []
+                    _, faltando = _ids_turmas(dados.get("turma_nome"), mapa)
+                    atualizado = False
+                    if _so_digitos(dados.get("cpf")):
+                        por_cpf[_so_digitos(dados.get("cpf"))] = {"id": aluno_id, "matricula": matricula, "cpf": dados.get("cpf")}
                 cursor.execute("RELEASE SAVEPOINT aluno_lote")
-                ok.append({"matricula": matricula, "aluno_id": aluno_id, "aluno": dados})
+                if faltando:
+                    avisos.append(f"Linha {i} ({nome}): turma não encontrada ({', '.join(faltando)}).")
+                ok.append({
+                    "matricula": matricula,
+                    "aluno_id": aluno_id,
+                    "aluno": dados,
+                    "atualizado": atualizado,
+                })
             except Exception as e:
                 cursor.execute("ROLLBACK TO SAVEPOINT aluno_lote")
                 erros.append(f"Linha {i} ({nome}): {e}")
@@ -321,7 +502,7 @@ def cadastrar_alunos_lote(itens):
         if cursor:
             cursor.close()
         conexao.close()
-    return ok, erros
+    return ok, erros, avisos
 
 
 def listar_alunos(termo: str = None):
