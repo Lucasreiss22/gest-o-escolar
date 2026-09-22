@@ -824,6 +824,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         ORDER BY nome_completo
         """
     )
+    funcionarios = list(cursor.fetchall() or [])
     ajustes = _mapa_ajustes_folha(cursor, mes_filtro)
     itens = []
     totais = {
@@ -834,7 +835,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         "inss_patronal": 0.0,
         "fgts": 0.0,
     }
-    for row in cursor.fetchall():
+    for row in funcionarios:
         dados = aplicar_ajuste_competencia(dict(row), ajustes.get(row.get("id")))
         if not contrato_vigente(dados, ano, mes):
             continue
