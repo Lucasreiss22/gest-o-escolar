@@ -5,16 +5,30 @@ from email.message import EmailMessage
 
 from config import ambiente_producao, carregar_config
 
-EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
-
-
-def email_valido(valor):
-    texto = (valor or "").strip()
-    return bool(EMAIL_RE.match(texto))
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_INVISIVEL = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff\xa0"), None)
+_DOMINIOS_MICROSOFT = (
+    "@hotmail.com",
+    "@hotmail.com.br",
+    "@outlook.com",
+    "@outlook.com.br",
+    "@live.com",
+    "@live.com.br",
+    "@msn.com",
+)
 
 
 def normalizar_email(valor):
-    return (valor or "").strip().lower()
+    texto = (valor or "").translate(_INVISIVEL).replace("＠", "@").strip()
+    achado = EMAIL_RE.search(texto.replace(" ", ""))
+    if achado:
+        return achado.group(0).lower()
+    return texto.lower()
+
+
+def email_valido(valor):
+    texto = normalizar_email(valor)
+    return bool(texto and EMAIL_RE.fullmatch(texto))
 
 
 def _parece_senha_app(valor):
@@ -125,6 +139,19 @@ def identidade_envio():
     if nome_pessoa and nome_escola and nome_pessoa.lower() != nome_escola.lower():
         nome_visivel = f"{nome_pessoa} · {nome_escola}"
     return nome_visivel, nome_escola, email_escola
+
+
+def aviso_caixa_entrada(destinos):
+    for item in destinos or []:
+        email = normalizar_email(item)
+        if email.endswith(_DOMINIOS_MICROSOFT) or email.endswith(
+            ("@yahoo.com", "@yahoo.com.br", "@icloud.com", "@bol.com.br", "@uol.com.br", "@terra.com.br")
+        ):
+            return (
+                " Se for Hotmail, Outlook, Yahoo ou similar, abra Lixo eletrônico e a aba Outros "
+                "— esses provedores filtram PDF de sistema."
+            )
+    return " Confira também a pasta Spam."
 
 
 def identidade_escola():
@@ -376,17 +403,37 @@ def _tentar_smtp_gmail(cfg, msg, timeout=None):
     raise RuntimeError("Não foi possível conectar ao Gmail para enviar o e-mail.")
 
 
+def _html_do_texto(corpo):
+    from html import escape
+    linhas = escape(corpo or "").replace("\n", "<br>")
+    return (
+        "<!DOCTYPE html><html lang=\"pt-br\"><body style=\"margin:0;padding:0;background:#f1f5f9;"
+        "font-family:Arial,Helvetica,sans-serif;\">"
+        "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" "
+        "style=\"background:#f1f5f9;padding:24px 0;\"><tr><td align=\"center\">"
+        "<table role=\"presentation\" width=\"560\" cellspacing=\"0\" cellpadding=\"0\" "
+        "style=\"background:#ffffff;border-radius:8px;padding:24px;color:#0f172a;font-size:15px;line-height:1.5;\">"
+        f"<tr><td>{linhas}</td></tr>"
+        "<tr><td style=\"padding-top:18px;font-size:12px;color:#64748b;\">"
+        "E-mail automático da escola, com documento em anexo. Se não reconhecer, ignore."
+        "</td></tr></table></td></tr></table></body></html>"
+    )
+
+
 def _montar_mensagem(remetente, destinos, assunto, corpo, html=None, anexos=None, nome_remetente=None, responder_para=None):
-    from email.utils import formataddr
+    from email.utils import formataddr, formatdate, make_msgid
     msg = EmailMessage()
     msg["Subject"] = assunto
     msg["From"] = formataddr(((nome_remetente or "Gestão Escolar").strip(), remetente))
     msg["To"] = ", ".join(destinos)
+    msg["Date"] = formatdate(localtime=True)
+    dominio = remetente.split("@")[-1] if "@" in (remetente or "") else "gestaoescolar.local"
+    msg["Message-ID"] = make_msgid(domain=dominio)
     if responder_para and email_valido(responder_para) and normalizar_email(responder_para) != normalizar_email(remetente):
         msg["Reply-To"] = formataddr(((nome_remetente or "Gestão Escolar").strip(), responder_para))
-    msg.set_content(corpo)
-    if html:
-        msg.add_alternative(html, subtype="html")
+        msg["List-Unsubscribe"] = f"<mailto:{normalizar_email(responder_para)}>"
+    msg.set_content(corpo or "")
+    msg.add_alternative(html or _html_do_texto(corpo), subtype="html")
     for anexo in anexos or []:
         nome = anexo.get("nome") or "documento.pdf"
         dados = anexo.get("dados") or b""
@@ -414,17 +461,20 @@ def _anexos_api(anexos):
 
 
 def _enviar_via_brevo(chave, remetente, destinos, assunto, corpo, html=None, anexos=None, nome_remetente=None, responder_para=None):
+    import uuid
     import requests
     payload = {
         "sender": {"email": remetente, "name": (nome_remetente or "Gestão Escolar").strip()},
         "to": [{"email": item} for item in destinos],
         "subject": assunto,
         "textContent": corpo or "",
+        "htmlContent": html or _html_do_texto(corpo),
+        "headers": {"X-Entity-Ref-ID": str(uuid.uuid4())},
+        "tags": ["gestao-escolar"],
     }
     if responder_para and email_valido(responder_para):
         payload["replyTo"] = {"email": responder_para, "name": (nome_remetente or "Gestão Escolar").strip()}
-    if html:
-        payload["htmlContent"] = html
+        payload["headers"]["List-Unsubscribe"] = f"<mailto:{normalizar_email(responder_para)}>"
     arquivos = _anexos_api(anexos)
     if arquivos:
         payload["attachment"] = [{"name": item["nome"], "content": item["conteudo"]} for item in arquivos]
@@ -447,11 +497,10 @@ def _enviar_via_resend(chave, remetente, destinos, assunto, corpo, html=None, an
         "to": list(destinos),
         "subject": assunto,
         "text": corpo or "",
+        "html": html or _html_do_texto(corpo),
     }
     if responder_para and email_valido(responder_para):
         payload["reply_to"] = responder_para
-    if html:
-        payload["html"] = html
     arquivos = _anexos_api(anexos)
     if arquivos:
         payload["attachments"] = [{"filename": item["nome"], "content": item["conteudo"]} for item in arquivos]
@@ -533,6 +582,7 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
     if not lista:
         raise RuntimeError("Nenhum e-mail válido para envio. Cadastre o e-mail do responsável, professor ou destinatário.")
 
+    html = html or _html_do_texto(corpo)
     cfg = carregar_config()
     smtp = carregar_smtp()
     nome_visivel, _nome_escola, email_escola = identidade_envio()

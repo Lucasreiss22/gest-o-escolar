@@ -94,3 +94,96 @@ def rotulo_papel(papel):
         "funcionario": "Funcionário",
     }
     return mapa.get(normalizar_papel(papel), papel or "-")
+
+
+CARGOS_ESCOLA = [
+    (
+        "Direção e gestão",
+        [
+            "Diretor(a)",
+            "Vice-diretor(a)",
+            "Diretor(a) adjunto(a)",
+            "Coordenador(a) pedagógico(a)",
+            "Coordenador(a) de turno",
+            "Coordenador(a) de educação infantil",
+            "Supervisor(a) pedagógico(a)",
+            "Orientador(a) educacional",
+            "Secretário(a) escolar",
+            "Auxiliar de secretaria",
+            "Administrador(a)",
+            "Administrativo",
+            "Financeiro",
+            "Recursos humanos",
+            "Assistente administrativo",
+        ],
+    ),
+    (
+        "Docência",
+        [
+            "Professor(a)",
+            "Professor(a) de educação infantil",
+            "Professor(a) de ensino fundamental",
+            "Professor(a) de educação física",
+            "Professor(a) de artes",
+            "Professor(a) de música",
+            "Professor(a) de inglês",
+            "Professor(a) de espanhol",
+            "Professor(a) de informática",
+            "Professor(a) de reforço",
+            "Professor(a) substituto(a)",
+            "Auxiliar",
+            "Auxiliar de classe",
+            "Auxiliar de creche",
+            "Monitor(a) de turma",
+            "Estagiário(a) docente",
+        ],
+    ),
+    (
+        "Apoio pedagógico",
+        [
+            "Psicopedagogo(a)",
+            "Psicólogo(a) escolar",
+            "Fonoaudiólogo(a)",
+            "Assistente social",
+            "Intérprete de Libras",
+            "Cuidador(a)",
+            "Auxiliar de inclusão",
+            "Bibliotecário(a)",
+        ],
+    ),
+    (
+        "Alimentação",
+        [
+            "Nutricionista",
+            "Cozinheiro(a)",
+            "Auxiliar de cozinha",
+            "Merendeiro(a)",
+        ],
+    ),
+    (
+        "Operacional e apoio",
+        [
+            "Porteiro(a)",
+            "Recepcionista",
+            "Inspetor(a) de alunos",
+            "Zelador(a)",
+            "Auxiliar de limpeza",
+            "Serviços gerais",
+            "Motorista",
+            "Monitor(a) de transporte",
+            "Técnico(a) de informática",
+            "Manutenção",
+            "Jardineiro(a)",
+            "Estagiário(a)",
+            "Voluntário(a)",
+            "Prestador(a) de serviço",
+        ],
+    ),
+]
+
+
+def cargos_escola_planos():
+    itens = []
+    for _grupo, cargos in CARGOS_ESCOLA:
+        itens.extend(cargos)
+    return itens

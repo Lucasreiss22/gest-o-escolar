@@ -149,7 +149,28 @@
                     <div class="form-group"><label>RG</label><input name="rg" value="{{ cadastro.rg or '' }}"></div>
                     <div class="form-group"><label>Data de nascimento</label><input type="date" name="data_nascimento" value="{{ cadastro.data_nascimento or '' }}"></div>
                     <div class="form-group"><label>Telefone</label><input name="telefone" value="{{ cadastro.telefone or '' }}" placeholder="(00) 00000-0000"></div>
-                    <div class="form-group"><label>Cargo</label><input name="cargo" value="{{ cadastro.cargo or '' }}" placeholder="Professor, secretaria..."></div>
+                    <div class="form-group">
+                        <label>Cargo</label>
+                        {% set cargo_atual = cadastro.cargo or '' %}
+                        <select name="cargo" id="campoCargo">
+                            <option value="">Selecione o cargo</option>
+                            {% for grupo, cargos in cargos_escola %}
+                            <optgroup label="{{ grupo }}">
+                                {% for cargo in cargos %}
+                                <option value="{{ cargo }}" {% if cargo_atual == cargo %}selected{% endif %}>{{ cargo }}</option>
+                                {% endfor %}
+                            </optgroup>
+                            {% endfor %}
+                            {% if cargo_atual and cargo_atual not in cargos_escola_planos %}
+                            <option value="{{ cargo_atual }}" selected>{{ cargo_atual }}</option>
+                            {% endif %}
+                            <option value="Outro">Outro</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="campoCargoOutro" hidden>
+                        <label>Descreva o cargo</label>
+                        <input name="cargo_outro" value="{% if cargo_atual and cargo_atual not in cargos_escola_planos %}{{ cargo_atual }}{% endif %}" placeholder="Cargo da escola">
+                    </div>
                     <div class="form-group"><label>Disciplina / especialidade</label><input name="especialidade" value="{{ cadastro.especialidade or '' }}"></div>
                     <div class="form-group span2">
                         <label>Formação</label>
@@ -369,6 +390,14 @@
         function sync() { bloco.hidden = !box.checked; }
         box.addEventListener("change", sync);
         sync();
+    })();
+    (function () {
+        var sel = document.getElementById("campoCargo");
+        var extra = document.getElementById("campoCargoOutro");
+        if (!sel || !extra) return;
+        function syncCargo() { extra.hidden = sel.value !== "Outro"; }
+        sel.addEventListener("change", syncCargo);
+        syncCargo();
     })();
     </script>
 </body>

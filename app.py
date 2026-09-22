@@ -22,6 +22,7 @@ from email_envio import (
     enviar_via_gmail_api,
     diagnostico_envio,
     normalizar_email,
+    aviso_caixa_entrada,
 )
 from psycopg2.extras import RealDictCursor
 from alunos import cadastrar_aluno, listar_alunos, atualizar_responsavel, deletar_responsavel
@@ -53,7 +54,7 @@ from folha import (
     dia_pagamento_valido,
     aplicar_ajuste_competencia,
 )
-from permissoes import pode_endpoint, pode_modulo, normalizar_papel, rotulo_papel
+from permissoes import pode_endpoint, pode_modulo, normalizar_papel, rotulo_papel, CARGOS_ESCOLA, cargos_escola_planos
 from plataforma import (
     buscar_admin_plataforma,
     buscar_escola_por_email,
@@ -296,15 +297,24 @@ def listar_custos_do_mes(cursor, mes_filtro):
 
 def _cargo_do_papel(papel):
     mapa = {
-        "admin": "Administrador",
-        "supervisor": "Supervisor",
+        "admin": "Administrador(a)",
+        "supervisor": "Supervisor(a) pedagógico(a)",
         "financeiro": "Financeiro",
-        "direcao": "Direção",
-        "secretaria": "Secretaria",
-        "professor": "Professor",
-        "funcionario": "Funcionário",
+        "direcao": "Diretor(a)",
+        "secretaria": "Secretário(a) escolar",
+        "professor": "Professor(a)",
+        "funcionario": "Auxiliar",
     }
-    return mapa.get(normalizar_papel(papel), "Funcionário")
+    return mapa.get(normalizar_papel(papel), "Auxiliar")
+
+
+def _cargo_do_form(papel=None):
+    cargo = (request.form.get("cargo") or "").strip()
+    if cargo == "Outro":
+        cargo = (request.form.get("cargo_outro") or "").strip()
+    if cargo:
+        return cargo[:150]
+    return _cargo_do_papel(papel)
 
 
 def _data_iso(valor):
@@ -422,6 +432,8 @@ def inject_acl():
         "super_admin": bool(session.get("super_admin")),
         "escola_nome": session.get("escola_nome"),
         "origem_plataforma": bool(session.get("origem_plataforma")),
+        "cargos_escola": CARGOS_ESCOLA,
+        "cargos_escola_planos": cargos_escola_planos(),
     }
 
 
@@ -1879,7 +1891,7 @@ def gerenciar_usuarios():
                                 (nome, email, uid),
                             )
 
-                    cargo = limpar_campo("cargo") or _cargo_do_papel(papel)
+                    cargo = _cargo_do_form(papel)
                     cpf = limpar_campo("cpf") or _cpf_provisorio(email)
                     telefone = limpar_campo("telefone") or "(00) 00000-0000"
                     nasc = limpar_campo("data_nascimento") or "2000-01-01"
@@ -4190,7 +4202,7 @@ def pagina_financeiro():
                                 limpar_campo("nome_completo"),
                                 limpar_campo("cpf") or f"TMP{datetime.now().strftime('%H%M%S')}",
                                 limpar_campo("data_nascimento") or "2000-01-01",
-                                limpar_campo("cargo") or "Funcionário",
+                                _cargo_do_form() or "Auxiliar",
                                 limpar_campo("telefone") or "(00) 00000-0000",
                                 limpar_campo("email"),
                                 salario,
@@ -4746,6 +4758,7 @@ def enviar_contracheques_mes():
         return redirect(url_for("contracheque", mes=mes_filtro))
     enviados = 0
     falhas = []
+    todos_dest = []
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT nome_escola, regime_tributario, email_contato FROM configuracoes WHERE id = 1;")
@@ -4764,6 +4777,7 @@ def enviar_contracheques_mes():
                     dados = _func_com_ajuste(cursor, func, mes_filtro)
                     destinos = _emails_colaborador(dados, cursor)
                     dest = _enviar_contracheque_pessoa(dados, regime, mes_filtro, escola, destinos=destinos)
+                    todos_dest.extend(dest or destinos)
                     _registrar_folha_item(cursor, item, mes_filtro)
                     cursor.execute(
                         """
@@ -4784,7 +4798,7 @@ def enviar_contracheques_mes():
     finally:
         conexao.close()
     if enviados:
-        flash(f"{enviados} contra-cheque(s) enviado(s) por e-mail.", "success")
+        flash(f"{enviados} contra-cheque(s) enviado(s) por e-mail.{aviso_caixa_entrada(todos_dest)}", "success")
     if falhas:
         flash("Falhas: " + " | ".join(falhas[:8]), "danger")
     if not enviados and not falhas:
@@ -4887,7 +4901,7 @@ def pdf_contracheque_rota():
                 f"Olá, {func.get('nome_completo') or ''}.\n\nSegue em anexo o contra-cheque de {nome_mes_extenso(mes_filtro)}.\n",
                 [{"nome": nome_arq, "dados": bytes_pdf(buffer)}],
             )
-            flash(f"Contra-cheque enviado para {', '.join(destinos)}.", "success")
+            flash(f"Contra-cheque enviado para {', '.join(destinos)}.{aviso_caixa_entrada(destinos)}", "success")
             return redirect(request.referrer or url_for("contracheque", mes=mes_filtro))
         return send_file(
             buffer,
