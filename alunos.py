@@ -1,5 +1,6 @@
 import datetime
 import re
+import unicodedata
 from database import obter_conexao
 from psycopg2.extras import RealDictCursor
 from simples_nacional import _linhas_arquivo, parse_moeda_livre
@@ -313,18 +314,36 @@ def _celula(row, idx):
     return str(valor).strip()
 
 
+def _normalizar_coluna(texto):
+    s = str(texto or "").strip().lower().lstrip("\ufeff")
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    return s
+
+
 def _indice_coluna(cabecalho, *chaves):
-    for chave in chaves:
-        for i, nome in enumerate(cabecalho):
+    cab = [_normalizar_coluna(c) for c in cabecalho]
+    chaves_norm = [_normalizar_coluna(c) for c in chaves if _normalizar_coluna(c)]
+    for chave in chaves_norm:
+        for i, nome in enumerate(cab):
             if nome == chave:
                 return i
-    for chave in chaves:
+    for chave in chaves_norm:
         if len(chave) < 5:
             continue
-        for i, nome in enumerate(cabecalho):
+        for i, nome in enumerate(cab):
             if chave in nome:
                 return i
     return None
+
+
+def _linha_cabecalho_alunos(linhas):
+    for i, row in enumerate(linhas[:8]):
+        cab = [_normalizar_coluna(c) for c in row]
+        if "nome_completo" in cab or "nome_do_aluno" in cab or "nome" in cab:
+            return i
+    return 0
 
 
 def parse_data_livre(texto):
@@ -345,7 +364,8 @@ def importar_planilha_alunos(arquivo):
     linhas = _linhas_arquivo(arquivo)
     if not linhas:
         return []
-    cab = [str(c or "").strip().lower().lstrip("\ufeff") for c in linhas[0]]
+    inicio_cab = _linha_cabecalho_alunos(linhas)
+    cab = [_normalizar_coluna(c) for c in linhas[inicio_cab]]
     col = {
         "nome": _indice_coluna(cab, "nome_completo", "nome do aluno", "aluno", "nome"),
         "nascimento": _indice_coluna(cab, "data_nascimento", "nascimento", "dt_nasc"),
@@ -372,10 +392,14 @@ def importar_planilha_alunos(arquivo):
         "resp1_email": _indice_coluna(cab, "resp1_email", "email_responsavel", "e-mail do responsável"),
     }
     if col["nome"] is None:
-        raise ValueError("A planilha precisa de uma coluna de nome do aluno (nome ou nome_completo).")
+        encontradas = ", ".join(c for c in cab if c) or "nenhuma"
+        raise ValueError(
+            "A planilha precisa de uma coluna de nome do aluno (Nome Completo ou nome_completo). "
+            f"Colunas encontradas: {encontradas}."
+        )
 
     itens = []
-    for row in linhas[1:]:
+    for row in linhas[inicio_cab + 1:]:
         if not row or not any(str(c).strip() for c in row if c is not None):
             continue
         nome = _celula(row, col["nome"])
