@@ -5094,10 +5094,24 @@ def relatorio_tributario():
             if regime == "simples_nacional":
                 apuracao, colaboradores = calcular_apuracao_simples(cursor, mes_filtro)
                 receitas_mes = listar_lancamentos_mes(cursor, mes_filtro)
+                _itens_folha, totais_folha = montar_folha_contratos(cursor, regime, mes_filtro)
+                custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
                 buffer = pdf_simples_nacional(
-                    escola, mes_label, regime, apuracao, colaboradores, receitas_mes
+                    escola,
+                    mes_label,
+                    regime,
+                    apuracao,
+                    colaboradores,
+                    receitas_mes,
+                    dre={
+                        "receita": apuracao.get("receita_mes"),
+                        "das": apuracao.get("das"),
+                        "folha": totais_folha.get("custo_escola"),
+                        "compras": custos.get("compras"),
+                        "servicos": custos.get("servicos"),
+                    },
                 )
-                nome_arquivo = f"relatorio_simples_fator_r_{mes_filtro}.pdf"
+                nome_arquivo = f"relatorio_simples_dasn_{mes_filtro}.pdf"
             else:
                 cursor.execute(
                     """
@@ -5131,8 +5145,9 @@ def relatorio_tributario():
                 totais["custos"] = resumo_custos["custos"]
                 if regime == "lucro_presumido":
                     apuracao_p = apurar_lucro_presumido(receita_mes, colaboradores)
+                    _itens_folha, totais_folha = montar_folha_contratos(cursor, regime, mes_filtro)
                     totais["tributos"] = apuracao_p["tributos"]
-                    totais["folha_pagamento"] = apuracao_p["folha_total"]
+                    totais["folha_pagamento"] = totais_folha.get("custo_escola") or 0
                     buffer = pdf_lucro_presumido(
                         escola, mes_label, regime, apuracao_p, totais, recebidos
                     )

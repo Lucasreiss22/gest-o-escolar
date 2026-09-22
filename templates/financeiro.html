@@ -206,24 +206,25 @@
                 <div class="valor">R$ {{ "%.2f"|format(totais.folha_pagamento) }}</div>
                 <span class="hint" style="color: #9b59b6;">Líquido R$ {{ "%.2f"|format(totais_folha.liquido) }} · encargos R$ {{ "%.2f"|format(totais_folha.encargos) }}</span>
             </div>
-            <div class="card-resumo tributos" style="cursor: default;">
+            <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
                 {% if regime_atual == 'simples_nacional' and apuracao_simples %}
                 <h4>DAS ({{ "%.2f"|format(apuracao_simples.aliquota_efetiva_pct) }}% · Anexo {{ apuracao_simples.anexo }})</h4>
                 <div class="valor">R$ {{ "%.2f"|format(totais.tributos) }}</div>
-                <span class="hint" style="color: #e67e22;">📋 Tributos da empresa</span>
+                <span class="hint" style="color: #e67e22;">Abrir cálculo e DASN</span>
                 {% elif regime_atual == 'lucro_presumido' and apuracao_presumido %}
                 <h4>Tributos da empresa</h4>
                 <div class="valor">R$ {{ "%.2f"|format(apuracao_presumido.tributos) }}</div>
-                <span class="hint" style="color: #e67e22;">PIS+COFINS+ISS+IRPJ+CSLL</span>
+                <span class="hint" style="color: #e67e22;">Abrir apuração e DRE</span>
                 {% elif regime_atual == 'lucro_real' %}
                 <h4>PIS+COFINS (1,65% + 7,6%)</h4>
                 <div class="valor">R$ {{ "%.2f"|format(apuracao_pis_cofins.total if apuracao_pis_cofins else 0) }}</div>
-                <span class="hint" style="color: #e67e22;">Lucro Real (sem créditos)</span>
+                <span class="hint" style="color: #e67e22;">Abrir relatório</span>
                 {% else %}
                 <h4>Tributos</h4>
                 <div class="valor">R$ {{ "%.2f"|format(totais.tributos) }}</div>
+                <span class="hint" style="color: #e67e22;">Abrir relatório</span>
                 {% endif %}
-            </div>
+            </a>
             <a href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='custos') }}" class="card-resumo compras">
                 <h4>Compras e custos fixos</h4>
                 <div class="valor">R$ {{ "%.2f"|format(totais.custos_compras or 0) }}</div>

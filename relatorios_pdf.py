@@ -106,7 +106,18 @@ def _brl(valor):
     return br_money(valor)
 
 
-def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, receitas_mes):
+def _pagina_resultado(pdf, titulo, subtitulo, linhas, nota):
+    pdf.titulo_cabecalho = titulo
+    pdf.add_page()
+    pdf.paragrafo(subtitulo)
+    for rotulo, valor, negrito in linhas:
+        pdf.linha(rotulo, _brl(valor), negrito=negrito)
+    if nota:
+        pdf.ln(2)
+        pdf.paragrafo(nota)
+
+
+def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, receitas_mes, dre=None):
     ap = apuracao or {}
     quadro = ap.get("quadro") or {}
     pdf = RelatorioPDF("Memória de cálculo — Simples Nacional")
@@ -164,6 +175,30 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
     pdf.linha("Alíquota efetiva", f"{float(ap.get('aliquota_efetiva_pct') or 0):.4f}%")
     pdf.paragrafo("DAS = receita bruta do mês × alíquota efetiva")
     pdf.linha("DAS", _brl(ap.get("das")), negrito=True)
+    if dre:
+        receita = float(dre.get("receita") or 0)
+        das = float(dre.get("das") or 0)
+        folha = float(dre.get("folha") or 0)
+        compras = float(dre.get("compras") or 0)
+        servicos = float(dre.get("servicos") or 0)
+        apos_das = receita - das
+        resultado = apos_das - folha - compras - servicos
+        _pagina_resultado(
+            pdf,
+            "DASN — demonstrativo simplificado",
+            f"{escola} · {mes_label} · Simples Nacional",
+            [
+                ("(+) Receita bruta de serviços", receita, False),
+                ("(−) DAS", das, False),
+                ("(=) Receita após o DAS", apos_das, True),
+                ("(−) Folha e encargos", folha, False),
+                ("(−) Compras e custos fixos", compras, False),
+                ("(−) Serviços contratados", servicos, False),
+                ("(=) Resultado do período", resultado, True),
+            ],
+            "Demonstrativo interno da competência, no formato de uma DRE do Simples Nacional (DASN). "
+            "O DAS substitui PIS, COFINS, IRPJ, CSLL e ISS. Não substitui a declaração entregue à Receita.",
+        )
     return _saida(pdf)
 
 
@@ -179,14 +214,44 @@ def pdf_lucro_real(escola, mes_label, regime, totais, recebidos, pendentes, atra
 
 
 def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos):
-    pdf = RelatorioPDF("Relatório Lucro Presumido")
+    ap = apuracao or {}
+    tot = totais or {}
+    pdf = RelatorioPDF("Apuração — Lucro Presumido")
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label}")
-    pdf.linha("Faturamento", _brl((apuracao or {}).get("receita_mes")))
-    pdf.linha("Tributos", _brl((apuracao or {}).get("tributos")), negrito=True)
-    pdf.linha("Folha", _brl((apuracao or {}).get("folha_total")))
-    pdf.linha("Compras", _brl((totais or {}).get("custos_compras")))
-    pdf.linha("Serviços", _brl((totais or {}).get("custos_servicos")))
+    pdf.linha("Receita bruta do mês", _brl(ap.get("receita_mes")))
+    pdf.linha("PIS (0,65%)", _brl(ap.get("pis")))
+    pdf.linha("COFINS (3%)", _brl(ap.get("cofins")))
+    pdf.linha("ISS estimado (5%)", _brl(ap.get("iss")))
+    pdf.linha("Base de IRPJ/CSLL (32%)", _brl(ap.get("base_presumida")))
+    pdf.linha("CSLL (9% da base)", _brl(ap.get("csll")))
+    pdf.linha("IRPJ (15% da base)", _brl(ap.get("irpj")))
+    if ap.get("aplica_adicional_irpj"):
+        pdf.linha("Adicional de IRPJ (10%)", _brl(ap.get("irpj_adicional")))
+    pdf.linha("Total de tributos", _brl(ap.get("tributos")), negrito=True)
+
+    receita = float(ap.get("receita_mes") or 0)
+    tributos = float(ap.get("tributos") or 0)
+    folha = float(tot.get("folha_pagamento") or ap.get("folha_total") or 0)
+    compras = float(tot.get("custos_compras") or 0)
+    servicos = float(tot.get("custos_servicos") or 0)
+    apos_tributos = receita - tributos
+    resultado = apos_tributos - folha - compras - servicos
+    _pagina_resultado(
+        pdf,
+        "DRE simplificada — Lucro Presumido",
+        f"{escola} · {mes_label}",
+        [
+            ("(+) Receita bruta de serviços", receita, False),
+            ("(−) PIS, COFINS, ISS, IRPJ e CSLL", tributos, False),
+            ("(=) Resultado após tributos", apos_tributos, True),
+            ("(−) Folha e encargos", folha, False),
+            ("(−) Compras e custos fixos", compras, False),
+            ("(−) Serviços contratados", servicos, False),
+            ("(=) Resultado do período", resultado, True),
+        ],
+        "DRE gerencial do mês. IRPJ e CSLL usam a presunção de 32% sobre a receita de serviços educacionais.",
+    )
     return _saida(pdf)
 
 
