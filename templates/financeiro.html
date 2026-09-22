@@ -430,11 +430,11 @@
                             <label>Dia do contra-cheque</label>
                             <input type="number" name="dia_pagamento" min="1" max="28" value="{{ prof.dia_pagamento or 5 }}">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" data-contratos="clt_horista">
                             <label>Horas extras 50% (dias úteis)</label>
                             {% with hora_name='horas_extras', hora_valor=prof.horas_extras or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" data-contratos="clt_horista">
                             <label>Horas extras 100% (domingo/feriado)</label>
                             {% with hora_name='horas_extras_100', hora_valor=prof.horas_extras_100 or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
