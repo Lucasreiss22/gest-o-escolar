@@ -1,0 +1,9 @@
+{% set _url = foto_atual|default('') %}
+{% set _nome = foto_nome|default('') %}
+<span class="foto-mini"{% if foto_grande|default(false) %} style="width:72px;height:72px;font-size:1.45rem;"{% endif %}>
+    {% if _url %}
+    <img src="{{ url_for('static', filename=_url) }}" alt="">
+    {% else %}
+    <span>{{ (_nome or '?')[:1]|upper }}</span>
+    {% endif %}
+</span>

@@ -878,6 +878,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         calc["data_inicio_contrato"] = _data_iso(row.get("data_inicio_contrato") or row.get("data_contratacao"))
         calc["data_fim_contrato"] = _data_iso(row.get("data_fim_contrato"))
         calc["enviar_contracheque"] = True if row.get("enviar_contracheque") is None else bool(row.get("enviar_contracheque"))
+        calc["foto_url"] = row.get("foto_url")
         itens.append(calc)
         totais["bruto"] += calc["bruto"]
         totais["liquido"] += calc["liquido"]
@@ -1989,6 +1990,16 @@ def gerenciar_usuarios():
                             valores_folha,
                         )
                         fid = cursor.fetchone()["id"]
+                    foto_func = None
+                    try:
+                        foto_func = _salvar_foto("foto", "equipe")
+                    except ValueError as e:
+                        flash(str(e), "danger")
+                    if foto_func and fid:
+                        cursor.execute(
+                            "UPDATE funcionarios SET foto_url = %s WHERE id = %s",
+                            (foto_func, fid),
+                        )
                     conexao.commit()
                     flash("Cadastro da equipe salvo. Contra-cheque e avisos vão para o e-mail informado.", "success")
                     if criar_login and (novo_login or senha_informada):
@@ -2046,7 +2057,7 @@ def gerenciar_usuarios():
                     """
                     SELECT u.id, u.nome, u.email, u.papel,
                            f.id AS funcionario_id, f.cpf, f.cargo, f.telefone,
-                           f.tipo_contrato, f.salario, f.ativo
+                           f.tipo_contrato, f.salario, f.ativo, f.foto_url
                     FROM usuarios u
                     LEFT JOIN LATERAL (
                         SELECT * FROM funcionarios
@@ -2061,7 +2072,7 @@ def gerenciar_usuarios():
                 cursor.execute(
                     """
                     SELECT f.id AS funcionario_id, f.nome_completo AS nome, f.email, f.cargo,
-                           f.cpf, f.telefone, f.tipo_contrato, f.salario, f.ativo
+                           f.cpf, f.telefone, f.tipo_contrato, f.salario, f.ativo, f.foto_url
                     FROM funcionarios f
                     WHERE NOT EXISTS (
                         SELECT 1 FROM usuarios u
@@ -2140,6 +2151,7 @@ def gerenciar_usuarios():
                         "aliquota_iss": frow.get("aliquota_iss") or 5,
                         "data_contratacao": _data_iso(frow.get("data_contratacao")),
                         "ativo": True if frow.get("ativo") is None else bool(frow.get("ativo")),
+                        "foto_url": frow.get("foto_url") or "",
                     }
                     cursor.execute("SELECT regime_tributario FROM configuracoes WHERE id = 1")
                     cfg_folha = cursor.fetchone() or {}
@@ -2913,6 +2925,53 @@ def pagina_alunos():
                         conexao.close()
                 return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
 
+        if acao in ("editar_autorizado", "deletar_autorizado"):
+            aluno_id = request.form.get("aluno_id")
+            aut_id = request.form.get("autorizado_id")
+            if aluno_id and aut_id:
+                conexao = obter_conexao()
+                if conexao:
+                    try:
+                        with conexao.cursor() as cursor:
+                            if acao == "deletar_autorizado":
+                                cursor.execute(
+                                    "DELETE FROM pessoas_autorizadas WHERE id = %s AND aluno_id = %s",
+                                    (aut_id, aluno_id),
+                                )
+                                flash("Pessoa autorizada removida.", "success")
+                            else:
+                                foto_aut = None
+                                try:
+                                    foto_aut = _salvar_foto("foto", "autorizados")
+                                except ValueError as e:
+                                    flash(str(e), "danger")
+                                cursor.execute(
+                                    """
+                                    UPDATE pessoas_autorizadas
+                                    SET nome_completo = %s, cpf = %s, telefone = %s, vinculo = %s, endereco = %s,
+                                        foto_url = COALESCE(%s, foto_url)
+                                    WHERE id = %s AND aluno_id = %s
+                                    """,
+                                    (
+                                        limpar_campo("nome_completo"),
+                                        limpar_campo("cpf"),
+                                        limpar_campo("telefone"),
+                                        limpar_campo("vinculo") or limpar_campo("grau_parentesco"),
+                                        limpar_campo("endereco"),
+                                        foto_aut,
+                                        aut_id,
+                                        aluno_id,
+                                    ),
+                                )
+                                flash("Pessoa autorizada atualizada.", "success")
+                        conexao.commit()
+                    except Exception as e:
+                        conexao.rollback()
+                        flash(f"Erro ao atualizar pessoa autorizada: {e}", "danger")
+                    finally:
+                        conexao.close()
+                return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+
         if acao == "cadastrar_aluno":
             valor_mensalidade = _parse_moeda(request.form.get("valor_mensalidade"), 0.0)
             desconto_valor = _parse_moeda(request.form.get("desconto_valor"), 0.0)
@@ -2927,6 +2986,14 @@ def pagina_alunos():
                 "nenhum": "nenhum",
             }
             desconto_tipo = mapeamento_desconto.get(desconto_tipo_raw, "nenhum")
+
+            try:
+                foto_aluno = _salvar_foto("foto")
+                foto_r1 = _salvar_foto("resp1_foto")
+                foto_r2 = _salvar_foto("resp2_foto")
+            except ValueError as e:
+                flash(str(e), "danger")
+                foto_aluno = foto_r1 = foto_r2 = None
 
             dados_aluno = {
                 "nome_completo": limpar_campo("nome_completo"),
@@ -2951,7 +3018,7 @@ def pagina_alunos():
                 "contrato_meses": request.form.get("contrato_meses") or 12,
                 "contrato_inicio": limpar_campo("contrato_inicio") or None,
                 "turnos_mensalidade": limpar_campo("turnos_mensalidade") or "manha",
-                "foto_url": _salvar_foto("foto"),
+                "foto_url": foto_aluno,
             }
 
             resp1_nome = limpar_campo("resp1_nome")
@@ -2963,7 +3030,7 @@ def pagina_alunos():
                 "email": limpar_campo("resp1_email"),
                 "local_trabalho": limpar_campo("resp1_trabalho"),
                 "telefone_trabalho": limpar_campo("resp1_tel_trabalho"),
-                "foto_url": _salvar_foto("resp1_foto"),
+                "foto_url": foto_r1,
             } if resp1_nome else None
 
             resp2_nome = limpar_campo("resp2_nome")
@@ -2975,7 +3042,7 @@ def pagina_alunos():
                 "email": limpar_campo("resp2_email"),
                 "local_trabalho": limpar_campo("resp2_trabalho"),
                 "telefone_trabalho": limpar_campo("resp2_tel_trabalho"),
-                "foto_url": _salvar_foto("resp2_foto"),
+                "foto_url": foto_r2,
             } if resp2_nome else None
 
             try:
@@ -3114,7 +3181,7 @@ def detalhes_aluno(aluno_id):
                 financeiro_aluno = cursor.fetchall()
 
                 cursor.execute("""
-                    SELECT id, nome_completo, cpf, telefone, vinculo, endereco 
+                    SELECT id, nome_completo, cpf, telefone, vinculo, endereco, foto_url
                     FROM pessoas_autorizadas 
                     WHERE aluno_id = %s
                 """, (aluno_id,))
@@ -3397,16 +3464,24 @@ def adicionar_autorizado(aluno_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
 
+    garantir_tabelas_folha()
+    garantir_tabelas_pedagogicas()
+
     conexao = obter_conexao()
     if conexao:
         try:
             with conexao.cursor() as cursor:
+                foto_aut = None
+                try:
+                    foto_aut = _salvar_foto("foto", "autorizados")
+                except ValueError as e:
+                    flash(str(e), "danger")
                 cursor.execute("""
-                    INSERT INTO pessoas_autorizadas (aluno_id, nome_completo, cpf, telefone, vinculo, endereco)
-                    VALUES (%s, %s, %s, %s, %s, %s);
+                    INSERT INTO pessoas_autorizadas (aluno_id, nome_completo, cpf, telefone, vinculo, endereco, foto_url)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
                 """, (aluno_id, limpar_campo("nome_completo"), limpar_campo("cpf"), 
                       limpar_campo("telefone"), limpar_campo("vinculo") or limpar_campo("grau_parentesco"), 
-                      limpar_campo("endereco")))
+                      limpar_campo("endereco"), foto_aut))
                 conexao.commit()
                 flash("✅ Pessoa autorizada cadastrada com sucesso!", "success")
         except Exception as e:
@@ -3624,7 +3699,7 @@ def pagina_professores():
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute("""
                     SELECT f.id, f.nome_completo, f.especialidade as disciplina, f.email, f.telefone, f.salario,
-                           f.cargo, f.tipo_contrato, u.papel,
+                           f.cargo, f.tipo_contrato, f.foto_url, u.papel,
                            STRING_AGG(t.nome, ', ') AS turmas_lecionadas
                     FROM funcionarios f
                     LEFT JOIN turmas t ON t.professor_responsavel_id = f.id
@@ -3636,7 +3711,7 @@ def pagina_professores():
                     ) u ON TRUE
                     WHERE COALESCE(f.ativo, TRUE) = TRUE
                     GROUP BY f.id, f.nome_completo, f.especialidade, f.email, f.telefone, f.salario,
-                             f.cargo, f.tipo_contrato, u.papel
+                             f.cargo, f.tipo_contrato, f.foto_url, u.papel
                     ORDER BY f.nome_completo ASC;
                 """)
                 professores_cadastrados = cursor.fetchall()
@@ -4104,7 +4179,7 @@ def pagina_pedagogico():
 
                 cursor.execute(
                     """
-                    SELECT a.id, a.nome_completo, a.matricula,
+                    SELECT a.id, a.nome_completo, a.matricula, a.foto_url,
                            COALESCE(NULLIF(TRIM(a.status), ''), 'ativo') AS status,
                            STRING_AGG(t.nome, ', ') AS turmas_atuais
                     FROM alunos a

@@ -74,9 +74,7 @@
                                     <td>{{ aluno.matricula }}</td>
                                     <td>
                                         <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="text-primary text-decoration-none fw-bold d-flex align-items-center gap-2">
-                                            {% if aluno.foto_url %}
-                                            <img src="{{ url_for('static', filename=aluno.foto_url) }}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:50%;">
-                                            {% endif %}
+                                            {% with foto_atual=aluno.foto_url, foto_nome=aluno.nome_completo or aluno.nome %}{% include '_foto_mini.html' %}{% endwith %}
                                             {{ aluno.nome_completo or aluno.nome }}
                                         </a>
                                     </td>
@@ -121,7 +119,10 @@
                         {% for aluno in alunos %}
                         {% set st = (aluno.status or aluno.situacao or 'ativo') | lower %}
                         <article class="list-card">
-                            <h3>{{ aluno.nome_completo or aluno.nome }}</h3>
+                            <h3 class="d-flex align-items-center gap-2">
+                                {% with foto_atual=aluno.foto_url, foto_nome=aluno.nome_completo or aluno.nome %}{% include '_foto_mini.html' %}{% endwith %}
+                                {{ aluno.nome_completo or aluno.nome }}
+                            </h3>
                             <div class="meta">
                                 Matrícula {{ aluno.matricula or '-' }}
                                 · {{ aluno.turma_nome or 'Sem turma' }}
@@ -206,8 +207,7 @@
                                         </select>
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label small fw-bold">Foto do aluno</label>
-                                        <input type="file" name="foto" class="form-control" accept="image/*">
+                                        {% with foto_name='foto', foto_atual='', foto_rotulo='Foto do aluno' %}{% include '_foto_circulo.html' %}{% endwith %}
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Turma (mesmo cadastro usado no pedagógico)</label>
@@ -240,27 +240,29 @@
                                     </div>
                                     <div class="col-md-3">
                                         <label class="form-label small fw-bold">CEP</label>
-                                        <input type="text" name="cep" class="form-control" placeholder="00000-000" data-cep>
+                                        <input type="text" name="cep" class="form-control" placeholder="00000-000" data-cep autocomplete="postal-code">
+                                        <div class="form-text">Digite o CEP ou busque pelo nome da rua.</div>
                                     </div>
-                                    <div class="col-md-7">
-                                        <label class="form-label small fw-bold">Rua / Logradouro</label>
-                                        <input type="text" name="rua" class="form-control" placeholder="Nome da rua, avenida...">
+                                    <div class="col-md-2">
+                                        <label class="form-label small fw-bold">Estado (UF)</label>
+                                        <input type="text" name="estado" class="form-control" placeholder="RJ" maxlength="2">
+                                    </div>
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-bold">Cidade</label>
+                                        <input type="text" name="cidade" class="form-control" placeholder="Cidade">
                                     </div>
                                     <div class="col-md-2">
                                         <label class="form-label small fw-bold">Número</label>
                                         <input type="text" name="numero" class="form-control" placeholder="123">
                                     </div>
+                                    <div class="col-md-8 endereco-logradouro">
+                                        <label class="form-label small fw-bold">Rua / Logradouro</label>
+                                        <input type="text" name="rua" class="form-control" placeholder="Digite o logradouro para buscar nos Correios" data-logradouro autocomplete="off">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm mt-2" data-buscar-logradouro>Buscar logradouro nos Correios</button>
+                                    </div>
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Bairro</label>
                                         <input type="text" name="bairro" class="form-control" placeholder="Bairro">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label small fw-bold">Cidade</label>
-                                        <input type="text" name="cidade" class="form-control" placeholder="Cidade">
-                                    </div>
-                                    <div class="col-md-2">
-                                        <label class="form-label small fw-bold">Estado (UF)</label>
-                                        <input type="text" name="estado" class="form-control" placeholder="RJ" maxlength="2">
                                     </div>
                                 </div>
                             </div>
@@ -336,8 +338,7 @@
                                         <input type="text" name="resp1_trabalho" class="form-control" placeholder="Empresa">
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label small fw-bold">Foto do responsável 1</label>
-                                        <input type="file" name="resp1_foto" class="form-control" accept="image/*">
+                                        {% with foto_name='resp1_foto', foto_atual='', foto_rotulo='Foto do responsável 1' %}{% include '_foto_circulo.html' %}{% endwith %}
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Telefone do Trabalho</label>
@@ -374,8 +375,7 @@
                                         <input type="text" name="resp2_trabalho" class="form-control" placeholder="Empresa">
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label small fw-bold">Foto do responsável 2</label>
-                                        <input type="file" name="resp2_foto" class="form-control" accept="image/*">
+                                        {% with foto_name='resp2_foto', foto_atual='', foto_rotulo='Foto do responsável 2' %}{% include '_foto_circulo.html' %}{% endwith %}
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Telefone do Trabalho</label>

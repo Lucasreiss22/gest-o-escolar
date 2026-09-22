@@ -84,7 +84,12 @@
                         {% if professores %}
                             {% for prof in professores %}
                             <tr>
-                                <td>{{ prof.nome_completo }}</td>
+                                <td>
+                                    <span style="display:inline-flex;align-items:center;gap:8px;">
+                                        {% with foto_atual=prof.foto_url, foto_nome=prof.nome_completo %}{% include '_foto_mini.html' %}{% endwith %}
+                                        {{ prof.nome_completo }}
+                                    </span>
+                                </td>
                                 <td>{{ prof.cargo or 'Equipe' }}</td>
                                 <td>{{ nome_do_papel(prof.papel) if prof.papel else '—' }}</td>
                                 <td>{{ prof.disciplina or '—' }}</td>
@@ -112,7 +117,10 @@
                 {% if professores %}
                     {% for prof in professores %}
                     <article class="list-card">
-                        <h3>{{ prof.nome_completo }}</h3>
+                        <h3 style="display:flex;align-items:center;gap:8px;">
+                            {% with foto_atual=prof.foto_url, foto_nome=prof.nome_completo %}{% include '_foto_mini.html' %}{% endwith %}
+                            {{ prof.nome_completo }}
+                        </h3>
                         <div class="meta">
                             {{ prof.cargo or 'Equipe' }}
                             {% if prof.papel %} · {{ nome_do_papel(prof.papel) }}{% endif %}

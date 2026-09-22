@@ -1,0 +1,14 @@
+{% set _name = foto_name|default('foto') %}
+{% set _atual = foto_atual|default('') %}
+{% set _rotulo = foto_rotulo|default('Foto') %}
+<div class="foto-widget">
+    <label class="foto-circulo" data-foto-preview title="Clique para escolher a foto">
+        <img class="foto-circulo-img" alt="" {% if _atual %}src="{{ url_for('static', filename=_atual) }}"{% else %}src="" hidden{% endif %}>
+        <span class="foto-circulo-placeholder"{% if _atual %} hidden{% endif %}></span>
+        <input type="file" name="{{ _name }}" accept="image/*">
+    </label>
+    <div>
+        <div class="foto-widget-rotulo">{{ _rotulo }}</div>
+        <div class="foto-widget-hint">Clique no círculo para anexar a foto</div>
+    </div>
+</div>

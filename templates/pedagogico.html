@@ -140,7 +140,10 @@
                             {% set ns.achou = true %}
                             <tr>
                                 <td>
-                                    <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}">{{ aluno.nome_completo }}</a>
+                                    <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="d-inline-flex align-items-center gap-2">
+                                        {% with foto_atual=aluno.foto_url, foto_nome=aluno.nome_completo %}{% include '_foto_mini.html' %}{% endwith %}
+                                        {{ aluno.nome_completo }}
+                                    </a>
                                     <small class="text-muted d-block">Mat. {{ aluno.matricula or '-' }}</small>
                                 </td>
                                 <td class="d-flex flex-wrap gap-1">
@@ -529,7 +532,10 @@
                                 {% set ns_disp.qtd = ns_disp.qtd + 1 %}
                                 <label class="vinculo-item" data-busca="{{ (aluno.nome_completo or '')|lower }} {{ aluno.matricula or '' }}">
                                     <span>
+                                    <span class="d-inline-flex align-items-center gap-2">
+                                        {% with foto_atual=aluno.foto_url, foto_nome=aluno.nome_completo %}{% include '_foto_mini.html' %}{% endwith %}
                                         <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" onclick="event.stopPropagation();">{{ aluno.nome_completo }}</a>
+                                    </span>
                                         <div class="small text-muted">
                                             {% if aluno.matricula %}Mat. {{ aluno.matricula }}{% endif %}
                                             {% if aluno.turmas_atuais %} · já em {{ aluno.turmas_atuais }}{% else %} · sem turma{% endif %}

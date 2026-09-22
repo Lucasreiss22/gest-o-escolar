@@ -325,9 +325,13 @@
                 <div class="colab-pick">
                     {% for prof in colaboradores_busca %}
                     <a class="{% if colaborador_sel and colaborador_sel.id == prof.id %}sel{% endif %}"
-                       href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='folha', colab=prof.id, colab_q=colab_q) }}">
+                       href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='folha', colab=prof.id, colab_q=colab_q) }}"
+                       style="display:flex;align-items:center;gap:10px;">
+                        {% with foto_atual=prof.foto_url, foto_nome=prof.nome_completo %}{% include '_foto_mini.html' %}{% endwith %}
+                        <span>
                         <strong>{{ prof.nome_completo }}</strong>
                         <span class="fin-item-meta">{{ prof.cargo }} · {{ prof.rotulo_contrato }} · líquido R$ {{ "%.2f"|format(prof.liquido) }}</span>
+                        </span>
                     </a>
                     {% else %}
                     <p style="color:#777;">Nenhum colaborador encontrado. Cadastre em Gerenciar Usuários.</p>
@@ -338,7 +342,10 @@
                 {% set prof = colaborador_sel %}
                 <div class="fin-item">
                     <div class="fin-item-top">
-                        <strong>{{ prof.nome_completo }}</strong>
+                        <strong style="display:inline-flex;align-items:center;gap:10px;">
+                            {% with foto_atual=prof.foto_url, foto_nome=prof.nome_completo %}{% include '_foto_mini.html' %}{% endwith %}
+                            {{ prof.nome_completo }}
+                        </strong>
                         <span class="badge">{{ prof.rotulo_contrato }}</span>
                     </div>
                     <div class="fin-item-meta">{{ prof.cargo }} · {{ prof.observacao }}</div>

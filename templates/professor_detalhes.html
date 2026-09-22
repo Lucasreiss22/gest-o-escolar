@@ -46,7 +46,10 @@
     <div class="content">
         
         <div class="header-action">
-            <h2>Perfil do Professor: {{ professor.nome_completo }}</h2>
+            <h2 style="display:flex;align-items:center;gap:12px;">
+                {% with foto_atual=professor.foto_url, foto_nome=professor.nome_completo, foto_grande=true %}{% include '_foto_mini.html' %}{% endwith %}
+                Perfil do Professor: {{ professor.nome_completo }}
+            </h2>
             <a href="{{ url_for('pagina_professores') }}" class="btn btn-secondary">← Voltar para Lista</a>
         </div>
 

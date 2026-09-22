@@ -596,6 +596,7 @@ def garantir_tabelas_pedagogicas():
                 ("turma_disciplinas", "dias_semana", "VARCHAR(40) DEFAULT ''"),
                 ("disciplinas", "grade_json", "TEXT DEFAULT '[]'"),
                 ("turma_disciplinas", "grade_json", "TEXT DEFAULT '[]'"),
+                ("funcionarios", "foto_url", "VARCHAR(255)"),
             ):
                 _garantir_coluna(cursor, tabela, coluna, spec, mapa)
             if "frequencia" in mapa:
@@ -635,7 +636,7 @@ def garantir_tabelas_folha():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:folha"
+    chave = f"{schema}:folha:fotos"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -720,7 +721,8 @@ def garantir_tabelas_folha():
                     cpf VARCHAR(14),
                     telefone VARCHAR(30),
                     vinculo VARCHAR(80),
-                    endereco VARCHAR(255)
+                    endereco VARCHAR(255),
+                    foto_url VARCHAR(255)
                 );
                 CREATE TABLE IF NOT EXISTS provas_notas (
                     id SERIAL PRIMARY KEY,
@@ -784,6 +786,8 @@ def garantir_tabelas_folha():
                 ("alunos", "desconto_valor", "NUMERIC(12,2) DEFAULT 0"),
                 ("alunos", "foto_url", "VARCHAR(255)"),
                 ("responsaveis_aluno", "foto_url", "VARCHAR(255)"),
+                ("funcionarios", "foto_url", "VARCHAR(255)"),
+                ("pessoas_autorizadas", "foto_url", "VARCHAR(255)"),
                 ("alunos", "cep", "VARCHAR(9)"),
                 ("alunos", "rua", "VARCHAR(150)"),
                 ("alunos", "numero", "VARCHAR(20)"),

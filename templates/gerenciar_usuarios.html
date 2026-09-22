@@ -67,9 +67,12 @@
             </form>
             <div class="user-pick">
                 {% for u in usuarios %}
-                <a class="{% if cadastro.usuario_id == u.id %}sel{% endif %}" href="{{ url_for('gerenciar_usuarios', uid=u.id, q=busca_u) }}">
+                <a class="{% if cadastro.usuario_id == u.id %}sel{% endif %}" href="{{ url_for('gerenciar_usuarios', uid=u.id, q=busca_u) }}" style="display:flex;align-items:center;gap:10px;">
+                    {% with foto_atual=u.foto_url, foto_nome=u.nome %}{% include '_foto_mini.html' %}{% endwith %}
+                    <span>
                     <strong>{{ u.nome }}</strong> · {{ u.email }}
                     <div class="hint">{{ nome_do_papel(u.papel) }} {% if u.cargo %}· {{ u.cargo }}{% endif %} {% if u.tipo_contrato %}· {{ rotulo_contrato(u.tipo_contrato) }}{% endif %}</div>
+                    </span>
                 </a>
                 {% else %}
                 <p class="hint">Nenhum usuário de acesso encontrado.</p>
@@ -79,9 +82,12 @@
             <p class="hint" style="margin-top:14px;">Equipe só na folha (recebe e-mail, sem entrar no painel):</p>
             <div class="user-pick">
                 {% for u in sem_login %}
-                <a class="{% if cadastro.funcionario_id == u.funcionario_id %}sel{% endif %}" href="{{ url_for('gerenciar_usuarios', fid=u.funcionario_id, q=busca_u) }}">
+                <a class="{% if cadastro.funcionario_id == u.funcionario_id %}sel{% endif %}" href="{{ url_for('gerenciar_usuarios', fid=u.funcionario_id, q=busca_u) }}" style="display:flex;align-items:center;gap:10px;">
+                    {% with foto_atual=u.foto_url, foto_nome=u.nome %}{% include '_foto_mini.html' %}{% endwith %}
+                    <span>
                     <strong>{{ u.nome }}</strong> · {{ u.email or 'sem e-mail' }}
                     <div class="hint">{{ u.cargo or 'Equipe' }} · sem usuário de sistema</div>
+                    </span>
                 </a>
                 {% endfor %}
             </div>
@@ -90,12 +96,17 @@
 
         <div class="card-box">
             <h3 class="card-title">{% if cadastro.usuario_id or cadastro.funcionario_id %}Editar cadastro{% else %}Novo cadastro completo{% endif %}</h3>
-            <form method="POST">
+            <form method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="acao" value="salvar">
                 <input type="hidden" name="usuario_id" value="{{ cadastro.usuario_id or '' }}">
                 <input type="hidden" name="funcionario_id" value="{{ cadastro.funcionario_id or '' }}">
 
                 <h4 class="card-title">Dados da pessoa</h4>
+                <div class="form-grid" style="align-items:center;">
+                    <div class="form-group span2">
+                        {% with foto_name='foto', foto_atual=cadastro.foto_url, foto_rotulo='Foto do cadastro' %}{% include '_foto_circulo.html' %}{% endwith %}
+                    </div>
+                </div>
                 <p class="hint" style="margin-top:-8px;margin-bottom:12px;">
                     Qualquer funcionário só precisa de nome e e-mail para receber contra-cheque e avisos.
                     Ninguém da equipe tem senha SMTP. Se um professor ou funcionário disparar um e-mail,
@@ -184,12 +195,16 @@
                         </div>
                         <input name="formacao_curso" value="{{ cadastro.formacao or '' }}" placeholder="Curso / instituição">
                     </div>
-                    <div class="form-group"><label>CEP</label><input name="cep" data-cep value="{{ cadastro.cep or '' }}" placeholder="00000-000"></div>
-                    <div class="form-group span2"><label>Rua</label><input name="rua" value="{{ cadastro.rua or '' }}"></div>
+                    <div class="form-group"><label>CEP</label><input name="cep" data-cep value="{{ cadastro.cep or '' }}" placeholder="00000-000" autocomplete="postal-code"></div>
+                    <div class="form-group"><label>UF</label><input name="estado" maxlength="2" value="{{ cadastro.estado or '' }}"></div>
+                    <div class="form-group span2"><label>Cidade</label><input name="cidade" value="{{ cadastro.cidade or '' }}"></div>
+                    <div class="form-group span2 endereco-logradouro">
+                        <label>Rua / Logradouro (busca nos Correios)</label>
+                        <input name="rua" value="{{ cadastro.rua or '' }}" data-logradouro autocomplete="off" placeholder="Digite a rua, avenida...">
+                        <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px;width:auto;" data-buscar-logradouro>Buscar logradouro nos Correios</button>
+                    </div>
                     <div class="form-group"><label>Número</label><input name="numero" value="{{ cadastro.numero or '' }}"></div>
                     <div class="form-group"><label>Bairro</label><input name="bairro" value="{{ cadastro.bairro or '' }}"></div>
-                    <div class="form-group"><label>Cidade</label><input name="cidade" value="{{ cadastro.cidade or '' }}"></div>
-                    <div class="form-group"><label>UF</label><input name="estado" maxlength="2" value="{{ cadastro.estado or '' }}"></div>
                 </div>
 
                 <h4 class="card-title">Pagamento e contrato</h4>
