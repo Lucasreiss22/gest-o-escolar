@@ -262,11 +262,15 @@
                         <input type="number" name="dia_pagamento" min="1" max="28" value="{{ cadastro.dia_pagamento or 5 }}">
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
-                        <label>Horas extras do mês</label>
+                        <label>Horas extras 50% (dias úteis)</label>
                         <input name="horas_extras" value="{{ '%.2f'|format(cadastro.horas_extras|float if cadastro.horas_extras else 0) }}">
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
-                        <label>Valor da hora extra (R$). Em branco usa 50% sobre a hora/salário</label>
+                        <label>Horas extras 100% (domingos e feriados)</label>
+                        <input name="horas_extras_100" value="{{ '%.2f'|format(cadastro.horas_extras_100|float if cadastro.horas_extras_100 else 0) }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Valor da hora extra 50% (R$). 0 = salário ÷ 220 × 1,5 (CLT)</label>
                         <input name="valor_hora_extra" data-moeda value="{{ '%.2f'|format(cadastro.valor_hora_extra|float if cadastro.valor_hora_extra else 0) }}">
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">

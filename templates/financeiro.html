@@ -346,8 +346,14 @@
                     <div class="fin-linha"><span>Horas × valor da aula</span><strong>R$ {{ "%.2f"|format(prof.salario) }}</strong></div>
                     <div class="fin-linha"><span>DSR (1/6 ou equivalente do mês)</span><strong>R$ {{ "%.2f"|format(prof.dsr) }}</strong></div>
                     {% endif %}
-                    {% if prof.adicional_he %}
-                    <div class="fin-linha"><span>Horas extras ({{ prof.horas_extras }} h)</span><strong>R$ {{ "%.2f"|format(prof.adicional_he) }}</strong></div>
+                    {% if prof.adicional_he_50 %}
+                    <div class="fin-linha"><span>Hora extra 50% ({{ prof.horas_extras }} h)</span><strong>R$ {{ "%.2f"|format(prof.adicional_he_50) }}</strong></div>
+                    {% endif %}
+                    {% if prof.adicional_he_100 %}
+                    <div class="fin-linha"><span>Hora extra 100% ({{ prof.horas_extras_100 }} h)</span><strong>R$ {{ "%.2f"|format(prof.adicional_he_100) }}</strong></div>
+                    {% endif %}
+                    {% if prof.dsr_he %}
+                    <div class="fin-linha"><span>DSR sobre horas extras</span><strong>R$ {{ "%.2f"|format(prof.dsr_he) }}</strong></div>
                     {% endif %}
                     <div class="fin-linha"><span>Bruto</span><strong>R$ {{ "%.2f"|format(prof.bruto) }}</strong></div>
                     {% if prof.tipo_contrato in ['pj'] %}
@@ -418,12 +424,16 @@
                             <input type="number" name="dia_pagamento" min="1" max="28" value="{{ prof.dia_pagamento or 5 }}">
                         </div>
                         <div class="form-group">
-                            <label>Horas extras do mês</label>
+                            <label>Horas extras 50% (dias úteis)</label>
                             <input name="horas_extras" value="{{ '%.2f'|format(prof.horas_extras or 0) }}">
                         </div>
                         <div class="form-group">
-                            <label>Valor da hora extra</label>
-                            <input name="valor_hora_extra" value="{{ '%.2f'|format(prof.valor_hora_extra or 0) }}">
+                            <label>Horas extras 100% (domingo/feriado)</label>
+                            <input name="horas_extras_100" value="{{ '%.2f'|format(prof.horas_extras_100 or 0) }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Valor da hora extra 50% (0 = CLT automático)</label>
+                            <input name="valor_hora_extra" value="{{ '%.2f'|format(prof.valor_hora_extra_cadastro or 0) }}">
                         </div>
                         <div class="form-group" data-contratos="pj">
                             <label>Retenção federal PJ</label>

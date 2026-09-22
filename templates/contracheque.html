@@ -6,14 +6,25 @@
     <title>Contra-cheque</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
     <style>
-        .card-box { background:#fff; border-radius:12px; padding:20px; box-shadow:0 8px 24px rgba(15,23,42,.08); max-width:860px; }
-        .linha { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eef2f7; }
+        .card-box { background:#fff; border-radius:12px; padding:20px; box-shadow:0 8px 24px rgba(15,23,42,.08); max-width:920px; }
+        .linha { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eef2f7; gap:12px; }
         .btn { padding:9px 16px; border:none; border-radius:8px; background:#1e3a5f; color:#fff; text-decoration:none; display:inline-block; font-weight:700; cursor:pointer; }
         .btn-verde { background:#15803d; }
+        .btn-claro { background:#e2e8f0; color:#0f172a; }
         table { width:100%; border-collapse:collapse; font-size:.88rem; margin-top:12px; }
         th, td { padding:8px 10px; border-bottom:1px solid #e2e8f0; text-align:left; }
-        .acoes { display:flex; gap:8px; flex-wrap:wrap; }
+        .acoes { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
         .hint { color:#64748b; font-size:.85rem; }
+        .topo-envio { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px; }
+        tr.clicavel { cursor:pointer; }
+        tr.clicavel:hover td { background:#f8fafc; }
+        tr.selecionado td { background:#ecfdf3; }
+        .grade-ajuste { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:12px 0; }
+        .grade-ajuste label { display:block; font-size:.8rem; color:#475569; margin-bottom:4px; }
+        .grade-ajuste input { width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:8px; }
+        .clt-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; margin:12px 0; }
+        a.nome-colab { color:#0f172a; font-weight:700; text-decoration:none; }
+        a.nome-colab:hover { color:#15803d; text-decoration:underline; }
     </style>
 </head>
 <body>
@@ -28,17 +39,22 @@
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <form method="GET" style="margin-bottom:16px;">
-            <input type="month" name="mes" value="{{ mes_atual }}" onchange="this.form.submit()">
-        </form>
+        <div class="topo-envio">
+            <form method="GET">
+                <label class="hint" for="mes">Mês</label><br>
+                <input type="month" id="mes" name="mes" value="{{ mes_atual }}" onchange="this.form.submit()">
+            </form>
+            {% if admin_folha %}
+            <form action="{{ url_for('enviar_contracheques_mes') }}" method="POST">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <button class="btn btn-verde" type="submit">Enviar todos os contra-cheques</button>
+            </form>
+            {% endif %}
+        </div>
         {% if admin_folha %}
         <div class="card-box" style="margin-bottom:16px;">
             <p><strong>{{ escola }}</strong> · {{ mes_label }}</p>
-            <p class="hint">O contra-cheque vai para o e-mail do colaborador. O envio sai pelo sistema, com o nome de quem clicou em enviar. Confira também a pasta Spam.</p>
-            <form action="{{ url_for('enviar_contracheques_mes') }}" method="POST" class="acoes">
-                <input type="hidden" name="mes" value="{{ mes_atual }}">
-                <button class="btn btn-verde" type="submit">Enviar todos os contra-cheques do mês</button>
-            </form>
+            <p class="hint">Clique no nome do colaborador para abrir o contra-cheque e lançar hora extra (50% em dia útil, 100% em domingo/feriado, DSR de 1/6). O envio sai pelo sistema, com o nome de quem clicou em enviar.</p>
             <table>
                 <thead>
                     <tr>
@@ -52,8 +68,8 @@
                 </thead>
                 <tbody>
                     {% for row in itens %}
-                    <tr>
-                        <td>{{ row.nome_completo }}</td>
+                    <tr class="clicavel {% if item and item.id == row.id %}selecionado{% endif %}" onclick="if(!event.target.closest('a,button,form')) location='{{ url_for('contracheque', mes=mes_atual, funcionario_id=row.id) }}'">
+                        <td><a class="nome-colab" href="{{ url_for('contracheque', mes=mes_atual, funcionario_id=row.id) }}">{{ row.nome_completo }}</a></td>
                         <td>{{ row.email or '—' }}</td>
                         <td>{{ row.cargo }}</td>
                         <td>{{ row.dia_pagamento }}</td>
@@ -76,16 +92,64 @@
         </div>
         {% endif %}
         {% if item %}
-        <div class="card-box">
+        <div class="card-box" id="holerite">
             <p><strong>{{ item.nome_completo }}</strong> · {{ item.cargo }} · {{ item.rotulo_contrato }}</p>
             <p class="hint">{{ escola }} · {{ mes_label }} · pagamento dia {{ item.dia_pagamento }}</p>
-            {% if item.adicional_he %}
-            <div class="linha"><span>Horas extras ({{ item.horas_extras }} h)</span><strong>R$ {{ "%.2f"|format(item.adicional_he) }}</strong></div>
+            {% if admin_folha %}
+            <form action="{{ url_for('ajustar_contracheque') }}" method="POST" id="form-he">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <input type="hidden" name="funcionario_id" value="{{ item.id }}">
+                <div class="clt-box">
+                    <strong>Ajustar valores do mês (CLT)</strong>
+                    <p class="hint" style="margin:6px 0 0;">
+                        Hora normal = salário ÷ 220 (jornada de 44h). Extra em dia útil: +50% (art. 59, §1º, CLT).
+                        Domingo ou feriado: +100%. DSR de 1/6 sobre as extras habituais (Súmula 172 do TST). INSS e IRRF recaem sobre o bruto.
+                    </p>
+                    <div class="grade-ajuste">
+                        <div>
+                            <label>Horas extras 50% (dias úteis)</label>
+                            <input name="horas_extras" id="he50" value="{{ '%.2f'|format(item.horas_extras or 0) }}" inputmode="decimal">
+                        </div>
+                        <div>
+                            <label>Horas extras 100% (domingo/feriado)</label>
+                            <input name="horas_extras_100" id="he100" value="{{ '%.2f'|format(item.horas_extras_100 or 0) }}" inputmode="decimal">
+                        </div>
+                        <div>
+                            <label>Valor da hora extra 50% (0 = automático)</label>
+                            <input name="valor_hora_extra" id="vhe50" data-moeda value="{{ '%.2f'|format(item.valor_hora_extra_cadastro or 0) }}">
+                        </div>
+                    </div>
+                    <p class="hint" id="he-preview">
+                        Hora normal: R$ {{ "%.2f"|format(item.hora_normal or 0) }}.
+                        Extra 50% automática: R$ {{ "%.2f"|format((item.hora_normal or 0) * 1.5) }}.
+                        Extra 100%: R$ {{ "%.2f"|format((item.hora_normal or 0) * 2) }}.
+                    </p>
+                    <button class="btn btn-verde" type="submit">Recalcular contra-cheque</button>
+                </div>
+            </form>
+            {% endif %}
+            {% if item.tipo_contrato in ['clt_horista','horista'] %}
+            <div class="linha"><span>Horas do mês</span><strong>R$ {{ "%.2f"|format(item.salario) }}</strong></div>
+            <div class="linha"><span>DSR das horas</span><strong>R$ {{ "%.2f"|format(item.dsr) }}</strong></div>
+            {% else %}
+            <div class="linha"><span>Salário</span><strong>R$ {{ "%.2f"|format(item.salario) }}</strong></div>
+            {% endif %}
+            {% if item.adicional_he_50 %}
+            <div class="linha"><span>Hora extra 50% ({{ item.horas_extras }} h × R$ {{ "%.2f"|format(item.valor_hora_extra) }})</span><strong>R$ {{ "%.2f"|format(item.adicional_he_50) }}</strong></div>
+            {% endif %}
+            {% if item.adicional_he_100 %}
+            <div class="linha"><span>Hora extra 100% ({{ item.horas_extras_100 }} h × R$ {{ "%.2f"|format(item.valor_hora_extra_100) }})</span><strong>R$ {{ "%.2f"|format(item.adicional_he_100) }}</strong></div>
+            {% endif %}
+            {% if item.dsr_he %}
+            <div class="linha"><span>DSR sobre horas extras (1/6)</span><strong>R$ {{ "%.2f"|format(item.dsr_he) }}</strong></div>
             {% endif %}
             <div class="linha"><span>Bruto</span><strong>R$ {{ "%.2f"|format(item.bruto) }}</strong></div>
             <div class="linha"><span>INSS</span><strong>R$ {{ "%.2f"|format(item.inss_funcionario) }}</strong></div>
             <div class="linha"><span>IRRF</span><strong>R$ {{ "%.2f"|format(item.irrf) }}</strong></div>
             <div class="linha"><span>Líquido</span><strong>R$ {{ "%.2f"|format(item.liquido) }}</strong></div>
+            {% if item.observacao %}
+            <p class="hint" style="margin-top:10px;">{{ item.observacao }}</p>
+            {% endif %}
             <p style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
                 <a class="btn" href="{{ url_for('pdf_contracheque_rota', mes=mes_atual, funcionario_id=item.id) }}">Baixar PDF</a>
                 <form action="{{ url_for('pdf_contracheque_rota') }}" method="POST" style="display:inline;">
@@ -101,5 +165,42 @@
         {% endif %}
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    (function () {
+        var horaNormal = {{ item.hora_normal if item else 0 }};
+        var he50 = document.getElementById("he50");
+        var he100 = document.getElementById("he100");
+        var vhe50 = document.getElementById("vhe50");
+        var preview = document.getElementById("he-preview");
+        function num(el) {
+            if (!el) return 0;
+            return parseFloat(String(el.value || "0").replace(/\./g, "").replace(",", ".")) || parseFloat(el.value) || 0;
+        }
+        function atualizar() {
+            if (!preview) return;
+            var h50 = parseFloat((he50 && he50.value || "0").replace(",", ".")) || 0;
+            var h100 = parseFloat((he100 && he100.value || "0").replace(",", ".")) || 0;
+            var informado = parseFloat((vhe50 && vhe50.value || "0").replace(",", ".")) || 0;
+            var v50 = informado > 0 ? informado : horaNormal * 1.5;
+            var v100 = horaNormal * 2;
+            var a50 = h50 * v50;
+            var a100 = h100 * v100;
+            var dsr = (a50 + a100) / 6;
+            preview.textContent = "Prévia: hora normal R$ " + horaNormal.toFixed(2)
+                + " · HE 50% R$ " + a50.toFixed(2)
+                + " · HE 100% R$ " + a100.toFixed(2)
+                + " · DSR extras R$ " + dsr.toFixed(2)
+                + ". Salve para recalcular INSS, IRRF e líquido.";
+        }
+        [he50, he100, vhe50].forEach(function (el) {
+            if (el) el.addEventListener("input", atualizar);
+        });
+        atualizar();
+        if ({{ 'true' if item and admin_folha else 'false' }}) {
+            var alvo = document.getElementById("holerite");
+            if (alvo) alvo.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    })();
+    </script>
 </body>
 </html>

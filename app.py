@@ -45,7 +45,14 @@ from relatorios_pdf import (
     pdf_simples_nacional,
     pdf_cobranca_mensalidade,
 )
-from folha import calcular_folha_pessoa, rotulo_contrato, impostos_nota, contrato_vigente, dia_pagamento_valido
+from folha import (
+    calcular_folha_pessoa,
+    rotulo_contrato,
+    impostos_nota,
+    contrato_vigente,
+    dia_pagamento_valido,
+    aplicar_ajuste_competencia,
+)
 from permissoes import pode_endpoint, pode_modulo, normalizar_papel, rotulo_papel
 from plataforma import (
     buscar_admin_plataforma,
@@ -747,6 +754,60 @@ def montar_folha_colaboradores(cursor):
     return detalhe, total_mes
 
 
+def _garantir_folha_ajustes(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS folha_ajustes (
+            funcionario_id INT NOT NULL,
+            competencia VARCHAR(7) NOT NULL,
+            horas_extras NUMERIC(10,2) DEFAULT 0,
+            horas_extras_100 NUMERIC(10,2) DEFAULT 0,
+            valor_hora_extra NUMERIC(12,2) DEFAULT 0,
+            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (funcionario_id, competencia)
+        )
+        """
+    )
+    cursor.execute(
+        "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS horas_extras_100 NUMERIC(10,2) DEFAULT 0"
+    )
+
+
+def _mapa_ajustes_folha(cursor, competencia):
+    if not competencia:
+        return {}
+    _garantir_folha_ajustes(cursor)
+    cursor.execute(
+        """
+        SELECT funcionario_id, horas_extras, horas_extras_100, valor_hora_extra
+        FROM folha_ajustes
+        WHERE competencia = %s
+        """,
+        (competencia,),
+    )
+    return {row["funcionario_id"]: dict(row) for row in (cursor.fetchall() or [])}
+
+
+def _ajuste_folha(cursor, funcionario_id, competencia):
+    if not funcionario_id or not competencia:
+        return None
+    _garantir_folha_ajustes(cursor)
+    cursor.execute(
+        """
+        SELECT horas_extras, horas_extras_100, valor_hora_extra
+        FROM folha_ajustes
+        WHERE funcionario_id = %s AND competencia = %s
+        """,
+        (funcionario_id, competencia),
+    )
+    return cursor.fetchone()
+
+
+def _func_com_ajuste(cursor, func, competencia):
+    dados = dict(func or {})
+    return aplicar_ajuste_competencia(dados, _ajuste_folha(cursor, dados.get("id"), competencia))
+
+
 def montar_folha_contratos(cursor, regime, mes_filtro=None):
     garantir_tabelas_folha()
     ano = mes = None
@@ -763,6 +824,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         ORDER BY nome_completo
         """
     )
+    ajustes = _mapa_ajustes_folha(cursor, mes_filtro)
     itens = []
     totais = {
         "bruto": 0.0,
@@ -773,11 +835,15 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         "fgts": 0.0,
     }
     for row in cursor.fetchall():
-        dados = dict(row)
+        dados = aplicar_ajuste_competencia(dict(row), ajustes.get(row.get("id")))
         if not contrato_vigente(dados, ano, mes):
             continue
         calc = calcular_folha_pessoa(dados, regime, ano, mes)
         calc["rotulo_contrato"] = rotulo_contrato(calc["tipo_contrato"])
+        try:
+            calc["valor_hora_extra_cadastro"] = float(dados.get("valor_hora_extra") or 0)
+        except (TypeError, ValueError):
+            calc["valor_hora_extra_cadastro"] = 0.0
         calc["reter_federal"] = row.get("reter_federal")
         calc["reter_iss"] = row.get("reter_iss")
         calc["aliquota_iss"] = row.get("aliquota_iss") or 5
@@ -829,7 +895,11 @@ def _registrar_folha_item(cursor, item, competencia):
             item.get("custo_escola") or 0,
             json.dumps({
                 "horas_extras": item.get("horas_extras") or 0,
+                "horas_extras_100": item.get("horas_extras_100") or 0,
                 "adicional_he": item.get("adicional_he") or 0,
+                "adicional_he_50": item.get("adicional_he_50") or 0,
+                "adicional_he_100": item.get("adicional_he_100") or 0,
+                "dsr_he": item.get("dsr_he") or 0,
                 "dia_pagamento": item.get("dia_pagamento") or 5,
             }),
         ),
@@ -914,9 +984,10 @@ def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
                     pass
             regime = cfg.get("regime_tributario") or "simples_nacional"
             escola = cfg.get("nome_escola") or "Gestão Escolar"
+            ajustes = _mapa_ajustes_folha(cursor, competencia)
             cursor.execute("SELECT * FROM funcionarios WHERE COALESCE(ativo, TRUE) = TRUE")
             for func in cursor.fetchall() or []:
-                dados = dict(func)
+                dados = aplicar_ajuste_competencia(dict(func), ajustes.get(func.get("id")))
                 if not contrato_vigente(dados, hoje.year, hoje.month):
                     continue
                 if dia_pagamento_valido(dados.get("dia_pagamento")) != hoje.day:
@@ -1847,6 +1918,7 @@ def gerenciar_usuarios():
                         limpar_campo("data_fim_contrato") or None,
                         dia_pagamento_valido(request.form.get("dia_pagamento")),
                         _float_form("horas_extras"),
+                        _float_form("horas_extras_100"),
                         _float_form("valor_hora_extra"),
                         request.form.get("enviar_contracheque", "1") != "0",
                         ativo, uid,
@@ -1863,7 +1935,7 @@ def gerenciar_usuarios():
                                 reter_federal = %s, reter_iss = %s, aliquota_iss = %s,
                                 data_contratacao = COALESCE(%s::date, data_contratacao),
                                 data_inicio_contrato = %s, data_fim_contrato = %s, dia_pagamento = %s,
-                                horas_extras = %s, valor_hora_extra = %s, enviar_contracheque = %s,
+                                horas_extras = %s, horas_extras_100 = %s, valor_hora_extra = %s, enviar_contracheque = %s,
                                 ativo = %s, usuario_id = %s
                             WHERE id = %s
                             """,
@@ -1879,11 +1951,11 @@ def gerenciar_usuarios():
                                 salario, tipo_contrato, valor_hora, horas_mes,
                                 reter_federal, reter_iss, aliquota_iss, data_contratacao,
                                 data_inicio_contrato, data_fim_contrato, dia_pagamento,
-                                horas_extras, valor_hora_extra, enviar_contracheque, ativo, usuario_id
+                                horas_extras, horas_extras_100, valor_hora_extra, enviar_contracheque, ativo, usuario_id
                             ) VALUES (
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s, %s, %s, %s
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s
                             )
                             RETURNING id
                             """,
@@ -1926,6 +1998,7 @@ def gerenciar_usuarios():
         "valor_hora": 0,
         "horas_mes": 0,
         "horas_extras": 0,
+        "horas_extras_100": 0,
         "valor_hora_extra": 0,
         "dia_pagamento": 5,
         "enviar_contracheque": True,
@@ -2029,6 +2102,7 @@ def gerenciar_usuarios():
                         "valor_hora": frow.get("valor_hora") or 0,
                         "horas_mes": frow.get("horas_mes") or 0,
                         "horas_extras": frow.get("horas_extras") or 0,
+                        "horas_extras_100": frow.get("horas_extras_100") or 0,
                         "valor_hora_extra": frow.get("valor_hora_extra") or 0,
                         "dia_pagamento": dia_pagamento_valido(frow.get("dia_pagamento")),
                         "data_inicio_contrato": _data_iso(frow.get("data_inicio_contrato") or frow.get("data_contratacao")),
@@ -4136,13 +4210,14 @@ def pagina_financeiro():
                         valor_hora = _float_form("valor_hora")
                         horas_mes = _float_form("horas_mes")
                         horas_extras = float((request.form.get("horas_extras") or "0").replace(",", ".") or 0)
+                        horas_extras_100 = float((request.form.get("horas_extras_100") or "0").replace(",", ".") or 0)
                         valor_hora_extra = float((request.form.get("valor_hora_extra") or "0").replace(",", ".") or 0)
                         cursor.execute(
                             """
                             UPDATE funcionarios SET
                                 tipo_contrato = %s, salario = %s, valor_hora = %s, horas_mes = %s,
                                 reter_federal = %s, reter_iss = %s, aliquota_iss = %s,
-                                horas_extras = %s, valor_hora_extra = %s, dia_pagamento = %s,
+                                horas_extras = %s, horas_extras_100 = %s, valor_hora_extra = %s, dia_pagamento = %s,
                                 data_inicio_contrato = COALESCE(%s::date, data_inicio_contrato),
                                 data_fim_contrato = %s
                             WHERE id = %s
@@ -4156,6 +4231,7 @@ def pagina_financeiro():
                                 request.form.get("reter_iss") == "1",
                                 float((request.form.get("aliquota_iss") or "5").replace(",", ".") or 5),
                                 horas_extras,
+                                horas_extras_100,
                                 valor_hora_extra,
                                 dia_pagamento_valido(request.form.get("dia_pagamento")),
                                 request.form.get("data_inicio_contrato") or None,
@@ -4634,8 +4710,13 @@ def contracheque():
                     func = cursor.fetchone()
                     if func:
                         ano, mes = parse_mes(mes_filtro)
-                        item = calcular_folha_pessoa(dict(func), regime, ano, mes)
+                        dados = _func_com_ajuste(cursor, func, mes_filtro)
+                        item = calcular_folha_pessoa(dados, regime, ano, mes)
                         item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
+                        try:
+                            item["valor_hora_extra_cadastro"] = float(dados.get("valor_hora_extra") or 0)
+                        except (TypeError, ValueError):
+                            item["valor_hora_extra_cadastro"] = 0.0
         finally:
             conexao.close()
     return render_template(
@@ -4679,8 +4760,9 @@ def enviar_contracheques_mes():
                 if not func:
                     continue
                 try:
-                    destinos = _emails_colaborador(dict(func), cursor)
-                    dest = _enviar_contracheque_pessoa(dict(func), regime, mes_filtro, escola, destinos=destinos)
+                    dados = _func_com_ajuste(cursor, func, mes_filtro)
+                    destinos = _emails_colaborador(dados, cursor)
+                    dest = _enviar_contracheque_pessoa(dados, regime, mes_filtro, escola, destinos=destinos)
                     _registrar_folha_item(cursor, item, mes_filtro)
                     cursor.execute(
                         """
@@ -4709,6 +4791,55 @@ def enviar_contracheques_mes():
     return redirect(url_for("contracheque", mes=mes_filtro))
 
 
+@app.route("/contracheque/ajustar", methods=["POST"])
+def ajustar_contracheque():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if not pode_modulo(session.get("usuario_papel"), "financeiro"):
+        flash("Sem permissão para ajustar o contra-cheque.", "danger")
+        return redirect(url_for("contracheque"))
+    mes_filtro = request.form.get("mes") or datetime.now().strftime("%Y-%m")
+    fid = request.form.get("funcionario_id", type=int)
+    if not fid:
+        flash("Selecione o colaborador.", "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    horas_extras = _float_form("horas_extras")
+    horas_extras_100 = _float_form("horas_extras_100")
+    valor_hora_extra = _float_form("valor_hora_extra")
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro, funcionario_id=fid))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT id FROM funcionarios WHERE id = %s", (fid,))
+            if not cursor.fetchone():
+                flash("Colaborador não encontrado.", "danger")
+                return redirect(url_for("contracheque", mes=mes_filtro))
+            cursor.execute(
+                """
+                INSERT INTO folha_ajustes (
+                    funcionario_id, competencia, horas_extras, horas_extras_100, valor_hora_extra, atualizado_em
+                ) VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (funcionario_id, competencia) DO UPDATE SET
+                    horas_extras = EXCLUDED.horas_extras,
+                    horas_extras_100 = EXCLUDED.horas_extras_100,
+                    valor_hora_extra = EXCLUDED.valor_hora_extra,
+                    atualizado_em = CURRENT_TIMESTAMP
+                """,
+                (fid, mes_filtro, horas_extras, horas_extras_100, valor_hora_extra),
+            )
+        conexao.commit()
+        flash("Horas extras do mês atualizadas. O líquido já considera INSS e IRRF da CLT.", "success")
+    except Exception as e:
+        conexao.rollback()
+        flash(f"Não foi possível salvar o ajuste: {e}", "danger")
+    finally:
+        conexao.close()
+    return redirect(url_for("contracheque", mes=mes_filtro, funcionario_id=fid))
+
+
 @app.route("/contracheque/pdf", methods=["GET", "POST"])
 def pdf_contracheque_rota():
     if "usuario_id" not in session:
@@ -4723,24 +4854,29 @@ def pdf_contracheque_rota():
             cursor.execute("SELECT nome_escola, regime_tributario FROM configuracoes WHERE id = 1;")
             cfg = cursor.fetchone() or {}
             regime = cfg.get("regime_tributario") or "lucro_presumido"
-            fid = session.get("funcionario_id")
-            if not fid and pode_modulo(session.get("usuario_papel"), "financeiro"):
-                fid = request.values.get("funcionario_id", type=int)
+            fid = request.values.get("funcionario_id", type=int)
+            admin_folha = pode_modulo(session.get("usuario_papel"), "financeiro")
+            if not fid:
+                fid = session.get("funcionario_id")
             if not fid:
                 flash("❌ Nenhum colaborador vinculado a este usuário.", "danger")
+                return redirect(url_for("contracheque"))
+            if not admin_folha and fid != session.get("funcionario_id"):
+                flash("Sem permissão para este contra-cheque.", "danger")
                 return redirect(url_for("contracheque"))
             cursor.execute("SELECT * FROM funcionarios WHERE id = %s", (fid,))
             func = cursor.fetchone()
             if not func:
                 flash("❌ Colaborador não encontrado.", "danger")
                 return redirect(url_for("contracheque"))
+            dados = _func_com_ajuste(cursor, func, mes_filtro)
             ano, mes = parse_mes(mes_filtro)
-            item = calcular_folha_pessoa(dict(func), regime, ano, mes)
+            item = calcular_folha_pessoa(dados, regime, ano, mes)
             item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
             buffer = pdf_contracheque(cfg.get("nome_escola") or "Gestão Escolar", nome_mes_extenso(mes_filtro), item)
         nome_arq = f"contracheque_{fid}_{mes_filtro}.pdf"
         if request.args.get("enviar") or request.method == "POST":
-            destinos = _emails_colaborador(func, cursor)
+            destinos = _emails_colaborador(dados, cursor)
             if not destinos:
                 flash("O colaborador não tem e-mail válido cadastrado.", "danger")
                 return redirect(url_for("contracheque", mes=mes_filtro))

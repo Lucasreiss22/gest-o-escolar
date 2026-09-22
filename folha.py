@@ -150,25 +150,78 @@ def dia_pagamento_valido(valor, padrao=5):
     return max(1, min(28, dia))
 
 
+DIVISOR_CLT = 220.0
+ADICIONAL_HE_50 = 1.5
+ADICIONAL_HE_100 = 2.0
+
+
+def hora_normal_clt(func):
+    """Hora normal: horista usa valor_hora; mensalista usa salário ÷ 220 (CLT, jornada de 44h)."""
+    tipo = (func.get("tipo_contrato") or "clt_mensalista").strip().lower()
+    if tipo in ("clt_horista", "horista") and _num(func.get("valor_hora")) > 0:
+        return round(_num(func.get("valor_hora")), 4)
+    salario = _num(func.get("salario") or func.get("valor_servico"))
+    if salario > 0:
+        return round(salario / DIVISOR_CLT, 4)
+    if _num(func.get("valor_hora")) > 0:
+        return round(_num(func.get("valor_hora")), 4)
+    return 0.0
+
+
+def _contrato_clt(tipo):
+    return (tipo or "clt_mensalista").strip().lower() in ("clt_mensalista", "clt_horista", "horista", "")
+
+
+def detalhe_horas_extras(func):
+    """HE 50% (dia útil) e 100% (domingo/feriado), com DSR de 1/6 nas extras habituais (Súmula 172 TST)."""
+    hora_n = hora_normal_clt(func)
+    horas_50 = max(_num(func.get("horas_extras")), 0.0)
+    horas_100 = max(_num(func.get("horas_extras_100")), 0.0)
+    informado = _num(func.get("valor_hora_extra"))
+    valor_50 = round(informado, 4) if informado > 0 else round(hora_n * ADICIONAL_HE_50, 4)
+    valor_100 = round(hora_n * ADICIONAL_HE_100, 4)
+    adicional_50 = round(horas_50 * valor_50, 2)
+    adicional_100 = round(horas_100 * valor_100, 2)
+    adicional = round(adicional_50 + adicional_100, 2)
+    tipo = (func.get("tipo_contrato") or "clt_mensalista").strip().lower()
+    dsr_he = round(adicional / 6.0, 2) if adicional > 0 and _contrato_clt(tipo) else 0.0
+    return {
+        "hora_normal": hora_n,
+        "horas_extras": horas_50,
+        "horas_extras_100": horas_100,
+        "valor_hora_extra": valor_50,
+        "valor_hora_extra_100": valor_100,
+        "adicional_he_50": adicional_50,
+        "adicional_he_100": adicional_100,
+        "adicional_he": adicional,
+        "dsr_he": dsr_he,
+    }
+
+
 def adicional_horas_extras(func):
-    horas = _num(func.get("horas_extras"))
-    if horas <= 0:
-        return 0.0, 0.0, 0.0
-    valor = _num(func.get("valor_hora_extra"))
-    if valor <= 0:
-        if _num(func.get("valor_hora")) > 0:
-            valor = round(_num(func.get("valor_hora")) * 1.5, 2)
-        elif _num(func.get("salario")) > 0:
-            valor = round((_num(func.get("salario")) / 220.0) * 1.5, 2)
-    adicional = round(horas * valor, 2)
-    return horas, valor, adicional
+    d = detalhe_horas_extras(func)
+    return d["horas_extras"], d["valor_hora_extra"], d["adicional_he"]
+
+
+def aplicar_ajuste_competencia(func, ajuste):
+    if not ajuste:
+        return func
+    dados = dict(func)
+    for chave in ("horas_extras", "horas_extras_100", "valor_hora_extra"):
+        if ajuste.get(chave) is not None:
+            dados[chave] = ajuste.get(chave)
+    return dados
 
 
 def calcular_folha_pessoa(func, regime, ano=None, mes=None):
     tipo = (func.get("tipo_contrato") or "clt_mensalista").strip().lower()
     nome = func.get("nome_completo") or "-"
     cargo = func.get("cargo") or "-"
-    horas_ex, valor_he, adicional_he = adicional_horas_extras(func)
+    he = detalhe_horas_extras(func)
+    horas_ex = he["horas_extras"]
+    valor_he = he["valor_hora_extra"]
+    adicional_he = he["adicional_he"]
+    dsr_he = he["dsr_he"]
     resultado = {
         "id": func.get("id"),
         "nome_completo": nome,
@@ -176,6 +229,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         "tipo_contrato": tipo,
         "salario": 0.0,
         "dsr": 0.0,
+        "dsr_he": dsr_he,
         "bruto": 0.0,
         "inss_funcionario": 0.0,
         "irrf": 0.0,
@@ -198,8 +252,13 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         "observacao": "",
         "valor_hora": _num(func.get("valor_hora")),
         "horas_mes": _num(func.get("horas_mes")),
+        "hora_normal": he["hora_normal"],
         "horas_extras": horas_ex,
+        "horas_extras_100": he["horas_extras_100"],
         "valor_hora_extra": valor_he,
+        "valor_hora_extra_100": he["valor_hora_extra_100"],
+        "adicional_he_50": he["adicional_he_50"],
+        "adicional_he_100": he["adicional_he_100"],
         "adicional_he": adicional_he,
         "dia_pagamento": dia_pagamento_valido(func.get("dia_pagamento")),
     }
@@ -266,14 +325,23 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         horas = _num(func.get("horas_mes"))
         valor_horas = round(valor_hora * horas, 2)
         dsr = dsr_horista(valor_horas, ano, mes)
-        bruto = round(valor_horas + dsr + adicional_he, 2)
+        bruto = round(valor_horas + dsr + adicional_he + dsr_he, 2)
         resultado["observacao"] = f"Horista: {horas:g} h × R$ {valor_hora:.2f} + DSR de R$ {dsr:.2f}."
     else:
-        bruto = _num(func.get("salario")) + adicional_he
+        bruto = round(_num(func.get("salario")) + adicional_he + dsr_he, 2)
         dsr = 0.0
         resultado["observacao"] = "CLT mensalista: salário fixo. INSS progressivo e IRRF sobre o bruto."
-    if adicional_he:
-        resultado["observacao"] += f" Horas extras: {horas_ex:g} h × R$ {valor_he:.2f} = R$ {adicional_he:.2f}."
+    if adicional_he or dsr_he:
+        partes = []
+        if he["adicional_he_50"]:
+            partes.append(f"{horas_ex:g} h a 50% × R$ {valor_he:.2f} = R$ {he['adicional_he_50']:.2f}")
+        if he["adicional_he_100"]:
+            partes.append(
+                f"{he['horas_extras_100']:g} h a 100% × R$ {he['valor_hora_extra_100']:.2f} = R$ {he['adicional_he_100']:.2f}"
+            )
+        if dsr_he:
+            partes.append(f"DSR sobre extras R$ {dsr_he:.2f} (1/6, Súmula 172 TST)")
+        resultado["observacao"] += " Horas extras CLT: " + "; ".join(partes) + "."
 
     inss_f = inss_empregado(bruto)
     irrf = irrf_progressivo(bruto - inss_f)
@@ -287,8 +355,9 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
     resultado.update(patronal)
     resultado.update(
         {
-            "salario": (bruto - dsr - adicional_he) if tipo in ("clt_horista", "horista") else _num(func.get("salario")),
+            "salario": (bruto - dsr - adicional_he - dsr_he) if tipo in ("clt_horista", "horista") else _num(func.get("salario")),
             "dsr": dsr,
+            "dsr_he": dsr_he,
             "bruto": bruto,
             "inss_funcionario": inss_f,
             "irrf": irrf,

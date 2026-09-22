@@ -687,6 +687,15 @@ def garantir_tabelas_folha():
                     enviado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (funcionario_id, competencia)
                 );
+                CREATE TABLE IF NOT EXISTS folha_ajustes (
+                    funcionario_id INT NOT NULL,
+                    competencia VARCHAR(7) NOT NULL,
+                    horas_extras NUMERIC(10,2) DEFAULT 0,
+                    horas_extras_100 NUMERIC(10,2) DEFAULT 0,
+                    valor_hora_extra NUMERIC(12,2) DEFAULT 0,
+                    atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (funcionario_id, competencia)
+                );
                 CREATE TABLE IF NOT EXISTS turma_alunos (
                     turma_id INT,
                     aluno_id INT,
@@ -735,6 +744,7 @@ def garantir_tabelas_folha():
                 ("funcionarios", "data_fim_contrato", "DATE"),
                 ("funcionarios", "dia_pagamento", "INT DEFAULT 5"),
                 ("funcionarios", "horas_extras", "NUMERIC(10,2) DEFAULT 0"),
+                ("funcionarios", "horas_extras_100", "NUMERIC(10,2) DEFAULT 0"),
                 ("funcionarios", "valor_hora_extra", "NUMERIC(12,2) DEFAULT 0"),
                 ("funcionarios", "enviar_contracheque", "BOOLEAN DEFAULT TRUE"),
                 ("funcionarios", "salario", "NUMERIC(12,2) DEFAULT 0"),

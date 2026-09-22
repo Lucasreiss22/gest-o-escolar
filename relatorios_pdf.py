@@ -231,7 +231,19 @@ def pdf_contracheque(escola, mes_label, item):
     pdf.linha("Contrato", (item or {}).get("rotulo_contrato") or "-")
     if (item or {}).get("dia_pagamento"):
         pdf.linha("Dia de pagamento", str(item.get("dia_pagamento")))
-    if (item or {}).get("adicional_he"):
+    if (item or {}).get("adicional_he_50"):
+        pdf.linha(
+            "Hora extra 50% (dia útil)",
+            f"{item.get('horas_extras') or 0:g} h × {_brl(item.get('valor_hora_extra'))} = {_brl(item.get('adicional_he_50'))}",
+        )
+    if (item or {}).get("adicional_he_100"):
+        pdf.linha(
+            "Hora extra 100% (domingo/feriado)",
+            f"{item.get('horas_extras_100') or 0:g} h × {_brl(item.get('valor_hora_extra_100'))} = {_brl(item.get('adicional_he_100'))}",
+        )
+    if (item or {}).get("dsr_he"):
+        pdf.linha("DSR sobre horas extras", _brl(item.get("dsr_he")))
+    if (item or {}).get("adicional_he") and not (item or {}).get("adicional_he_50") and not (item or {}).get("adicional_he_100"):
         pdf.linha(
             "Horas extras",
             f"{item.get('horas_extras') or 0:g} h × {_brl(item.get('valor_hora_extra'))} = {_brl(item.get('adicional_he'))}",
