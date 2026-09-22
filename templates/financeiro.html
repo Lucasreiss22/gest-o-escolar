@@ -117,6 +117,9 @@
         .custo-linha .meta { display: block; margin-top: 2px; color: #64748b; font-size: 0.78rem; }
         .custo-linha .valor { font-weight: 700; white-space: nowrap; color: #1e293b; }
         .custo-total { background: #f8fafc; }
+        .baixa-lote { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 0 0 12px; }
+        .baixa-lote label { font-size: 0.78rem; color: #64748b; font-weight: 700; display: block; margin-bottom: 4px; }
+        .baixa-lote select, .baixa-lote input[type="date"] { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
         button.card-resumo { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
         .calc-link { font-size: 0.72rem; color: #3498db; margin-top: 5px; display: block; font-weight: 600; }
         button.card-resumo:hover { box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12); }
@@ -923,12 +926,55 @@
                 {% if status %}<span style="font-size: 0.85rem; color: #3498db; font-weight: normal;">({{ status }})</span>{% endif %}
                 </h3>
 
+            <form id="formBaixaLote" action="{{ url_for('pagina_financeiro') }}" method="POST">
+                <input type="hidden" name="acao" id="acaoBaixaLote" value="dar_baixa_lote">
+                <input type="hidden" name="aba" value="receitas">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                {% if busca %}<input type="hidden" name="busca" value="{{ busca }}">{% endif %}
+            </form>
+            <div class="baixa-lote">
+                <label style="align-self:center; margin:0;">
+                    <input type="checkbox" id="todosCobrancas"> Selecionar todas
+                </label>
+                <div>
+                    <label for="formaLote">Forma de pagamento</label>
+                    <select id="formaLote" name="forma_pagamento" form="formBaixaLote">
+                        <option value="Dinheiro">Dinheiro</option>
+                        <option value="Pix">Pix</option>
+                        <option value="Cartão de Crédito">Cartão de Crédito</option>
+                        <option value="Cartão de Débito">Cartão de Débito</option>
+                        <option value="Boleto">Boleto</option>
+                        <option value="Transferência">Transferência</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="dataLote">Data do pagamento</label>
+                    <input id="dataLote" type="date" name="data_pagamento" form="formBaixaLote" value="{{ data_hoje }}">
+                </div>
+                <button type="button" class="btn btn-success" id="btnBaixaLote" disabled>Dar baixa nos selecionados</button>
+                <button type="button" class="btn btn-warning" id="btnTirarLote" disabled>Tirar baixa dos selecionados</button>
+            </div>
+            <dialog id="dlgBaixaLote" class="calc-painel">
+                <div class="calc-head">
+                    <h3 id="dlgBaixaTitulo">Confirmar</h3>
+                    <button type="button" class="btn" id="fecharBaixaLote">Fechar</button>
+                </div>
+                <div class="calc-body">
+                    <p id="dlgBaixaTexto"></p>
+                    <button type="submit" class="btn btn-primary" form="formBaixaLote">Confirmar</button>
+                </div>
+            </dialog>
+
             <div class="fin-mobile-list">
                 {% if lancamentos %}
                     {% for item in lancamentos %}
                     <div class="fin-item">
                         <div class="fin-item-top">
-                            <strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong>
+                            <label style="display:flex;align-items:center;gap:8px;">
+                                <input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote">
+                                <strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong>
+                            </label>
                             <strong>R$ {{ "%.2f"|format(item.valor|float if item.valor else 0) }}</strong>
                     </div>
                         <div class="fin-item-meta">
@@ -975,6 +1021,15 @@
                         </select>
                                 <button type="submit" class="btn btn-success" style="padding: 6px 10px; font-size: 0.8rem;">Baixa</button>
                             </form>
+                            {% else %}
+                            <form action="{{ url_for('pagina_financeiro') }}" method="POST" onsubmit="return confirm('Tirar a baixa desta mensalidade?');">
+                                <input type="hidden" name="acao" value="tirar_baixa">
+                                <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                <input type="hidden" name="aba" value="receitas">
+                                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                                <button type="submit" class="btn btn-warning" style="padding: 6px 10px; font-size: 0.8rem;">Tirar baixa</button>
+                            </form>
                             {% endif %}
                             <form action="{{ url_for('excluir_financeiro', id=item.id) }}" method="POST">
                                 <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
@@ -999,6 +1054,7 @@
                 <table>
                     <thead>
                         <tr>
+                            <th style="width:36px;"></th>
                             <th>Aluno</th>
                             <th>Descrição</th>
                             <th>Valor</th>
@@ -1012,6 +1068,7 @@
                         {% if lancamentos %}
                             {% for item in lancamentos %}
                             <tr>
+                                <td><input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote" aria-label="Selecionar {{ item.nome_completo or 'cobrança' }}"></td>
                                 <td><strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong></td>
                                 <td>{{ item.descricao or '-' }}</td>
                                 <td>R$ {{ "%.2f"|format(item.valor|float if item.valor else 0) }}</td>
@@ -1067,6 +1124,15 @@
                                             </select>
                                             <button type="submit" class="btn btn-success" style="padding: 5px 10px; font-size: 0.75rem;">Dar Baixa</button>
                                         </form>
+                                        {% else %}
+                                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:inline;" onsubmit="return confirm('Tirar a baixa desta mensalidade?');">
+                                            <input type="hidden" name="acao" value="tirar_baixa">
+                                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                            <input type="hidden" name="aba" value="receitas">
+                                            <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                            {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                                            <button type="submit" class="btn btn-warning" style="padding: 5px 10px; font-size: 0.75rem;">Tirar baixa</button>
+                                        </form>
                                         {% endif %}
                                         <form action="{{ url_for('excluir_financeiro', id=item.id) }}" method="POST" style="display:inline;">
                                             <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
@@ -1081,13 +1147,73 @@
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="7" style="text-align: center; color: #777;">Nenhum registro financeiro encontrado para este filtro.</td>
+                                <td colspan="8" style="text-align: center; color: #777;">Nenhum registro financeiro encontrado para este filtro.</td>
                             </tr>
                         {% endif %}
                     </tbody>
                 </table>
             </div>
         </div>
+        <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var form = document.getElementById("formBaixaLote");
+            var acao = document.getElementById("acaoBaixaLote");
+            var dlg = document.getElementById("dlgBaixaLote");
+            var btnBaixa = document.getElementById("btnBaixaLote");
+            var btnTirar = document.getElementById("btnTirarLote");
+            var todos = document.getElementById("todosCobrancas");
+            if (!form || !dlg) return;
+            function painel() {
+                var desk = document.querySelector(".fin-desktop-table");
+                if (desk && desk.offsetParent !== null) return desk;
+                return document.querySelector(".fin-mobile-list");
+            }
+            function marcados() {
+                var ids = {};
+                var raiz = painel();
+                if (!raiz) return [];
+                raiz.querySelectorAll(".js-cobranca:checked").forEach(function (el) { ids[el.value] = true; });
+                return Object.keys(ids);
+            }
+            function atualizar() {
+                var n = marcados().length;
+                if (btnBaixa) btnBaixa.disabled = n === 0;
+                if (btnTirar) btnTirar.disabled = n === 0;
+            }
+            document.querySelectorAll(".js-cobranca").forEach(function (el) {
+                el.addEventListener("change", atualizar);
+            });
+            if (todos) {
+                todos.addEventListener("change", function () {
+                    var raiz = painel();
+                    if (!raiz) return;
+                    raiz.querySelectorAll(".js-cobranca").forEach(function (el) { el.checked = todos.checked; });
+                    atualizar();
+                });
+            }
+            function abrir(tipo) {
+                var n = marcados().length;
+                if (!n) return;
+                acao.value = tipo;
+                document.getElementById("dlgBaixaTitulo").textContent = tipo === "dar_baixa_lote" ? "Confirmar baixa" : "Confirmar retirada da baixa";
+                document.getElementById("dlgBaixaTexto").textContent = tipo === "dar_baixa_lote"
+                    ? "Dar baixa em " + n + " mensalidade(s) selecionada(s)?"
+                    : "Tirar a baixa de " + n + " mensalidade(s) selecionada(s)?";
+                if (dlg.showModal) dlg.showModal();
+            }
+            if (btnBaixa) btnBaixa.addEventListener("click", function () { abrir("dar_baixa_lote"); });
+            if (btnTirar) btnTirar.addEventListener("click", function () { abrir("tirar_baixa_lote"); });
+            form.addEventListener("submit", function () {
+                var raiz = painel();
+                document.querySelectorAll(".js-cobranca").forEach(function (el) {
+                    if (!raiz || !raiz.contains(el)) el.checked = false;
+                });
+            });
+            var fechar = document.getElementById("fecharBaixaLote");
+            if (fechar) fechar.addEventListener("click", function () { dlg.close(); });
+            atualizar();
+        });
+        </script>
         {% endif %}
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>

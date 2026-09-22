@@ -4844,7 +4844,62 @@ def pagina_financeiro():
                             ),
                         )
                         conexao.commit()
-                        flash("✅ Baixa realizada com sucesso!", "success")
+                        flash("Baixa realizada com sucesso.", "success")
+
+                    elif acao == "dar_baixa_lote":
+                        ids = []
+                        for bruto in request.form.getlist("cobranca_id"):
+                            try:
+                                cobranca_id = int(bruto)
+                            except (TypeError, ValueError):
+                                continue
+                            if cobranca_id not in ids:
+                                ids.append(cobranca_id)
+                        if not ids:
+                            flash("Selecione ao menos uma mensalidade para dar baixa.", "danger")
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE financeiro_mensalidades
+                                SET status = 'Pago', forma_pagamento = %s, data_pagamento = %s
+                                WHERE id = ANY(%s) AND COALESCE(status, '') <> 'Pago'
+                                """,
+                                (
+                                    request.form.get("forma_pagamento") or "Dinheiro",
+                                    request.form.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d"),
+                                    ids,
+                                ),
+                            )
+                            conexao.commit()
+                            flash(f"Baixa registrada em {cursor.rowcount} mensalidade(s).", "success")
+
+                    elif acao in ("tirar_baixa", "tirar_baixa_lote"):
+                        ids = []
+                        for bruto in request.form.getlist("cobranca_id"):
+                            try:
+                                cobranca_id = int(bruto)
+                            except (TypeError, ValueError):
+                                continue
+                            if cobranca_id not in ids:
+                                ids.append(cobranca_id)
+                        if not ids:
+                            flash("Selecione ao menos uma mensalidade para tirar a baixa.", "danger")
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE financeiro_mensalidades
+                                SET status = CASE
+                                        WHEN data_vencimento < CURRENT_DATE THEN 'Atrasado'
+                                        ELSE 'Pendente'
+                                    END,
+                                    forma_pagamento = NULL,
+                                    data_pagamento = NULL
+                                WHERE id = ANY(%s) AND status = 'Pago'
+                                """,
+                                (ids,),
+                            )
+                            conexao.commit()
+                            flash(f"Baixa removida de {cursor.rowcount} mensalidade(s).", "success")
 
                     elif acao == "salvar_funcionario":
                         salario = _float_form("salario")
@@ -5041,7 +5096,14 @@ def pagina_financeiro():
                 flash(f"❌ Erro ao processar financeiro: {e}", "danger")
             finally:
                 conexao.close()
+        voltar_aluno = request.form.get("voltar_aluno")
+        if voltar_aluno and str(voltar_aluno).isdigit() and acao in ("tirar_baixa", "dar_baixa"):
+            return redirect(url_for("detalhes_aluno", aluno_id=int(voltar_aluno)))
         params_redir = {"mes": mes_redir, "aba": aba_redir}
+        if request.form.get("status"):
+            params_redir["status"] = request.form.get("status")
+        if request.form.get("busca"):
+            params_redir["busca"] = request.form.get("busca")
         if request.form.get("funcionario_id"):
             params_redir["colab"] = request.form.get("funcionario_id")
         if request.form.get("colab_q") or request.args.get("colab_q"):

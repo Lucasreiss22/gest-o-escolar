@@ -468,6 +468,12 @@
                                                 </div>
                                             {% else %}
                                                 <small class="text-muted">{{ cobranca.forma_pagamento or cobranca[6] or 'Quitado' }}</small>
+                                                <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="d-inline" onsubmit="return confirm('Tirar a baixa desta mensalidade?');">
+                                                    <input type="hidden" name="acao" value="tirar_baixa">
+                                                    <input type="hidden" name="cobranca_id" value="{{ cobranca_id }}">
+                                                    <input type="hidden" name="voltar_aluno" value="{{ aluno.id or aluno[0] }}">
+                                                    <button type="submit" class="btn btn-sm btn-outline-warning">Tirar baixa</button>
+                                                </form>
                                                 <a class="btn btn-sm btn-outline-info" href="{{ url_for('cobranca_pdf', cobranca_id=cobranca_id) }}">PDF</a>
                                                 <form action="{{ url_for('cobranca_email', cobranca_id=cobranca_id) }}" method="POST" class="d-inline">
                                                     <button class="btn btn-sm btn-outline-primary" type="submit">E-mail</button>
