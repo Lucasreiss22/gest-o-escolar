@@ -29,6 +29,7 @@ from alunos import (
     cadastrar_aluno,
     cadastrar_alunos_lote,
     importar_planilha_alunos,
+    parse_data_livre,
     listar_alunos,
     atualizar_responsavel,
     deletar_responsavel,
@@ -41,6 +42,8 @@ from simples_nacional import (
     carregar_sistema,
     janela_competencias,
     folha_sistema_mes,
+    _linhas_arquivo,
+    parse_moeda_livre,
 )
 from database import obter_conexao, garantir_tabelas_pedagogicas, garantir_tabelas_folha, definir_banco_escola, limpar_banco_escola, resetar_tenant, erro_conexao_atual, host_postgres_configurado
 from tributacao import (
@@ -424,6 +427,204 @@ def _add_months(data_ref, meses):
     ano, mes = divmod(total, 12)
     dia = min(data_ref.day, calendario_lib.monthrange(ano, mes + 1)[1])
     return date(ano, mes + 1, dia)
+
+
+def _texto_planilha(valor):
+    if valor is None:
+        return ""
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%Y-%m-%d")
+    return str(valor).strip()
+
+
+def _coluna_planilha(cabecalho, *chaves):
+    for chave in chaves:
+        for i, nome in enumerate(cabecalho):
+            if nome == chave:
+                return i
+    for chave in chaves:
+        if len(chave) < 4:
+            continue
+        for i, nome in enumerate(cabecalho):
+            if chave in nome:
+                return i
+    return None
+
+
+def _celula_planilha(row, idx):
+    if idx is None or idx >= len(row):
+        return ""
+    return _texto_planilha(row[idx])
+
+
+def _tipo_custo_planilha(texto):
+    s = (texto or "").strip().lower()
+    if any(k in s for k in ("servi", "nfs")):
+        return "servico"
+    if "parcel" in s:
+        return "parcelado"
+    if any(k in s for k in ("recorr", "mensal", "fixo")):
+        return "recorrente"
+    return "avista"
+
+
+def _forma_custo_planilha(texto):
+    s = (texto or "").strip().lower()
+    if "cart" in s or "crédito" in s or "credito" in s:
+        return "cartao"
+    if "financ" in s:
+        return "financiamento"
+    if "boleto" in s:
+        return "boleto"
+    return "dinheiro"
+
+
+def _flag_planilha(texto, padrao=False):
+    s = (texto or "").strip().lower()
+    if not s:
+        return padrao
+    if s in ("1", "sim", "s", "true", "yes", "retido", "calcular"):
+        return True
+    if s in ("0", "nao", "não", "n", "false", "no", "nao se aplica", "não se aplica"):
+        return False
+    return padrao
+
+
+def _gravar_custo(cursor, dados):
+    tipo = dados.get("tipo") or "avista"
+    if tipo not in ("avista", "recorrente", "parcelado", "servico"):
+        tipo = "avista"
+    descricao = (dados.get("descricao") or "").strip() or "Custo"
+    categoria = (dados.get("categoria") or "").strip() or "operacional"
+    data_base = dados.get("data") or datetime.now().strftime("%Y-%m-%d")
+    data_ini = dados.get("data_inicio") or data_base
+    data_fim = dados.get("data_fim") or None
+    forma = dados.get("forma") or "dinheiro"
+    prestador = (dados.get("prestador") or "").strip() or None
+    try:
+        n_parc = max(int(float(dados.get("parcelas") or 1)), 1)
+    except (TypeError, ValueError):
+        n_parc = 1
+    valor_unit = float(dados.get("valor") or 0)
+    valor_bruto = float(dados.get("valor_bruto") or 0) or valor_unit
+    reter_fed = bool(dados.get("reter_federal"))
+    reter_iss = bool(dados.get("reter_iss"))
+    aliq_iss = float(dados.get("aliquota_iss") or 5)
+    fed_nota = dados.get("federal_na_nota", True)
+    iss_nota = dados.get("iss_na_nota", True)
+    impostos = impostos_nota(
+        valor_bruto or valor_unit,
+        reter_fed,
+        reter_iss,
+        aliq_iss,
+        float(dados.get("aliq_irrf") or 1.5),
+        float(dados.get("aliq_pis") or 0.65),
+        float(dados.get("aliq_cofins") or 3),
+        float(dados.get("aliq_csll") or 1),
+    )
+    if tipo == "servico":
+        if not (valor_bruto or valor_unit):
+            raise ValueError(f"Informe o valor de '{descricao}'.")
+        desconto_nota = 0.0
+        if reter_fed and fed_nota:
+            desconto_nota += impostos["irrf"] + impostos["pis"] + impostos["cofins"] + impostos["csll"]
+        if reter_iss and iss_nota:
+            desconto_nota += impostos["iss"]
+        valor_lancar = round((valor_bruto or valor_unit) - desconto_nota, 2)
+    else:
+        if not valor_unit:
+            raise ValueError(f"Informe o valor de '{descricao}'.")
+        valor_lancar = valor_unit
+        impostos = {"irrf": 0, "pis": 0, "cofins": 0, "csll": 0, "iss": 0}
+
+    def _inserir(data_ref, valor_ref, parcela_n=1, parcelas_t=1, grupo=None):
+        cursor.execute(
+            """
+            INSERT INTO financeiro_custos (
+                descricao, categoria, valor, data_custo, tipo, forma, parcelas, parcela_num,
+                grupo_id, data_inicio, data_fim, valor_unitario, valor_bruto, prestador,
+                reter_federal, reter_iss, aliquota_iss, federal_na_nota, iss_na_nota,
+                irrf, pis, cofins, csll, iss, ativo
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE
+            )
+            """,
+            (
+                descricao, categoria, valor_ref, data_ref, tipo, forma, parcelas_t, parcela_n,
+                grupo, data_ini, data_fim, valor_unit, valor_bruto or valor_unit, prestador,
+                reter_fed, reter_iss, aliq_iss, bool(fed_nota), bool(iss_nota),
+                impostos["irrf"], impostos["pis"], impostos["cofins"], impostos["csll"], impostos["iss"],
+            ),
+        )
+
+    if tipo == "parcelado":
+        grupo = uuid.uuid4().hex[:12]
+        for i in range(n_parc):
+            _inserir(_add_months(data_ini, i), valor_unit, i + 1, n_parc, grupo)
+        return n_parc
+    if tipo == "recorrente":
+        _inserir(data_ini, valor_unit, 1, 1, uuid.uuid4().hex[:12])
+        return 1
+    _inserir(data_ini if tipo == "servico" else data_base, valor_lancar, 1, 1, uuid.uuid4().hex[:12])
+    return 1
+
+
+def importar_planilha_custos(arquivo):
+    linhas = _linhas_arquivo(arquivo)
+    if not linhas:
+        return []
+    cab = [str(c or "").strip().lower() for c in linhas[0]]
+    col = {
+        "tipo": _coluna_planilha(cab, "tipo_custo", "tipo"),
+        "descricao": _coluna_planilha(cab, "descricao", "descrição", "historico", "histórico"),
+        "categoria": _coluna_planilha(cab, "categoria"),
+        "valor_bruto": _coluna_planilha(cab, "valor_bruto", "bruto"),
+        "valor": _coluna_planilha(cab, "valor_unitario", "valor", "mensal"),
+        "data_fim": _coluna_planilha(cab, "data_fim", "fim"),
+        "data_inicio": _coluna_planilha(cab, "data_inicio", "inicio", "início"),
+        "data": _coluna_planilha(cab, "data_custo", "data", "vencimento"),
+        "parcelas": _coluna_planilha(cab, "parcelas", "n_parcelas"),
+        "forma": _coluna_planilha(cab, "forma", "pagamento"),
+        "prestador": _coluna_planilha(cab, "prestador", "fornecedor"),
+        "reter_federal": _coluna_planilha(cab, "reter_federal", "federais"),
+        "reter_iss": _coluna_planilha(cab, "reter_iss"),
+        "aliquota_iss": _coluna_planilha(cab, "aliquota_iss", "aliq_iss"),
+        "federal_na_nota": _coluna_planilha(cab, "federal_na_nota"),
+        "iss_na_nota": _coluna_planilha(cab, "iss_na_nota"),
+    }
+    if col["descricao"] is None and col["valor"] is None:
+        raise ValueError("A planilha precisa das colunas descrição e valor.")
+    itens = []
+    for row in linhas[1:]:
+        if not row or not any(_texto_planilha(c) for c in row):
+            continue
+        descricao = _celula_planilha(row, col["descricao"])
+        valor = parse_moeda_livre(_celula_planilha(row, col["valor"]))
+        valor_bruto = parse_moeda_livre(_celula_planilha(row, col["valor_bruto"]))
+        if not descricao and not valor and not valor_bruto:
+            continue
+        data = parse_data_livre(_celula_planilha(row, col["data"]))
+        inicio = parse_data_livre(_celula_planilha(row, col["data_inicio"])) or data
+        itens.append({
+            "tipo": _tipo_custo_planilha(_celula_planilha(row, col["tipo"])),
+            "descricao": descricao or "Custo",
+            "categoria": _celula_planilha(row, col["categoria"]) or "operacional",
+            "valor": valor or valor_bruto,
+            "valor_bruto": valor_bruto or valor,
+            "data": data or inicio,
+            "data_inicio": inicio or data,
+            "data_fim": parse_data_livre(_celula_planilha(row, col["data_fim"])),
+            "parcelas": _celula_planilha(row, col["parcelas"]) or 1,
+            "forma": _forma_custo_planilha(_celula_planilha(row, col["forma"])),
+            "prestador": _celula_planilha(row, col["prestador"]),
+            "reter_federal": _flag_planilha(_celula_planilha(row, col["reter_federal"])),
+            "reter_iss": _flag_planilha(_celula_planilha(row, col["reter_iss"])),
+            "aliquota_iss": parse_moeda_livre(_celula_planilha(row, col["aliquota_iss"])) or 5,
+            "federal_na_nota": _flag_planilha(_celula_planilha(row, col["federal_na_nota"]), True),
+            "iss_na_nota": _flag_planilha(_celula_planilha(row, col["iss_na_nota"]), True),
+        })
+    return itens
 
 
 def _rotulo_turno_mensalidade(turnos):
@@ -3271,6 +3472,24 @@ def modelo_alunos_csv():
     )
 
 
+@app.route("/financeiro/custos/modelo.csv")
+def modelo_custos_csv():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    cab = (
+        "tipo;descricao;categoria;valor;data;forma;parcelas;data_fim;prestador;valor_bruto;reter_federal;reter_iss\n"
+        "avista;Energia elétrica;operacional;890,50;22/09/2026;pix;;;;;\n"
+        "recorrente;Aluguel;operacional;4500,00;01/02/2026;boleto;;31/12/2026;;;\n"
+        "parcelado;Notebook;equipamento;350,00;01/03/2026;cartao;10;;;;\n"
+        "servico;Contabilidade;servico;1200,00;05/09/2026;pix;;;Escritório Alfa;1200,00;sim;nao\n"
+    )
+    return Response(
+        "\ufeff" + cab,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=modelo_custos.csv"},
+    )
+
+
 @app.route("/financeiro/simples/modelo.csv")
 def modelo_simples_csv():
     if "usuario_id" not in session:
@@ -4463,6 +4682,8 @@ def pagina_financeiro():
         acao = request.form.get("acao")
         if acao and str(acao).startswith("simples"):
             aba_redir = "simples"
+        if acao == "importar_custos":
+            aba_redir = "custos"
         conexao = obter_conexao()
         if conexao:
             try:
@@ -4623,88 +4844,70 @@ def pagina_financeiro():
 
                     elif acao == "criar_custo":
                         tipo = request.form.get("tipo_custo") or "avista"
-                        descricao = limpar_campo("descricao_custo") or "Custo"
-                        categoria = limpar_campo("categoria_custo") or "operacional"
-                        data_base = request.form.get("data_custo") or datetime.now().strftime("%Y-%m-%d")
-                        data_ini = request.form.get("data_inicio_custo") or data_base
-                        data_fim = limpar_campo("data_fim_custo")
-                        forma = request.form.get("forma_custo") or "dinheiro"
-                        prestador = limpar_campo("prestador_custo")
                         try:
-                            n_parc = max(int(request.form.get("parcelas_custo") or 1), 1)
-                        except ValueError:
-                            n_parc = 1
-                        valor_unit = _float_form("valor_custo") or _float_form("valor_unitario_custo")
-                        valor_bruto = _float_form("valor_bruto_custo") or valor_unit
-                        reter_fed = request.form.get("custo_reter_federal") == "1"
-                        reter_iss = request.form.get("custo_reter_iss") == "1"
-                        aliq_iss = _float_form("custo_aliquota_iss", 5.0)
-                        fed_nota = request.form.get("federal_na_nota") != "0"
-                        iss_nota = request.form.get("iss_na_nota") != "0"
-                        impostos = impostos_nota(
-                            valor_bruto or valor_unit,
-                            reter_fed,
-                            reter_iss,
-                            aliq_iss,
-                            _float_form("custo_aliq_irrf", 1.5),
-                            _float_form("custo_aliq_pis", 0.65),
-                            _float_form("custo_aliq_cofins", 3.0),
-                            _float_form("custo_aliq_csll", 1.0),
-                        )
-                        custo_ok = True
-                        if tipo == "servico":
-                            if not (valor_bruto or valor_unit):
-                                flash("Informe o valor bruto da NFS-e.", "danger")
-                                custo_ok = False
-                            desconto_nota = 0.0
-                            if reter_fed and fed_nota:
-                                desconto_nota += impostos["irrf"] + impostos["pis"] + impostos["cofins"] + impostos["csll"]
-                            if reter_iss and iss_nota:
-                                desconto_nota += impostos["iss"]
-                            valor_lancar = round((valor_bruto or valor_unit) - desconto_nota, 2)
-                        else:
-                            if not valor_unit:
-                                flash("Informe o valor unitário do custo.", "danger")
-                                custo_ok = False
-                            valor_lancar = valor_unit
-                            impostos = {"irrf": 0, "pis": 0, "cofins": 0, "csll": 0, "iss": 0, "retido": 0, "liquido": valor_unit}
-
-                        def _inserir_custo(data_ref, valor_ref, parcela_n=1, parcelas_t=1, grupo=None):
-                            cursor.execute(
-                                """
-                                INSERT INTO financeiro_custos (
-                                    descricao, categoria, valor, data_custo, tipo, forma, parcelas, parcela_num,
-                                    grupo_id, data_inicio, data_fim, valor_unitario, valor_bruto, prestador,
-                                    reter_federal, reter_iss, aliquota_iss, federal_na_nota, iss_na_nota,
-                                    irrf, pis, cofins, csll, iss, ativo
-                                ) VALUES (
-                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE
-                                )
-                                """,
-                                (
-                                    descricao, categoria, valor_ref, data_ref, tipo, forma, parcelas_t, parcela_n,
-                                    grupo, data_ini, data_fim or None, valor_unit, valor_bruto or valor_unit, prestador,
-                                    reter_fed, reter_iss, aliq_iss, fed_nota, iss_nota,
-                                    impostos["irrf"], impostos["pis"], impostos["cofins"], impostos["csll"], impostos["iss"],
-                                ),
-                            )
-
-                        if custo_ok:
+                            n = _gravar_custo(cursor, {
+                                "tipo": tipo,
+                                "descricao": limpar_campo("descricao_custo") or "Custo",
+                                "categoria": limpar_campo("categoria_custo") or "operacional",
+                                "data": request.form.get("data_custo") or datetime.now().strftime("%Y-%m-%d"),
+                                "data_inicio": request.form.get("data_inicio_custo") or request.form.get("data_custo"),
+                                "data_fim": limpar_campo("data_fim_custo"),
+                                "forma": request.form.get("forma_custo") or "dinheiro",
+                                "prestador": limpar_campo("prestador_custo"),
+                                "parcelas": request.form.get("parcelas_custo") or 1,
+                                "valor": _float_form("valor_custo") or _float_form("valor_unitario_custo"),
+                                "valor_bruto": _float_form("valor_bruto_custo"),
+                                "reter_federal": request.form.get("custo_reter_federal") == "1",
+                                "reter_iss": request.form.get("custo_reter_iss") == "1",
+                                "aliquota_iss": _float_form("custo_aliquota_iss", 5.0),
+                                "aliq_irrf": _float_form("custo_aliq_irrf", 1.5),
+                                "aliq_pis": _float_form("custo_aliq_pis", 0.65),
+                                "aliq_cofins": _float_form("custo_aliq_cofins", 3.0),
+                                "aliq_csll": _float_form("custo_aliq_csll", 1.0),
+                                "federal_na_nota": request.form.get("federal_na_nota") != "0",
+                                "iss_na_nota": request.form.get("iss_na_nota") != "0",
+                            })
+                            conexao.commit()
                             if tipo == "parcelado":
-                                grupo = uuid.uuid4().hex[:12]
-                                for i in range(n_parc):
-                                    _inserir_custo(_add_months(data_ini, i), valor_unit, i + 1, n_parc, grupo)
-                                conexao.commit()
-                                flash(f"Custo parcelado em {n_parc} vezes de R$ {valor_unit:.2f}.", "success")
+                                flash(f"Custo parcelado em {n} parcela(s).", "success")
                             elif tipo == "recorrente":
-                                _inserir_custo(data_ini, valor_unit, 1, 1, uuid.uuid4().hex[:12])
-                                conexao.commit()
                                 flash("Custo recorrente cadastrado. Ele entra em todos os meses do período.", "success")
                             else:
-                                _inserir_custo(data_ini if tipo == "servico" else data_base, valor_lancar, 1, 1, uuid.uuid4().hex[:12])
-                                conexao.commit()
                                 flash("Custo registrado.", "success")
+                        except ValueError as e:
+                            flash(str(e), "danger")
+
+                    elif acao == "importar_custos":
+                        arquivo = request.files.get("planilha_custos")
+                        if not arquivo or not arquivo.filename:
+                            flash("Selecione uma planilha CSV ou Excel com os custos.", "danger")
+                        else:
+                            try:
+                                itens = importar_planilha_custos(arquivo)
+                            except ValueError as e:
+                                flash(str(e), "danger")
+                                itens = None
+                            if itens is not None:
+                                if not itens:
+                                    flash("A planilha não trouxe nenhum custo válido.", "danger")
+                                else:
+                                    ok, erros = 0, []
+                                    for i, item in enumerate(itens, start=2):
+                                        try:
+                                            cursor.execute("SAVEPOINT custo_lote")
+                                            _gravar_custo(cursor, item)
+                                            cursor.execute("RELEASE SAVEPOINT custo_lote")
+                                            ok += 1
+                                        except Exception as e:
+                                            cursor.execute("ROLLBACK TO SAVEPOINT custo_lote")
+                                            erros.append(f"Linha {i} ({item.get('descricao')}): {e}")
+                                    conexao.commit()
+                                    msg = f"{ok} custo(s) importado(s)."
+                                    if erros:
+                                        extra = " | ".join(erros[:6])
+                                        flash(f"{msg} Falhas: {extra}", "danger" if not ok else "success")
+                                    else:
+                                        flash(msg, "success")
 
                     elif acao == "simples_salvar_quadro":
                         competencias = request.form.getlist("competencia")

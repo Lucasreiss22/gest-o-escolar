@@ -787,6 +787,18 @@
                     <div class="form-group" data-custos="servico"><label>Alíquota ISS %</label><input name="custo_aliquota_iss" value="5"></div>
                     <div class="form-group"><button class="btn btn-primary" type="submit">Lançar custo</button></div>
                 </form>
+                <form method="POST" action="{{ url_for('pagina_financeiro') }}" enctype="multipart/form-data" class="simples-acoes">
+                    <input type="hidden" name="acao" value="importar_custos">
+                    <input type="hidden" name="aba" value="custos">
+                    <input type="hidden" name="mes" value="{{ mes_atual }}">
+                    <div class="form-group">
+                        <label>Importar planilha</label>
+                        <input type="file" name="planilha_custos" accept=".csv,.txt,.xlsx,.xls" required>
+                    </div>
+                    <button class="btn btn-success" type="submit">Importar custos</button>
+                    <a class="btn btn-primary" href="{{ url_for('modelo_custos_csv') }}">Baixar modelo</a>
+                </form>
+                <p class="simples-hint">CSV ou Excel, uma linha por custo. Tipos: avista, recorrente, parcelado ou servico. Parcelado gera as parcelas; recorrente vale todo mês até a data fim.</p>
                 {% set rotulo_tipo = {'avista': 'À vista', 'recorrente': 'Recorrente', 'parcelado': 'Parcelado', 'servico': 'Serviço NFS-e'} %}
                 {% for c in custos_mes %}
                 <div class="fin-item">
