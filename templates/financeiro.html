@@ -35,8 +35,18 @@
         .badge-pago { background-color: #15803d; color: #fff; }
         .badge-pendente { background-color: #b45309; color: #fff; }
         .badge-atrasado { background-color: #b91c1c; color: #fff; }
-        .legenda-status { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
-        .legenda-status span { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 700; color: #334155; }
+        .filtro-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
+        .filtro-cards a {
+            text-decoration: none; border-radius: 12px; padding: 12px 14px; border: 2px solid transparent; display: block;
+        }
+        .filtro-cards a.pago { background: #ecfdf3; color: #14532d; border-color: #86efac; }
+        .filtro-cards a.pendente { background: #fff7ed; color: #7c2d12; border-color: #fdba74; }
+        .filtro-cards a.atrasado { background: #fef2f2; color: #7f1d1d; border-color: #fca5a5; }
+        .filtro-cards a.ativo { box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.25); }
+        .filtro-cards .rotulo { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+        .filtro-cards .valor { font-size: 1.15rem; font-weight: 800; margin-top: 4px; }
+        .filtro-cards .qtd { font-size: 0.75rem; margin-top: 2px; opacity: 0.8; }
+        @media (max-width: 720px) { .filtro-cards { grid-template-columns: 1fr; } }
         tr.st-pago td { background: #ecfdf3; }
         tr.st-pendente td { background: #fff7ed; }
         tr.st-atrasado td { background: #fef2f2; }
@@ -46,7 +56,14 @@
         .fin-item.st-pago { background: #ecfdf3; border-left: 4px solid #15803d; }
         .fin-item.st-pendente { background: #fff7ed; border-left: 4px solid #d97706; }
         .fin-item.st-atrasado { background: #fef2f2; border-left: 4px solid #dc2626; }
-        .grid-acoes-geracao { display: grid; grid-template-columns: minmax(280px, 560px); }
+        .grid-acoes-geracao { display: block; }
+        .form-nova-cobranca { display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap: 12px 14px; align-items: end; }
+        .form-nova-cobranca .span-2 { grid-column: span 2; }
+        .form-nova-cobranca .form-group { margin-bottom: 0 !important; }
+        @media (max-width: 800px) {
+            .form-nova-cobranca { grid-template-columns: 1fr; }
+            .form-nova-cobranca .span-2 { grid-column: auto; }
+        }
         .form-group { display: flex; flex-direction: column; }
         .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
         .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
@@ -862,9 +879,11 @@
             <!-- Gerar Cobrança Individual -->
             <div class="card-box" style="margin-bottom: 0;">
                 <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Gerar Nova Cobrança</h3>
-                <form action="{{ url_for('pagina_financeiro') }}" method="POST">
+                <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="form-nova-cobranca">
                     <input type="hidden" name="acao" value="criar_cobranca">
-                    <div class="form-group" style="margin-bottom: 12px;">
+                    <input type="hidden" name="aba" value="receitas">
+                    <input type="hidden" name="mes" value="{{ mes_atual }}">
+                    <div class="form-group span-2">
                         <label>Aluno</label>
                         <select name="aluno_id" required>
                             <option value="">Selecione o aluno...</option>
@@ -873,19 +892,19 @@
                             {% endfor %}
                         </select>
                     </div>
-                    <div class="form-group" style="margin-bottom: 12px;">
+                    <div class="form-group">
                         <label>Descrição</label>
                         <input type="text" name="descricao" placeholder="Ex: Mensalidade" required>
                     </div>
-                    <div class="form-group" style="margin-bottom: 12px;">
+                    <div class="form-group">
                         <label>Valor mensal (R$)</label>
                         <input type="text" name="valor" placeholder="Digite o valor" required data-moeda>
                     </div>
-                    <div class="form-group" style="margin-bottom: 12px;">
+                    <div class="form-group">
                         <label>Primeiro vencimento</label>
                         <input type="date" name="data_vencimento" required>
                     </div>
-                    <div class="form-group" style="margin-bottom: 12px;">
+                    <div class="form-group">
                         <label>Duração do contrato</label>
                         <select name="duracao">
                             <option value="1">Só este mês</option>
@@ -893,18 +912,20 @@
                             <option value="12">12 meses (ano letivo)</option>
                         </select>
                     </div>
-                    <div class="form-group" style="margin-bottom: 15px;">
+                    <div class="form-group">
                         <label>Turno incluso na mensalidade</label>
                         <select name="turnos">
                             <option value="manha">Manhã</option>
                             <option value="tarde">Tarde</option>
                             <option value="hibrido">Híbrido (manhã e tarde)</option>
+                            <option value="tarde_noite">Tarde e noite</option>
                             <option value="noite">Noite</option>
                         </select>
                     </div>
-                    <input type="hidden" name="aba" value="receitas">
-                    <input type="hidden" name="mes" value="{{ mes_atual }}">
-                    <button type="submit" class="btn btn-primary" style="width: 100%;">Registrar Cobrança</button>
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">Registrar Cobrança</button>
+                    </div>
                 </form>
             </div>
 
@@ -959,10 +980,22 @@
                 </div>
             </dialog>
 
-            <div class="legenda-status">
-                <span><i class="badge badge-pago">Pago</i> quitada</span>
-                <span><i class="badge badge-pendente">Pendente</i> no prazo</span>
-                <span><i class="badge badge-atrasado">Atrasado</i> vencida</span>
+            <div class="filtro-cards">
+                <a class="pago {% if status == 'Pago' %}ativo{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='receitas', busca=busca, status='' if status == 'Pago' else 'Pago') }}">
+                    <div class="rotulo">Pago</div>
+                    <div class="valor">R$ {{ "%.2f"|format(totais.recebido) }}</div>
+                    <div class="qtd">{{ totais.qtd_pago }} cobrança(s){% if status == 'Pago' %} · clique de novo para ver todas{% endif %}</div>
+                </a>
+                <a class="pendente {% if status == 'Pendente' %}ativo{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='receitas', busca=busca, status='' if status == 'Pendente' else 'Pendente') }}">
+                    <div class="rotulo">Pendente</div>
+                    <div class="valor">R$ {{ "%.2f"|format(totais.pendente) }}</div>
+                    <div class="qtd">{{ totais.qtd_pendente }} cobrança(s){% if status == 'Pendente' %} · clique de novo para ver todas{% endif %}</div>
+                </a>
+                <a class="atrasado {% if status == 'Atrasado' %}ativo{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='receitas', busca=busca, status='' if status == 'Atrasado' else 'Atrasado') }}">
+                    <div class="rotulo">Atrasado</div>
+                    <div class="valor">R$ {{ "%.2f"|format(totais.atrasado) }}</div>
+                    <div class="qtd">{{ totais.qtd_atrasado }} cobrança(s){% if status == 'Atrasado' %} · clique de novo para ver todas{% endif %}</div>
+                </a>
             </div>
 
             <div class="fin-mobile-list">
@@ -990,7 +1023,8 @@
                             <input type="hidden" name="mes" value="{{ mes_atual }}">
                             <input name="descricao" value="{{ item.descricao or '' }}" style="flex:1;min-width:140px;padding:6px;border:1px solid #ccc;border-radius:4px;" placeholder="Descrição">
                             <input name="valor" data-moeda placeholder="Valor" value="{{ item.valor|moeda_campo }}" style="width:110px;padding:6px;border:1px solid #ccc;border-radius:4px;">
-                            <input type="date" name="data_vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:6px;border:1px solid #ccc;border-radius:4px;">
+                            <input type="date" name="data_vencimento" title="Vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:6px;border:1px solid #ccc;border-radius:4px;">
+                            <input type="date" name="data_pagamento" title="Data de pagamento" aria-label="Data de pagamento" value="{{ item.data_pagamento.strftime('%Y-%m-%d') if item.data_pagamento else '' }}" style="padding:6px;border:1px solid #ccc;border-radius:4px;">
                             <select name="status" style="padding:6px;border:1px solid #ccc;border-radius:4px;">
                                 <option value="Pendente" {% if item.status == 'Pendente' %}selected{% endif %}>Pendente</option>
                                 <option value="Atrasado" {% if item.status == 'Atrasado' %}selected{% endif %}>Atrasado</option>
@@ -1073,15 +1107,13 @@
                                 </td>
                                 <td>
                                     {% if item.status == 'Pago' %}
-                                        {{ item.forma_pagamento or 'Dinheiro' }}<br>
-                                        <small style="color: #777;">{{ item.data_pagamento.strftime('%d/%m/%Y') if item.data_pagamento else '' }}</small>
-                                    {% else %}
-                                        -
+                                        <div style="font-size:0.75rem;color:#475569;margin-bottom:4px;">{{ item.forma_pagamento or 'Dinheiro' }}</div>
                                     {% endif %}
+                                    <input type="date" name="data_pagamento" form="edit-{{ item.id }}" title="Data de pagamento" aria-label="Data de pagamento" value="{{ item.data_pagamento.strftime('%Y-%m-%d') if item.data_pagamento else '' }}" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
                                 </td>
                                 <td>
                                     <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
-                                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                                        <form id="edit-{{ item.id }}" action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center; flex-wrap: wrap;">
                                             <input type="hidden" name="acao" value="editar_cobranca">
                                             <input type="hidden" name="cobranca_id" value="{{ item.id }}">
                                             <input type="hidden" name="aba" value="receitas">

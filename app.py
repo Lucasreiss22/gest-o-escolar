@@ -4813,10 +4813,17 @@ def pagina_financeiro():
                         cobranca_id = request.form.get("cobranca_id")
                         valor_edit = _parse_moeda(request.form.get("valor"), 0.0)
                         status_edit = request.form.get("status") or "Pendente"
+                        data_pag = (request.form.get("data_pagamento") or "").strip() or None
+                        if status_edit == "Pago":
+                            if not data_pag:
+                                data_pag = datetime.now().strftime("%Y-%m-%d")
+                        else:
+                            data_pag = None
                         cursor.execute(
                             """
                             UPDATE financeiro_mensalidades
-                            SET descricao = %s, valor = %s, data_vencimento = %s, status = %s
+                            SET descricao = %s, valor = %s, data_vencimento = %s, status = %s,
+                                data_pagamento = %s
                             WHERE id = %s
                             """,
                             (
@@ -4824,11 +4831,31 @@ def pagina_financeiro():
                                 valor_edit,
                                 request.form.get("data_vencimento") or datetime.now().strftime("%Y-%m-%d"),
                                 status_edit,
+                                data_pag,
                                 cobranca_id,
                             ),
                         )
                         conexao.commit()
                         flash("Cobrança atualizada no extrato.", "success")
+
+                    elif acao == "alterar_data_pagamento":
+                        data_pag = (request.form.get("data_pagamento") or "").strip()
+                        if not data_pag:
+                            flash("Informe a data de pagamento.", "danger")
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE financeiro_mensalidades
+                                SET data_pagamento = %s
+                                WHERE id = %s AND status = 'Pago'
+                                """,
+                                (data_pag, request.form.get("cobranca_id")),
+                            )
+                            conexao.commit()
+                            if cursor.rowcount:
+                                flash("Data de pagamento atualizada.", "success")
+                            else:
+                                flash("Só é possível alterar a data de uma mensalidade paga.", "danger")
 
                     elif acao == "dar_baixa":
                         cursor.execute(
@@ -5097,7 +5124,7 @@ def pagina_financeiro():
             finally:
                 conexao.close()
         voltar_aluno = request.form.get("voltar_aluno")
-        if voltar_aluno and str(voltar_aluno).isdigit() and acao in ("tirar_baixa", "dar_baixa"):
+        if voltar_aluno and str(voltar_aluno).isdigit() and acao in ("tirar_baixa", "dar_baixa", "alterar_data_pagamento", "editar_cobranca"):
             return redirect(url_for("detalhes_aluno", aluno_id=int(voltar_aluno)))
         params_redir = {"mes": mes_redir, "aba": aba_redir}
         if request.form.get("status"):
@@ -5117,6 +5144,9 @@ def pagina_financeiro():
         "recebido": 0.0,
         "pendente": 0.0,
         "atrasado": 0.0,
+        "qtd_pago": 0,
+        "qtd_pendente": 0,
+        "qtd_atrasado": 0,
         "folha_pagamento": 0.0,
         "tributos": 0.0,
         "liquido": 0.0,
@@ -5173,7 +5203,10 @@ def pagina_financeiro():
                     SELECT 
                         COALESCE(SUM(CASE WHEN status = 'Pago' THEN valor::numeric ELSE 0 END), 0) AS recebido,
                         COALESCE(SUM(CASE WHEN status = 'Pendente' THEN valor::numeric ELSE 0 END), 0) AS pendente,
-                        COALESCE(SUM(CASE WHEN status = 'Atrasado' THEN valor::numeric ELSE 0 END), 0) AS atrasado
+                        COALESCE(SUM(CASE WHEN status = 'Atrasado' THEN valor::numeric ELSE 0 END), 0) AS atrasado,
+                        COALESCE(SUM(CASE WHEN status = 'Pago' THEN 1 ELSE 0 END), 0) AS qtd_pago,
+                        COALESCE(SUM(CASE WHEN status = 'Pendente' THEN 1 ELSE 0 END), 0) AS qtd_pendente,
+                        COALESCE(SUM(CASE WHEN status = 'Atrasado' THEN 1 ELSE 0 END), 0) AS qtd_atrasado
                     FROM financeiro_mensalidades
                     WHERE TO_CHAR(data_vencimento, 'YYYY-MM') = %s;
                     """,
@@ -5184,6 +5217,9 @@ def pagina_financeiro():
                     totais["recebido"] = float(resumo_mensalidades["recebido"])
                     totais["pendente"] = float(resumo_mensalidades["pendente"])
                     totais["atrasado"] = float(resumo_mensalidades["atrasado"])
+                    totais["qtd_pago"] = int(resumo_mensalidades["qtd_pago"] or 0)
+                    totais["qtd_pendente"] = int(resumo_mensalidades["qtd_pendente"] or 0)
+                    totais["qtd_atrasado"] = int(resumo_mensalidades["qtd_atrasado"] or 0)
 
                 # 3. Folha de pagamento por tipo de contrato
                 professores_detalhes, totais_folha = montar_folha_contratos(cursor, regime_tributario, mes_filtro)
