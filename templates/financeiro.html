@@ -792,13 +792,13 @@
                     <input type="hidden" name="aba" value="custos">
                     <input type="hidden" name="mes" value="{{ mes_atual }}">
                     <div class="form-group">
-                        <label>Importar planilha</label>
-                        <input type="file" name="planilha_custos" accept=".csv,.txt,.xlsx,.xls" required>
+                        <label>Importar CSV ou Excel</label>
+                        <input type="file" name="planilha_custos" accept=".csv,text/csv,.txt,.xlsx,.xls" required>
                     </div>
                     <button class="btn btn-success" type="submit">Importar custos</button>
-                    <a class="btn btn-primary" href="{{ url_for('modelo_custos_csv') }}">Baixar modelo</a>
+                    <a class="btn btn-primary" href="{{ url_for('modelo_custos_csv') }}">Baixar modelo CSV</a>
                 </form>
-                <p class="simples-hint">CSV ou Excel, uma linha por custo. Tipos: avista, recorrente, parcelado ou servico. Parcelado gera as parcelas; recorrente vale todo mês até a data fim.</p>
+                <p class="simples-hint">Aceita CSV (vírgula ou ponto e vírgula, inclusive o que o Excel salva) e Excel. Uma linha por custo. Tipos: avista, recorrente, parcelado ou servico.</p>
                 {% set rotulo_tipo = {'avista': 'À vista', 'recorrente': 'Recorrente', 'parcelado': 'Parcelado', 'servico': 'Serviço NFS-e'} %}
                 {% for c in custos_mes %}
                 <div class="fin-item">

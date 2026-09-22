@@ -221,6 +221,35 @@ def carregar_folhas(cursor, mes_apuracao):
     return qtd
 
 
+def _decodificar_csv(bruto):
+    if bruto.startswith(b"\xff\xfe") or bruto.startswith(b"\xfe\xff"):
+        return bruto.decode("utf-16")
+    if bruto.startswith(b"\xef\xbb\xbf"):
+        return bruto.decode("utf-8-sig")
+    for enc in ("utf-8", "cp1252", "latin-1"):
+        try:
+            return bruto.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return bruto.decode("latin-1", errors="replace")
+
+
+def _separador_csv(texto):
+    linhas = [ln for ln in texto.splitlines() if ln.strip()][:8]
+    if not linhas:
+        return ";"
+    pontos = sum(ln.count(";") for ln in linhas)
+    virgulas = sum(ln.count(",") for ln in linhas)
+    tabs = sum(ln.count("\t") for ln in linhas)
+    if tabs > pontos and tabs > virgulas:
+        return "\t"
+    if pontos >= virgulas and pontos > 0:
+        return ";"
+    if virgulas > 0:
+        return ","
+    return ";"
+
+
 def _linhas_arquivo(arquivo):
     nome = (arquivo.filename or "").lower()
     bruto = arquivo.read()
@@ -232,14 +261,8 @@ def _linhas_arquivo(arquivo):
         wb = load_workbook(io.BytesIO(bruto), data_only=True)
         ws = wb.active
         return [[cell if cell is not None else "" for cell in row] for row in ws.iter_rows(values_only=True)]
-    texto = bruto.decode("utf-8-sig", errors="replace")
-    amostra = texto[:2048]
-    try:
-        dialect = csv.Sniffer().sniff(amostra, delimiters=";,|\t")
-        sep = dialect.delimiter
-    except csv.Error:
-        sep = ";" if amostra.count(";") >= amostra.count(",") else ","
-    return list(csv.reader(io.StringIO(texto), delimiter=sep))
+    texto = _decodificar_csv(bruto)
+    return list(csv.reader(io.StringIO(texto), delimiter=_separador_csv(texto)))
 
 
 def importar_competencias(arquivo, origem="planilha"):
