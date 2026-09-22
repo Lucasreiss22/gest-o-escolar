@@ -36,6 +36,7 @@ ENDPOINTS = {
     "excluir_financeiro": "financeiro",
     "relatorio_tributario": "financeiro",
     "relatorio_pdf_folha": "financeiro",
+    "relatorio_pdf_custos": "financeiro",
     "calendario_escolar": "calendario",
     "cadastrar_evento": "calendario",
     "pagina_configuracoes": "configuracoes",
@@ -69,10 +70,88 @@ def normalizar_papel(papel):
     } else "admin")
 
 
+AREAS_ACESSO = [
+    ("dashboard", "Painel"),
+    ("alunos", "Alunos"),
+    ("pedagogico", "Pedagógico (turmas, chamada e notas)"),
+    ("pedagogico_cadastro", "Cadastrar turma e matrícula"),
+    ("professores", "Equipe"),
+    ("financeiro", "Financeiro"),
+    ("calendario", "Calendário"),
+    ("contracheque", "Contra-cheque"),
+    ("configuracoes", "Configurações"),
+    ("usuarios", "Usuários e permissões"),
+]
+
+ACOES_ACESSO = ("acessar", "ver", "alterar")
+
+_POST_SO_LEITURA = {"pdf_contracheque_rota", "relatorio_pdf_consulta", "relatorio_tributario", "relatorio_pdf_custos"}
+
+
 def pode_modulo(papel, modulo):
     papel_n = normalizar_papel(papel)
     permitidos = MODULOS.get(modulo, PAPEIS_TOTAIS)
     return papel_n in permitidos
+
+
+def permissoes_padrao(papel):
+    papel_n = normalizar_papel(papel)
+    mapa = {}
+    for area, _rotulo in AREAS_ACESSO:
+        entra = papel_n == "admin" or pode_modulo(papel_n, area)
+        altera = entra
+        if area == "contracheque" and papel_n in {"professor", "funcionario", "secretaria"}:
+            altera = False
+        mapa[area] = {"acessar": entra, "ver": entra, "alterar": altera}
+    return mapa
+
+
+def ler_permissoes(bruto):
+    if not bruto:
+        return None
+    if isinstance(bruto, dict):
+        return bruto
+    try:
+        import json
+        dados = json.loads(bruto)
+        return dados if isinstance(dados, dict) else None
+    except Exception:
+        return None
+
+
+def permissoes_efetivas(papel, salvo=None):
+    base = permissoes_padrao(papel)
+    dados = ler_permissoes(salvo)
+    if not dados:
+        return base
+    for area, _rotulo in AREAS_ACESSO:
+        item = dados.get(area) or {}
+        for acao in ACOES_ACESSO:
+            if acao in item:
+                base[area][acao] = bool(item[acao])
+        if base[area]["alterar"]:
+            base[area]["ver"] = True
+            base[area]["acessar"] = True
+        elif base[area]["ver"]:
+            base[area]["acessar"] = True
+    return base
+
+
+def padroes_por_papel():
+    return {papel: permissoes_padrao(papel) for papel in (
+        "admin", "supervisor", "financeiro", "direcao", "secretaria", "professor", "funcionario"
+    )}
+
+
+def pode_acao(papel, modulo, acao="acessar", salvo=None):
+    if normalizar_papel(papel) == "admin":
+        return True
+    bloco = permissoes_efetivas(papel, salvo).get(modulo) or {}
+    if acao == "alterar":
+        return bool(bloco.get("alterar"))
+    if acao == "ver":
+        return bool(bloco.get("ver") or bloco.get("acessar"))
+    return bool(bloco.get("acessar") or bloco.get("ver"))
 
 
 def pode_endpoint(papel, endpoint):
@@ -82,6 +161,18 @@ def pode_endpoint(papel, endpoint):
     if not modulo:
         return True
     return pode_modulo(papel, modulo)
+
+
+def pode_requisicao(papel, endpoint, metodo, salvo=None):
+    if not endpoint:
+        return True
+    modulo = ENDPOINTS.get(endpoint)
+    if not modulo:
+        return True
+    acao = "acessar"
+    if (metodo or "GET").upper() == "POST" and endpoint not in _POST_SO_LEITURA:
+        acao = "alterar"
+    return pode_acao(papel, modulo, acao, salvo)
 
 
 def rotulo_papel(papel):

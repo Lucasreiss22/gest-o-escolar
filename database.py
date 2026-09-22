@@ -841,6 +841,7 @@ def garantir_tabelas_folha():
                 ("configuracoes", "smtp_password", "VARCHAR(255)"),
                 ("configuracoes", "smtp_from", "VARCHAR(150)"),
                 ("configuracoes", "smtp_tls", "BOOLEAN DEFAULT TRUE"),
+                ("usuarios", "permissoes", "TEXT"),
             ):
                 _garantir_coluna(cursor, tabela, coluna, spec, mapa)
             if "alunos" in mapa:

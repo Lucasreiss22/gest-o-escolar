@@ -255,6 +255,56 @@ def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos):
     return _saida(pdf)
 
 
+def pdf_custos(escola, mes_label, custos, resumo):
+    pdf = RelatorioPDF("Relatório de custos")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola} · {mes_label}")
+    resumo = resumo or {}
+    pdf.linha("Compras e custos fixos", _brl(resumo.get("compras")))
+    pdf.linha("Serviços contratados", _brl(resumo.get("servicos")))
+    pdf.linha("Total do mês", _brl(resumo.get("custos")), negrito=True)
+    pdf.ln(3)
+    pdf.secao("Lançamentos")
+    rotulo_tipo = {
+        "avista": "À vista",
+        "recorrente": "Recorrente",
+        "parcelado": "Parcelado",
+        "servico": "Serviço",
+    }
+    rotulo_forma = {
+        "dinheiro": "Pix",
+        "cartao": "Cartão",
+        "boleto": "Boleto",
+        "financiamento": "Financiamento",
+    }
+    if not custos:
+        pdf.paragrafo("Nenhum custo neste mês.")
+        return _saida(pdf)
+    for item in custos:
+        data = item.get("data_custo") or item.get("data_inicio") or ""
+        if hasattr(data, "strftime"):
+            data = data.strftime("%d/%m/%Y")
+        else:
+            data = str(data)[:10]
+        tipo = rotulo_tipo.get(item.get("tipo") or "", "À vista")
+        forma = rotulo_forma.get(item.get("forma") or "", item.get("forma") or "")
+        extra = " · ".join(parte for parte in (
+            tipo,
+            (item.get("categoria") or "").strip(),
+            forma,
+            (item.get("prestador") or "").strip(),
+            data,
+        ) if parte)
+        nome = (item.get("descricao") or "Custo")[:70]
+        pdf.linha(nome, _brl(item.get("valor")))
+        if extra:
+            pdf.set_font(pdf.fonte, "", 8)
+            pdf.set_text_color(100, 116, 139)
+            pdf.cell(0, 4.5, extra[:110], new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(40, 40, 40)
+    return _saida(pdf)
+
+
 def pdf_boletim(escola, aluno, notas, faltas_resumo, turmas=None):
     pdf = RelatorioPDF("Boletim escolar")
     pdf.add_page()

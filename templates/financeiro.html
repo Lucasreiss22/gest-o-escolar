@@ -201,6 +201,7 @@
             <div class="fin-reports">
                 <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="btn btn-success">PDF tributos</a>
                 <a href="{{ url_for('relatorio_pdf_folha', mes=mes_atual) }}" class="btn btn-success">PDF folha</a>
+                <a href="{{ url_for('relatorio_pdf_custos', mes=mes_atual) }}" class="btn btn-success">PDF custos</a>
             </div>
             <div style="margin-top: 8px; font-size: 0.8rem; color: #64748b;">
                 Apuração de <strong>{{ mes_label }}</strong>

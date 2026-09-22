@@ -59,6 +59,7 @@ from relatorios_pdf import (
     pdf_contracheque,
     pdf_historico_periodo,
     pdf_folha_pagamento,
+    pdf_custos,
     pdf_lucro_presumido,
     pdf_lucro_real,
     pdf_simples_nacional,
@@ -72,7 +73,20 @@ from folha import (
     dia_pagamento_valido,
     aplicar_ajuste_competencia,
 )
-from permissoes import pode_endpoint, pode_modulo, normalizar_papel, rotulo_papel, CARGOS_ESCOLA, cargos_escola_planos
+from permissoes import (
+    AREAS_ACESSO,
+    pode_acao,
+    pode_endpoint,
+    pode_modulo,
+    pode_requisicao,
+    normalizar_papel,
+    rotulo_papel,
+    CARGOS_ESCOLA,
+    cargos_escola_planos,
+    permissoes_efetivas,
+    permissoes_padrao,
+    padroes_por_papel,
+)
 from plataforma import (
     buscar_admin_plataforma,
     buscar_escola_por_email,
@@ -402,6 +416,18 @@ def _especialidade_form():
     if texto.lower() in {"gerais", "geral", "n/a", "-"}:
         return ""
     return texto[:150]
+
+
+def _permissoes_do_form(papel):
+    if not any(str(chave).startswith("perm_") for chave in request.form.keys()):
+        return None
+    dados = {}
+    for area, _rotulo in AREAS_ACESSO:
+        dados[area] = {
+            acao: request.form.get(f"perm_{area}_{acao}") == "1"
+            for acao in ("acessar", "ver", "alterar")
+        }
+    return permissoes_efetivas(papel, dados)
 
 
 def _cargo_do_form(papel=None):
@@ -824,7 +850,8 @@ def inject_acl():
     return {
         "papel_atual": papel,
         "rotulo_papel": rotulo_papel(papel),
-        "pode": lambda modulo: pode_modulo(papel, modulo),
+        "pode": lambda modulo: pode_acao(papel, modulo, "acessar", session.get("permissoes")),
+        "pode_alterar": lambda modulo: pode_acao(papel, modulo, "alterar", session.get("permissoes")),
         "smtp_ok": smtp_ok,
         "google_login": google_login,
         "super_admin": bool(session.get("super_admin")),
@@ -879,11 +906,11 @@ def proteger_rotas():
     papel = session.get("usuario_papel")
     if endpoint == "pagina_pedagogico" and request.method == "POST":
         acao = request.form.get("acao") or ""
-        if acao in ("criar_turma", "nova_turma", "vincular_aluno", "incluir_aluno", "desvincular_aluno") and not pode_modulo(papel, "pedagogico_cadastro"):
-            flash("❌ Sem permissão para cadastrar turma ou matricular aluno (secretaria).", "danger")
+        if acao in ("criar_turma", "nova_turma", "vincular_aluno", "incluir_aluno", "desvincular_aluno") and not pode_acao(papel, "pedagogico_cadastro", "alterar", session.get("permissoes")):
+            flash("❌ Sem permissão para cadastrar turma ou matricular aluno.", "danger")
             return redirect(url_for("pagina_pedagogico"))
-    if not pode_endpoint(papel, endpoint):
-        flash("❌ Sem permissão para acessar esta área.", "danger")
+    if not pode_requisicao(papel, endpoint, request.method, session.get("permissoes")):
+        flash("❌ Sem permissão para acessar ou alterar esta área.", "danger")
         return redirect(url_for("dashboard"))
     return None
 
@@ -1612,6 +1639,7 @@ def _iniciar_sessao(usuario, email):
     session["usuario_nome"] = usuario.get("nome") or usuario.get("nome_completo") or email
     session["usuario_papel"] = normalizar_papel(usuario.get("papel") or usuario.get("cargo") or "admin")
     session["usuario_email"] = email
+    session["permissoes"] = permissoes_efetivas(session["usuario_papel"], usuario.get("permissoes"))
     session["funcionario_id"] = _id_funcionario_da_sessao(email)
 
 
@@ -2354,7 +2382,7 @@ def gerenciar_usuarios():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
 
-    if session.get("usuario_papel") != "admin" and not pode_modulo(session.get("usuario_papel"), "usuarios"):
+    if session.get("usuario_papel") != "admin" and not pode_acao(session.get("usuario_papel"), "usuarios", "acessar", session.get("permissoes")):
         flash("Acesso negado. Area restrita para administradores.", "danger")
         return redirect(url_for("dashboard"))
 
@@ -2366,6 +2394,7 @@ def gerenciar_usuarios():
         if conexao:
             try:
                 with conexao.cursor() as cursor:
+                    cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes TEXT")
                     if acao == "excluir":
                         uid = request.form.get("usuario_id", type=int)
                         if uid:
@@ -2380,6 +2409,8 @@ def gerenciar_usuarios():
                     senha_informada = (request.form.get("senha") or "").strip()
                     senha = senha_informada
                     papel = normalizar_papel(limpar_campo("papel") or "funcionario")
+                    perm_salvas = _permissoes_do_form(papel)
+                    perm_json = json.dumps(perm_salvas or permissoes_padrao(papel), ensure_ascii=False)
                     uid = request.form.get("usuario_id", type=int)
                     fid = request.form.get("funcionario_id", type=int)
                     criar_login = request.form.get("criar_login") == "1"
@@ -2393,22 +2424,22 @@ def gerenciar_usuarios():
                         if uid:
                             if senha:
                                 cursor.execute(
-                                    "UPDATE usuarios SET nome = %s, email = %s, senha = %s, papel = %s WHERE id = %s",
-                                    (nome, email, senha, papel, uid),
+                                    "UPDATE usuarios SET nome = %s, email = %s, senha = %s, papel = %s, permissoes = %s WHERE id = %s",
+                                    (nome, email, senha, papel, perm_json, uid),
                                 )
                             else:
                                 cursor.execute(
-                                    "UPDATE usuarios SET nome = %s, email = %s, papel = %s WHERE id = %s",
-                                    (nome, email, papel, uid),
+                                    "UPDATE usuarios SET nome = %s, email = %s, papel = %s, permissoes = %s WHERE id = %s",
+                                    (nome, email, papel, perm_json, uid),
                                 )
                         else:
                             cursor.execute(
                                 """
-                                INSERT INTO usuarios (nome, email, senha, papel)
-                                VALUES (%s, %s, %s, %s)
+                                INSERT INTO usuarios (nome, email, senha, papel, permissoes)
+                                VALUES (%s, %s, %s, %s, %s)
                                 RETURNING id
                                 """,
-                                (nome, email, senha, papel),
+                                (nome, email, senha, papel, perm_json),
                             )
                             uid = cursor.fetchone()["id"]
                     else:
@@ -2514,7 +2545,12 @@ def gerenciar_usuarios():
                             (foto_func, fid),
                         )
                     conexao.commit()
+                    if uid and uid == session.get("usuario_id"):
+                        session["usuario_papel"] = papel
+                        session["permissoes"] = perm_salvas or permissoes_padrao(papel)
                     flash("Cadastro da equipe salvo. Contra-cheque e avisos vão para o e-mail informado.", "success")
+                    if criar_login and uid and uid != session.get("usuario_id"):
+                        flash("O que esta pessoa pode ver e alterar vale no próximo acesso dela.", "success")
                     if criar_login and (novo_login or senha_informada):
                         try:
                             ok, erro = _enviar_codigo_colaborador(email, nome)
@@ -2543,6 +2579,7 @@ def gerenciar_usuarios():
         "nome": "",
         "email": "",
         "papel": "professor",
+        "permissoes": permissoes_padrao("professor"),
         "ativo": True,
         "tipo_contrato": "clt_mensalista",
         "salario": 0,
@@ -2628,6 +2665,10 @@ def gerenciar_usuarios():
                         "nome": urow.get("nome") or frow.get("nome_completo") or "",
                         "email": urow.get("email") or frow.get("email") or "",
                         "papel": normalizar_papel(urow.get("papel") or "funcionario"),
+                        "permissoes": permissoes_efetivas(
+                            normalizar_papel(urow.get("papel") or "funcionario"),
+                            urow.get("permissoes"),
+                        ),
                         "cpf": frow.get("cpf") or "",
                         "rg": frow.get("rg") or "",
                         "data_nascimento": _data_iso(frow.get("data_nascimento")),
@@ -2700,6 +2741,8 @@ def gerenciar_usuarios():
         nome_do_papel=rotulo_papel,
         preview_folha=preview_folha,
         regime_folha=regime_folha,
+        areas_acesso=AREAS_ACESSO,
+        padroes_acesso=padroes_por_papel(),
     )
 
 
@@ -5716,6 +5759,38 @@ def enviar_memoria_simples():
     except Exception as e:
         flash(f"Não foi possível enviar o PDF: {e}", "danger")
     return redirect(destino)
+
+
+@app.route("/financeiro/custos/pdf")
+def relatorio_pdf_custos():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    mes_filtro = request.args.get("mes", "").strip() or datetime.now().strftime("%Y-%m")
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco para gerar o relatório.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro, aba="custos"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1;")
+            config = cursor.fetchone() or {}
+            custos = listar_custos_do_mes(cursor, mes_filtro)
+            resumo = resumir_custos_operacionais(custos)
+        buffer = pdf_custos(
+            config.get("nome_escola") or "Gestão Escolar",
+            nome_mes_extenso(mes_filtro),
+            custos,
+            resumo,
+        )
+    finally:
+        conexao.close()
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"custos_{mes_filtro}.pdf",
+    )
 
 
 @app.route("/financeiro/relatorio-tributario")

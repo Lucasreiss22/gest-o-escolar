@@ -153,6 +153,37 @@
                         </select>
                     </div>
                 </div>
+                <div id="blocoAcesso" {% if not cadastro.usuario_id %}hidden{% endif %}>
+                    <h4 class="card-title">O que esta pessoa pode acessar, ver e alterar</h4>
+                    <p class="hint">O padrão segue a função. Administrador acessa e altera tudo. Nos outros perfis, marque ou desmarque cada item. Alterar já inclui ver e acessar.</p>
+                    <p style="margin:0 0 10px;"><button type="button" class="btn btn-secondary" id="usarPadraoFuncao">Usar o padrão da função</button></p>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:.9rem;">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;padding:6px 8px;">Área</th>
+                                    <th style="text-align:center;padding:6px 8px;">Acessar</th>
+                                    <th style="text-align:center;padding:6px 8px;">Ver</th>
+                                    <th style="text-align:center;padding:6px 8px;">Alterar</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for area, rotulo in areas_acesso %}
+                                {% set bloco = cadastro.permissoes.get(area, {}) if cadastro.permissoes else {} %}
+                                <tr>
+                                    <td style="padding:6px 8px;">{{ rotulo }}</td>
+                                    {% for acao in ['acessar', 'ver', 'alterar'] %}
+                                    <td style="text-align:center;">
+                                        <input type="checkbox" name="perm_{{ area }}_{{ acao }}" value="1" data-perm="{{ area }}" data-acao="{{ acao }}" {% if bloco.get(acao) %}checked{% endif %}>
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <script type="application/json" id="padroesAcesso">{{ padroes_acesso|tojson }}</script>
+                </div>
 
                 <h4 class="card-title">Dados pessoais</h4>
                 <div class="form-grid">
@@ -392,8 +423,12 @@
     (function () {
         var box = document.getElementById("criarLogin");
         var bloco = document.getElementById("blocoLogin");
+        var acesso = document.getElementById("blocoAcesso");
         if (!box || !bloco) return;
-        function sync() { bloco.hidden = !box.checked; }
+        function sync() {
+            bloco.hidden = !box.checked;
+            if (acesso) acesso.hidden = !box.checked;
+        }
         box.addEventListener("change", sync);
         sync();
     })();
@@ -404,6 +439,51 @@
         function syncCargo() { extra.hidden = sel.value !== "Outro"; }
         sel.addEventListener("change", syncCargo);
         syncCargo();
+    })();
+    (function () {
+        var bruto = document.getElementById("padroesAcesso");
+        var papel = document.querySelector("select[name='papel']");
+        var cargo = document.getElementById("campoCargo");
+        if (!bruto || !papel) return;
+        var padroes = {};
+        try { padroes = JSON.parse(bruto.textContent || "{}"); } catch (e) { padroes = {}; }
+        function papelDoCargo(texto) {
+            var t = (texto || "").toLowerCase();
+            if (t.indexOf("professor") >= 0) return "professor";
+            if (t.indexOf("secret") >= 0) return "secretaria";
+            if (t.indexOf("diret") >= 0 || t.indexOf("direc") >= 0 || t.indexOf("direç") >= 0) return "direcao";
+            if (t.indexOf("financ") >= 0) return "financeiro";
+            if (t.indexOf("supervis") >= 0) return "supervisor";
+            if (t.indexOf("admin") >= 0) return "admin";
+            return "funcionario";
+        }
+        function aplicar(codigo) {
+            var mapa = padroes[codigo] || padroes.funcionario || {};
+            document.querySelectorAll("[data-perm]").forEach(function (el) {
+                var area = mapa[el.getAttribute("data-perm")] || {};
+                el.checked = !!area[el.getAttribute("data-acao")];
+            });
+        }
+        document.querySelectorAll("[data-acao='alterar']").forEach(function (el) {
+            el.addEventListener("change", function () {
+                if (!el.checked) return;
+                var area = el.getAttribute("data-perm");
+                document.querySelectorAll("[data-perm='" + area + "']").forEach(function (item) {
+                    item.checked = true;
+                });
+            });
+        });
+        papel.addEventListener("change", function () { aplicar(papel.value); });
+        if (cargo) {
+            cargo.addEventListener("change", function () {
+                if (!cargo.value || cargo.value === "Outro") return;
+                var codigo = papelDoCargo(cargo.value);
+                papel.value = codigo;
+                aplicar(codigo);
+            });
+        }
+        var botao = document.getElementById("usarPadraoFuncao");
+        if (botao) botao.addEventListener("click", function () { aplicar(papel.value); });
     })();
     </script>
 </body>
