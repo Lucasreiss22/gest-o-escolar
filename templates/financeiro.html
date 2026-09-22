@@ -110,6 +110,13 @@
         .simples-acoes { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 12px 0; }
         .simples-acoes .form-group { min-width: 180px; }
         .simples-hint { font-size: 0.8rem; color: #64748b; line-height: 1.45; margin: 0 0 12px; }
+        .custo-lista { border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #fff; }
+        .custo-linha { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 14px; border-bottom: 1px solid #eef2f7; }
+        .custo-linha:last-child { border-bottom: 0; }
+        .custo-linha .nome { font-weight: 700; color: #1e293b; }
+        .custo-linha .meta { display: block; margin-top: 2px; color: #64748b; font-size: 0.78rem; }
+        .custo-linha .valor { font-weight: 700; white-space: nowrap; color: #1e293b; }
+        .custo-total { background: #f8fafc; }
         button.card-resumo { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
         .calc-link { font-size: 0.72rem; color: #3498db; margin-top: 5px; display: block; font-weight: 600; }
         button.card-resumo:hover { box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12); }
@@ -799,34 +806,36 @@
                     <a class="btn btn-primary" href="{{ url_for('modelo_custos_csv') }}">Baixar modelo CSV</a>
                 </form>
                 <p class="simples-hint">Aceita CSV (vírgula ou ponto e vírgula, inclusive o que o Excel salva) e Excel. Uma linha por custo. Tipos: avista, recorrente, parcelado ou servico.</p>
-                {% set rotulo_tipo = {'avista': 'À vista', 'recorrente': 'Recorrente', 'parcelado': 'Parcelado', 'servico': 'Serviço NFS-e'} %}
-                {% for c in custos_mes %}
-                <div class="fin-item">
-                    <div class="fin-item-top">
-                        <strong>{{ c.descricao }}</strong>
-                        <strong>R$ {{ "%.2f"|format(c.valor) }}</strong>
+                {% set rotulo_tipo = {'avista': 'À vista', 'recorrente': 'Recorrente', 'parcelado': 'Parcelado', 'servico': 'Serviço'} %}
+                {% set rotulo_forma = {'dinheiro': 'Pix', 'cartao': 'Cartão', 'boleto': 'Boleto', 'financiamento': 'Financiamento'} %}
+                {% if custos_mes %}
+                <div class="custo-lista">
+                    {% for c in custos_mes %}
+                    {% set retencao = (c.irrf or 0) + (c.pis or 0) + (c.cofins or 0) + (c.csll or 0) + (c.iss or 0) %}
+                    <div class="custo-linha">
+                        <div>
+                            <span class="nome">{{ c.descricao }}</span>
+                            <span class="meta">
+                                {{ rotulo_tipo.get(c.tipo, 'À vista') }}
+                                {% if c.categoria %} · {{ c.categoria }}{% endif %}
+                                {% if c.forma %} · {{ rotulo_forma.get(c.forma, c.forma) }}{% endif %}
+                                {% if c.prestador %} · {{ c.prestador }}{% endif %}
+                                {% if c.tipo == 'parcelado' %} · {{ c.parcela_num }}/{{ c.parcelas }}{% endif %}
+                                {% if c.tipo == 'recorrente' and c.data_fim %} · até {{ c.data_fim }}{% endif %}
+                                {% if retencao > 0 %} · retenções R$ {{ "%.2f"|format(retencao) }}{% endif %}
+                            </span>
+                        </div>
+                        <span class="valor">R$ {{ "%.2f"|format(c.valor) }}</span>
                     </div>
-                    <div class="fin-item-meta">
-                        {{ rotulo_tipo.get(c.tipo, 'À vista') }} · {{ c.categoria }}
-                        {% if c.forma %} · {{ c.forma }}{% endif %}
-                        {% if c.tipo == 'parcelado' %} · parcela {{ c.parcela_num }}/{{ c.parcelas }}{% endif %}
-                        {% if c.tipo == 'recorrente' %} · todo mês{% if c.data_fim %} até {{ c.data_fim }}{% endif %}{% endif %}
-                        {% if c.prestador %} · {{ c.prestador }}{% endif %}
+                    {% endfor %}
+                    <div class="custo-linha custo-total">
+                        <span class="nome">Total do mês</span>
+                        <span class="valor">R$ {{ "%.2f"|format(custos_mes|sum(attribute='valor')) }}</span>
                     </div>
-                    {% if c.tipo == 'servico' %}
-                    <div class="fin-linha"><span>Bruto da nota</span><strong>R$ {{ "%.2f"|format(c.valor_bruto or c.valor) }}</strong></div>
-                    <div class="fin-linha"><span>IRRF</span><strong>R$ {{ "%.2f"|format(c.irrf or 0) }}</strong></div>
-                    <div class="fin-linha"><span>PIS</span><strong>R$ {{ "%.2f"|format(c.pis or 0) }}</strong></div>
-                    <div class="fin-linha"><span>COFINS</span><strong>R$ {{ "%.2f"|format(c.cofins or 0) }}</strong></div>
-                    <div class="fin-linha"><span>CSLL</span><strong>R$ {{ "%.2f"|format(c.csll or 0) }}</strong></div>
-                    <div class="fin-linha"><span>Federais {{ 'retidos na nota' if c.federal_na_nota else 'não retidos (a recolher)' }}</span><strong>R$ {{ "%.2f"|format((c.irrf or 0)+(c.pis or 0)+(c.cofins or 0)+(c.csll or 0)) }}</strong></div>
-                    <div class="fin-linha"><span>ISS {{ 'retido na nota' if c.iss_na_nota else 'não retido (a recolher)' }}</span><strong>R$ {{ "%.2f"|format(c.iss or 0) }}</strong></div>
-                    <div class="fin-linha"><span>Pago ao prestador</span><strong>R$ {{ "%.2f"|format(c.valor) }}</strong></div>
-                    {% endif %}
                 </div>
                 {% else %}
                 <p style="color:#777;">Nenhum custo extra neste mês.</p>
-                {% endfor %}
+                {% endif %}
             </div>
         </details>
         {% endif %}
