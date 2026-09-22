@@ -31,10 +31,22 @@
         .btn-success { background-color: #2ecc71; color: white; }
         .btn-warning { background-color: #f39c12; color: white; }
         .btn-danger { background-color: #e74c3c; color: white; padding: 6px 10px; font-size: 0.8rem; }
-        .badge { padding: 5px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
-        .badge-pago { background-color: #d4edda; color: #155724; }
-        .badge-pendente { background-color: #fff3cd; color: #856404; }
-        .badge-atrasado { background-color: #f8d7da; color: #721c24; }
+        .badge { padding: 5px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; font-style: normal; display: inline-block; letter-spacing: 0.02em; }
+        .badge-pago { background-color: #15803d; color: #fff; }
+        .badge-pendente { background-color: #b45309; color: #fff; }
+        .badge-atrasado { background-color: #b91c1c; color: #fff; }
+        .legenda-status { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+        .legenda-status span { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 700; color: #334155; }
+        tr.st-pago td { background: #ecfdf3; }
+        tr.st-pendente td { background: #fff7ed; }
+        tr.st-atrasado td { background: #fef2f2; }
+        tr.st-pago td:first-child { box-shadow: inset 4px 0 0 #15803d; }
+        tr.st-pendente td:first-child { box-shadow: inset 4px 0 0 #d97706; }
+        tr.st-atrasado td:first-child { box-shadow: inset 4px 0 0 #dc2626; }
+        .fin-item.st-pago { background: #ecfdf3; border-left: 4px solid #15803d; }
+        .fin-item.st-pendente { background: #fff7ed; border-left: 4px solid #d97706; }
+        .fin-item.st-atrasado { background: #fef2f2; border-left: 4px solid #dc2626; }
+        .grid-acoes-geracao { display: grid; grid-template-columns: minmax(280px, 560px); }
         .form-group { display: flex; flex-direction: column; }
         .form-group label { font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; color: #555; }
         .form-group input, .form-group select { padding: 9px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 0.9rem; outline: none; }
@@ -896,25 +908,6 @@
                 </form>
             </div>
 
-            <!-- Gerar Cobranças em Lote -->
-            <div class="card-box" style="margin-bottom: 0;">
-                <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Gerar Cobranças em Lote</h3>
-                <form action="{{ url_for('pagina_financeiro') }}" method="POST" onsubmit="return confirm('Deseja gerar cobranças para todos os alunos ativos com base em suas mensalidades cadastradas?');">
-                    <input type="hidden" name="acao" value="gerar_lote">
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label>Descrição do Lote</label>
-                        <input type="text" name="descricao_lote" placeholder="Ex: Mensalidade - Mês Atual" required>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 15px;">
-                        <label>Data de Vencimento do Lote</label>
-                        <input type="date" name="data_vencimento_lote" required>
-                    </div>
-                    <p style="font-size: 0.8rem; color: #666; margin-bottom: 25px; line-height: 1.4;">
-                        Gera a cobrança do mês informado só para alunos ativos cujo contrato (6 ou 12 meses) ainda esteja vigente. Não duplica mês já lançado.
-                    </p>
-                    <button type="submit" class="btn btn-warning" style="width: 100%;">Gerar Lote de Mensalidades</button>
-                </form>
-            </div>
         </div>
             </div>
         </details>
@@ -966,10 +959,17 @@
                 </div>
             </dialog>
 
+            <div class="legenda-status">
+                <span><i class="badge badge-pago">Pago</i> quitada</span>
+                <span><i class="badge badge-pendente">Pendente</i> no prazo</span>
+                <span><i class="badge badge-atrasado">Atrasado</i> vencida</span>
+            </div>
+
             <div class="fin-mobile-list">
                 {% if lancamentos %}
                     {% for item in lancamentos %}
-                    <div class="fin-item">
+                    {% set st = 'pago' if item.status == 'Pago' else ('pendente' if item.status == 'Pendente' else 'atrasado') %}
+                    <div class="fin-item st-{{ st }}">
                         <div class="fin-item-top">
                             <label style="display:flex;align-items:center;gap:8px;">
                                 <input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote">
@@ -981,13 +981,7 @@
                             {{ item.descricao or '-' }} · vence
                             {{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}
                             ·
-                            {% if item.status == 'Pago' %}
-                                <span class="badge badge-pago">Pago</span>
-                            {% elif item.status == 'Pendente' %}
-                                <span class="badge badge-pendente">Pendente</span>
-                            {% else %}
-                                <span class="badge badge-atrasado">Atrasado</span>
-                            {% endif %}
+                            <span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span>
                             </div>
                         <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="fin-item-meta" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
                             <input type="hidden" name="acao" value="editar_cobranca">
@@ -1067,20 +1061,15 @@
                     <tbody>
                         {% if lancamentos %}
                             {% for item in lancamentos %}
-                            <tr>
+                            {% set st = 'pago' if item.status == 'Pago' else ('pendente' if item.status == 'Pendente' else 'atrasado') %}
+                            <tr class="st-{{ st }}">
                                 <td><input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote" aria-label="Selecionar {{ item.nome_completo or 'cobrança' }}"></td>
                                 <td><strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong></td>
                                 <td>{{ item.descricao or '-' }}</td>
                                 <td>R$ {{ "%.2f"|format(item.valor|float if item.valor else 0) }}</td>
                                 <td>{{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}</td>
                                 <td>
-                                    {% if item.status == 'Pago' %}
-                                        <span class="badge badge-pago">Pago</span>
-                                    {% elif item.status == 'Pendente' %}
-                                        <span class="badge badge-pendente">Pendente</span>
-                                    {% else %}
-                                        <span class="badge badge-atrasado">Atrasado</span>
-                                    {% endif %}
+                                    <span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span>
                                 </td>
                                 <td>
                                     {% if item.status == 'Pago' %}
