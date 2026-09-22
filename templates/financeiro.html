@@ -1106,15 +1106,10 @@
                                 <td>{{ item.descricao or '-' }}</td>
                                 <td>R$ {{ "%.2f"|format(item.valor|float if item.valor else 0) }}</td>
                                 <td>
-                                    <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex;gap:4px;align-items:center;">
-                                        <input type="hidden" name="acao" value="alterar_data_vencimento">
-                                        <input type="hidden" name="cobranca_id" value="{{ item.id }}">
-                                        <input type="hidden" name="aba" value="receitas">
-                                        <input type="hidden" name="mes" value="{{ mes_atual }}">
-                                        {% if busca %}<input type="hidden" name="busca" value="{{ busca }}">{% endif %}
-                                        <input type="date" name="data_vencimento" required aria-label="Data de vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
-                                        <button type="submit" class="btn btn-secondary" style="padding:5px 8px;font-size:0.75rem;">Salvar</button>
-                                    </form>
+                                    <div style="display:flex;gap:4px;align-items:center;">
+                                        <input type="date" name="data_vencimento" form="edit-{{ item.id }}" required aria-label="Data de vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:4px 6px;border:1px solid #94a3b8;border-radius:4px;font-size:0.75rem;">
+                                        <button type="submit" class="btn btn-secondary" form="edit-{{ item.id }}" style="padding:5px 8px;font-size:0.75rem;">Salvar</button>
+                                    </div>
                                 </td>
                                 <td>
                                     <span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span>
@@ -1134,7 +1129,6 @@
                                             <input type="hidden" name="mes" value="{{ mes_atual }}">
                                             <input name="descricao" value="{{ item.descricao or '' }}" style="width:120px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
                                             <input name="valor" data-moeda placeholder="Valor" value="{{ item.valor|moeda_campo }}" style="width:96px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
-                                            <input type="date" name="data_vencimento" aria-label="Vencimento" title="Vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
                                             <select name="status" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
                                                 <option value="Pendente" {% if item.status == 'Pendente' %}selected{% endif %}>Pendente</option>
                                                 <option value="Atrasado" {% if item.status == 'Atrasado' %}selected{% endif %}>Atrasado</option>

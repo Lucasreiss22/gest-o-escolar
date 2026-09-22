@@ -4810,66 +4810,102 @@ def pagina_financeiro():
                         flash(f"Lote gerado: {geradas} cobrança(s) no mês, respeitando o prazo do contrato.", "success")
 
                     elif acao == "editar_cobranca":
-                        cobranca_id = request.form.get("cobranca_id")
-                        valor_edit = _parse_moeda(request.form.get("valor"), 0.0)
-                        status_edit = request.form.get("status") or "Pendente"
-                        data_pag = (request.form.get("data_pagamento") or "").strip() or None
-                        if status_edit == "Pago":
-                            if not data_pag:
-                                data_pag = datetime.now().strftime("%Y-%m-%d")
+                        try:
+                            cobranca_id = int(request.form.get("cobranca_id"))
+                            venc_date = datetime.strptime((request.form.get("data_vencimento") or "")[:10], "%Y-%m-%d").date()
+                        except (TypeError, ValueError):
+                            flash("Informe a data de vencimento.", "danger")
                         else:
-                            data_pag = None
-                        data_venc_edit = (request.form.get("data_vencimento") or "").strip()
-                        if len(data_venc_edit) >= 7:
-                            mes_redir = data_venc_edit[:7]
-                        cursor.execute(
-                            """
-                            UPDATE financeiro_mensalidades
-                            SET descricao = %s, valor = %s, data_vencimento = %s, status = %s,
-                                data_pagamento = %s
-                            WHERE id = %s
-                            """,
-                            (
-                                limpar_campo("descricao") or "Mensalidade",
-                                valor_edit,
-                                request.form.get("data_vencimento") or datetime.now().strftime("%Y-%m-%d"),
-                                status_edit,
-                                data_pag,
-                                cobranca_id,
-                            ),
-                        )
-                        conexao.commit()
-                        flash("Cobrança atualizada no extrato.", "success")
+                            status_edit = request.form.get("status") or "Pendente"
+                            pago = status_edit == "Pago"
+                            data_pag = (request.form.get("data_pagamento") or "").strip() or None
+                            if pago and not data_pag:
+                                data_pag = datetime.now().date()
+                            if not pago:
+                                data_pag = None
+                            cursor.execute(
+                                """
+                                UPDATE financeiro_mensalidades
+                                SET descricao = CASE
+                                        WHEN COALESCE(%s, descricao) ~ '^Mensalidade [0-9]{2}/[0-9]{4}'
+                                        THEN regexp_replace(
+                                            COALESCE(%s, descricao),
+                                            '^Mensalidade [0-9]{2}/[0-9]{4}',
+                                            'Mensalidade ' || to_char(%s, 'MM/YYYY')
+                                        )
+                                        ELSE COALESCE(%s, descricao)
+                                    END,
+                                    valor = %s,
+                                    data_vencimento = %s,
+                                    data_pagamento = %s,
+                                    status = CASE
+                                        WHEN %s THEN 'Pago'
+                                        WHEN %s < CURRENT_DATE THEN 'Atrasado'
+                                        ELSE 'Pendente'
+                                    END
+                                WHERE id = %s
+                                RETURNING id
+                                """,
+                                (
+                                    limpar_campo("descricao"),
+                                    limpar_campo("descricao"),
+                                    venc_date,
+                                    limpar_campo("descricao"),
+                                    _parse_moeda(request.form.get("valor"), 0.0),
+                                    venc_date,
+                                    data_pag,
+                                    pago,
+                                    venc_date,
+                                    cobranca_id,
+                                ),
+                            )
+                            if cursor.fetchone():
+                                conexao.commit()
+                                mes_redir = venc_date.strftime("%Y-%m")
+                                flash(
+                                    f"Vencimento salvo em {venc_date.strftime('%d/%m/%Y')}. Pendente e atrasado deste mês foram recalculados.",
+                                    "success",
+                                )
+                            else:
+                                flash("Não foi possível salvar a cobrança.", "danger")
 
                     elif acao == "alterar_data_vencimento":
-                        data_venc = (request.form.get("data_vencimento") or "").strip()
-                        cobranca_id = request.form.get("cobranca_id")
                         try:
-                            datetime.strptime(data_venc, "%Y-%m-%d")
-                            valida = True
-                        except ValueError:
-                            valida = False
-                        if not valida:
+                            cobranca_id = int(request.form.get("cobranca_id"))
+                            venc_date = datetime.strptime((request.form.get("data_vencimento") or "")[:10], "%Y-%m-%d").date()
+                        except (TypeError, ValueError):
                             flash("Informe a data de vencimento.", "danger")
                         else:
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
                                 SET data_vencimento = %s,
+                                    descricao = CASE
+                                        WHEN descricao ~ '^Mensalidade [0-9]{2}/[0-9]{4}'
+                                        THEN regexp_replace(
+                                            descricao,
+                                            '^Mensalidade [0-9]{2}/[0-9]{4}',
+                                            'Mensalidade ' || to_char(%s, 'MM/YYYY')
+                                        )
+                                        ELSE descricao
+                                    END,
                                     status = CASE
                                         WHEN status = 'Pago' THEN status
-                                        WHEN %s::date < CURRENT_DATE THEN 'Atrasado'
+                                        WHEN %s < CURRENT_DATE THEN 'Atrasado'
                                         ELSE 'Pendente'
                                     END
                                 WHERE id = %s
+                                RETURNING id
                                 """,
-                                (data_venc, data_venc, cobranca_id),
+                                (venc_date, venc_date, venc_date, cobranca_id),
                             )
-                            conexao.commit()
-                            if cursor.rowcount:
-                                dia = datetime.strptime(data_venc, "%Y-%m-%d").strftime("%d/%m/%Y")
-                                flash(f"Vencimento alterado para {dia}.", "success")
-                                mes_redir = data_venc[:7]
+                            if cursor.fetchone():
+                                conexao.commit()
+                                mes_redir = venc_date.strftime("%Y-%m")
+                                flash(
+                                    f"Vencimento salvo em {venc_date.strftime('%d/%m/%Y')}. Pendente e atrasado deste mês foram recalculados.",
+                                    "success",
+                                )
                             else:
                                 flash("Não foi possível alterar o vencimento.", "danger")
 
@@ -5225,9 +5261,19 @@ def pagina_financeiro():
                 # 1. Atualiza faturas vencidas para 'Atrasado' globalmente[cite: 5]
                 cursor.execute(
                     """
-                    UPDATE financeiro_mensalidades 
-                    SET status = 'Atrasado' 
-                    WHERE status = 'Pendente' AND data_vencimento < CURRENT_DATE;
+                    UPDATE financeiro_mensalidades
+                    SET status = CASE
+                        WHEN data_vencimento < CURRENT_DATE THEN 'Atrasado'
+                        ELSE 'Pendente'
+                    END
+                    WHERE COALESCE(status, '') <> 'Pago'
+                      AND data_vencimento IS NOT NULL
+                      AND status IS DISTINCT FROM (
+                          CASE
+                              WHEN data_vencimento < CURRENT_DATE THEN 'Atrasado'
+                              ELSE 'Pendente'
+                          END
+                      );
                     """
                 )
                 conexao.commit()
