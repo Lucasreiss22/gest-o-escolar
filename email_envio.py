@@ -102,42 +102,50 @@ def carregar_smtp():
     return smtp
 
 
-def identidade_escola():
-    """Nome e e-mail da escola para aparecer como remetente/resposta. A senha SMTP fica só no sistema."""
-    nome = "Gestão Escolar"
-    resposta = ""
+def identidade_envio():
+    """Quem aparece no envio: e-mail da escola + nome de quem disparou. Sem senha SMTP do funcionário."""
+    nome_escola = "Gestão Escolar"
+    email_escola = ""
+    nome_pessoa = ""
     try:
         from flask import has_request_context, session
         if has_request_context():
-            nome = (session.get("escola_nome") or nome).strip() or nome
+            nome_escola = (session.get("escola_nome") or nome_escola).strip() or nome_escola
+            nome_pessoa = (session.get("usuario_nome") or "").strip()
     except Exception:
         pass
     try:
         from database import _nome_banco_atual, obter_conexao
-        if not _nome_banco_atual(master=False):
-            return nome, resposta
-        conexao = obter_conexao()
-    except Exception:
-        return nome, resposta
-    if not conexao:
-        return nome, resposta
-    try:
-        with conexao.cursor() as cursor:
-            cursor.execute(
-                "SELECT nome_escola, email_contato FROM configuracoes WHERE id = 1"
-            )
-            row = cursor.fetchone() or {}
-        if isinstance(row, dict):
-            nome = (row.get("nome_escola") or nome or "").strip() or nome
-            resposta = (row.get("email_contato") or "").strip()
+        if _nome_banco_atual(master=False):
+            conexao = obter_conexao()
+            if conexao:
+                try:
+                    with conexao.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT nome_escola, email_contato FROM configuracoes WHERE id = 1"
+                        )
+                        row = cursor.fetchone() or {}
+                    if isinstance(row, dict):
+                        nome_escola = (row.get("nome_escola") or nome_escola or "").strip() or nome_escola
+                        email_escola = (row.get("email_contato") or "").strip()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        conexao.close()
+                    except Exception:
+                        pass
     except Exception:
         pass
-    finally:
-        try:
-            conexao.close()
-        except Exception:
-            pass
-    return nome, resposta
+    nome_visivel = nome_pessoa or nome_escola
+    if nome_pessoa and nome_escola and nome_pessoa.lower() != nome_escola.lower():
+        nome_visivel = f"{nome_pessoa} · {nome_escola}"
+    return nome_visivel, nome_escola, email_escola
+
+
+def identidade_escola():
+    nome_visivel, _nome_escola, email_escola = identidade_envio()
+    return nome_visivel, email_escola
 
 
 def emails_contato_aluno(cursor, aluno_id):
@@ -543,39 +551,59 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
 
     cfg = carregar_config()
     smtp = carregar_smtp()
-    nome_escola, email_escola = identidade_escola()
-    remetente = (smtp.get("SMTP_FROM") or smtp.get("SMTP_USER") or cfg.get("SUPER_ADMIN_EMAIL") or "").strip()
-    if not remetente:
+    nome_visivel, _nome_escola, email_escola = identidade_envio()
+    remetente_sistema = (smtp.get("SMTP_FROM") or smtp.get("SMTP_USER") or cfg.get("SUPER_ADMIN_EMAIL") or "").strip()
+    remetentes = []
+    if email_escola and email_valido(email_escola):
+        remetentes.append(email_escola)
+    if remetente_sistema and remetente_sistema.lower() not in {item.lower() for item in remetentes}:
+        remetentes.append(remetente_sistema)
+    if not remetentes:
         raise RuntimeError(
-            "Falta o e-mail remetente do sistema. No Render, cadastre SMTP_FROM (o Gmail do admin da plataforma, verificado na Brevo)."
+            "Falta o e-mail principal da escola (Configurações) ou SMTP_FROM / SUPER_ADMIN_EMAIL do sistema."
         )
+    responder_para = email_escola if email_valido(email_escola) else remetente_sistema
     erros = []
     producao = ambiente_producao()
     https_ok = _tem_envio_https(cfg)
     smtp_ok = smtp_configurado(smtp)
 
     def tentar_https():
-        return _enviar_via_https(
-            remetente, lista, assunto, corpo, html=html, anexos=anexos,
-            nome_remetente=nome_escola, responder_para=email_escola,
-        )
+        ultimo = None
+        for de in remetentes:
+            try:
+                return _enviar_via_https(
+                    de, lista, assunto, corpo, html=html, anexos=anexos,
+                    nome_remetente=nome_visivel, responder_para=responder_para,
+                )
+            except Exception as e:
+                ultimo = e
+                print(f"HTTPS remetente {de}: {e}")
+        raise ultimo or RuntimeError("Não foi possível enviar por HTTPS.")
 
     def tentar_smtp():
         if not smtp_ok:
             raise RuntimeError("Faltam SMTP_USER e SMTP_PASSWORD do sistema.")
-        msg = _montar_mensagem(
-            remetente, lista, assunto, corpo, html=html, anexos=anexos,
-            nome_remetente=nome_escola, responder_para=email_escola,
-        )
-        _tentar_smtp_gmail(smtp, msg)
-        return lista
+        ultimo = None
+        for de in remetentes:
+            try:
+                msg = _montar_mensagem(
+                    de, lista, assunto, corpo, html=html, anexos=anexos,
+                    nome_remetente=nome_visivel, responder_para=responder_para,
+                )
+                _tentar_smtp_gmail(smtp, msg)
+                return lista
+            except Exception as e:
+                ultimo = e
+                print(f"SMTP remetente {de}: {e}")
+        raise ultimo or RuntimeError("Não foi possível enviar por SMTP.")
 
     def tentar_gmail_api():
         token = access_token
-        de = remetente
+        de = remetentes[0]
         if not token:
             token, de_api = obter_access_token_gmail()
-            de = de or de_api
+            de = de or de_api or remetentes[0]
         if not token:
             raise RuntimeError("Gmail API sem token.")
         return enviar_via_gmail_api(token, lista, assunto, corpo, remetente=de, anexos=anexos, html=html)

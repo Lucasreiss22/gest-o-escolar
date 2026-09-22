@@ -97,8 +97,9 @@
 
                 <h4 class="card-title">Dados da pessoa</h4>
                 <p class="hint" style="margin-top:-8px;margin-bottom:12px;">
-                    Funcionário simples (como a Angela) só precisa de nome e e-mail.
-                    O sistema envia contra-cheque e avisos para esse e-mail. Não existe senha SMTP dela.
+                    Qualquer funcionário só precisa de nome e e-mail para receber contra-cheque e avisos.
+                    Ninguém da equipe tem senha SMTP. Se um professor ou funcionário disparar um e-mail,
+                    o envio sai pelo <strong>e-mail principal da escola</strong>, com o <strong>nome de quem enviou</strong>.
                 </p>
                 <div class="form-grid">
                     <div class="form-group span2">
@@ -120,7 +121,7 @@
 
                 <label class="hint" style="display:flex;gap:8px;align-items:flex-start;margin:8px 0 12px;">
                     <input type="checkbox" name="criar_login" value="1" id="criarLogin" {% if cadastro.usuario_id %}checked{% endif %}>
-                    <span>Esta pessoa também entra no painel da escola (secretaria, professor, admin). Funcionário que só recebe contra-cheque deixa desmarcado.</span>
+                    <span>Esta pessoa também entra no painel da escola. Quem só recebe contra-cheque deixa desmarcado. Enviar e-mail nunca usa senha SMTP do funcionário: sai pelo e-mail da escola com o nome de quem enviou.</span>
                 </label>
                 <div class="form-grid" id="blocoLogin" {% if not cadastro.usuario_id %}hidden{% endif %}>
                     <div class="form-group">
