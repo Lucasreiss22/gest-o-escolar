@@ -34,7 +34,7 @@
         {% if admin_folha %}
         <div class="card-box" style="margin-bottom:16px;">
             <p><strong>{{ escola }}</strong> · {{ mes_label }}</p>
-            <p class="hint">Cada colaborador com contrato vigente neste mês recebe um contra-cheque. No dia cadastrado, o sistema gera o holerite; use o botão para enviar todos por e-mail.</p>
+            <p class="hint">O contra-cheque vai para o e-mail do colaborador. O envio sai pelo sistema, com o nome de quem clicou em enviar. Confira também a pasta Spam.</p>
             <form action="{{ url_for('enviar_contracheques_mes') }}" method="POST" class="acoes">
                 <input type="hidden" name="mes" value="{{ mes_atual }}">
                 <button class="btn btn-verde" type="submit">Enviar todos os contra-cheques do mês</button>
@@ -43,6 +43,7 @@
                 <thead>
                     <tr>
                         <th>Colaborador</th>
+                        <th>E-mail</th>
                         <th>Cargo</th>
                         <th>Dia</th>
                         <th>Líquido</th>
@@ -53,6 +54,7 @@
                     {% for row in itens %}
                     <tr>
                         <td>{{ row.nome_completo }}</td>
+                        <td>{{ row.email or '—' }}</td>
                         <td>{{ row.cargo }}</td>
                         <td>{{ row.dia_pagamento }}</td>
                         <td>R$ {{ "%.2f"|format(row.liquido) }}</td>
@@ -67,7 +69,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5">Nenhum contrato vigente neste mês.</td></tr>
+                    <tr><td colspan="6">Nenhum contrato vigente neste mês.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

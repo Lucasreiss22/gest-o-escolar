@@ -21,6 +21,7 @@ from email_envio import (
     exigencia_email,
     enviar_via_gmail_api,
     diagnostico_envio,
+    normalizar_email,
 )
 from psycopg2.extras import RealDictCursor
 from alunos import cadastrar_aluno, listar_alunos, atualizar_responsavel, deletar_responsavel
@@ -843,19 +844,53 @@ def _montar_pdf_contracheque(escola, mes_filtro, func, regime):
     return item, buffer
 
 
-def _enviar_contracheque_pessoa(func, regime, mes_filtro, escola):
-    dest = (func.get("email") or "").strip()
-    if not email_valido(dest):
-        raise RuntimeError(f"{func.get('nome_completo') or 'Colaborador'} sem e-mail válido.")
+def _emails_colaborador(func, cursor=None):
+    destinos = []
+    vistos = set()
+    candidatos = [func.get("email")]
+    if cursor:
+        uid = func.get("usuario_id")
+        if uid:
+            cursor.execute("SELECT email FROM usuarios WHERE id = %s", (uid,))
+            row = cursor.fetchone() or {}
+            candidatos.append(row.get("email") if isinstance(row, dict) else None)
+        email_func = (func.get("email") or "").strip()
+        if email_func:
+            cursor.execute(
+                "SELECT email FROM usuarios WHERE LOWER(email) = LOWER(%s) LIMIT 1",
+                (email_func,),
+            )
+            row = cursor.fetchone() or {}
+            candidatos.append(row.get("email") if isinstance(row, dict) else None)
+    for bruto in candidatos:
+        if email_valido(bruto):
+            n = normalizar_email(bruto)
+            if n not in vistos:
+                vistos.add(n)
+                destinos.append(n)
+    return destinos
+
+
+def _enviar_contracheque_pessoa(func, regime, mes_filtro, escola, destinos=None):
+    destinos = list(destinos or [])
+    if not destinos:
+        destinos = _emails_colaborador(func)
+    if not destinos:
+        raise RuntimeError(f"{func.get('nome_completo') or 'Colaborador'} sem e-mail válido para receber o contra-cheque.")
     item, buffer = _montar_pdf_contracheque(escola, mes_filtro, func, regime)
     nome_arq = f"contracheque_{func.get('id')}_{mes_filtro}.pdf"
+    nome = item.get("nome_completo") or func.get("nome_completo") or "colaborador"
     enviar_email(
-        [dest],
-        f"Contra-cheque {nome_mes_extenso(mes_filtro)} — {item.get('nome_completo')}",
-        "Segue em anexo o contra-cheque do período.",
+        destinos,
+        f"Contra-cheque {nome_mes_extenso(mes_filtro)} — {nome}",
+        (
+            f"Olá, {nome}.\n\n"
+            f"Segue em anexo o contra-cheque de {nome_mes_extenso(mes_filtro)}.\n"
+            f"Escola: {escola}.\n"
+        ),
         [{"nome": nome_arq, "dados": bytes_pdf(buffer)}],
     )
-    return dest
+    return destinos
 
 
 def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
@@ -868,8 +903,15 @@ def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
     enviados = gerados = 0
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT nome_escola, regime_tributario FROM configuracoes WHERE id = 1")
+            cursor.execute("SELECT nome_escola, regime_tributario, email_contato FROM configuracoes WHERE id = 1")
             cfg = cursor.fetchone() or {}
+            if cfg.get("email_contato"):
+                try:
+                    from flask import has_request_context, session as sess
+                    if has_request_context():
+                        sess["escola_email_contato"] = cfg["email_contato"]
+                except Exception:
+                    pass
             regime = cfg.get("regime_tributario") or "simples_nacional"
             escola = cfg.get("nome_escola") or "Gestão Escolar"
             cursor.execute("SELECT * FROM funcionarios WHERE COALESCE(ativo, TRUE) = TRUE")
@@ -894,7 +936,8 @@ def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
                 if cursor.fetchone():
                     continue
                 try:
-                    _enviar_contracheque_pessoa(dados, regime, competencia, escola)
+                    destinos = _emails_colaborador(dados, cursor)
+                    _enviar_contracheque_pessoa(dados, regime, competencia, escola, destinos=destinos)
                     cursor.execute(
                         """
                         INSERT INTO folha_envios (funcionario_id, competencia)
@@ -1046,6 +1089,8 @@ def _entrar_escola(usuario, email, escola, origem_plataforma=False, plataforma_e
     session["escola_db"] = escola["db_nome"]
     session["escola_id"] = escola["id"]
     session["escola_nome"] = escola["nome"]
+    session["escola_email"] = (escola.get("email_admin") or "").strip()
+    session["escola_email_contato"] = (escola.get("email_admin") or "").strip()
     session["super_admin"] = False
     if origem_plataforma:
         session["origem_plataforma"] = True
@@ -4621,8 +4666,10 @@ def enviar_contracheques_mes():
     falhas = []
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT nome_escola, regime_tributario FROM configuracoes WHERE id = 1;")
+            cursor.execute("SELECT nome_escola, regime_tributario, email_contato FROM configuracoes WHERE id = 1;")
             cfg = cursor.fetchone() or {}
+            if cfg.get("email_contato"):
+                session["escola_email_contato"] = cfg["email_contato"]
             regime = cfg.get("regime_tributario") or "simples_nacional"
             escola = cfg.get("nome_escola") or "Gestão Escolar"
             itens, _totais = montar_folha_contratos(cursor, regime, mes_filtro)
@@ -4632,7 +4679,8 @@ def enviar_contracheques_mes():
                 if not func:
                     continue
                 try:
-                    dest = _enviar_contracheque_pessoa(dict(func), regime, mes_filtro, escola)
+                    destinos = _emails_colaborador(dict(func), cursor)
+                    dest = _enviar_contracheque_pessoa(dict(func), regime, mes_filtro, escola, destinos=destinos)
                     _registrar_folha_item(cursor, item, mes_filtro)
                     cursor.execute(
                         """
@@ -4692,16 +4740,14 @@ def pdf_contracheque_rota():
             buffer = pdf_contracheque(cfg.get("nome_escola") or "Gestão Escolar", nome_mes_extenso(mes_filtro), item)
         nome_arq = f"contracheque_{fid}_{mes_filtro}.pdf"
         if request.args.get("enviar") or request.method == "POST":
-            destinos = []
-            if email_valido((func or {}).get("email")):
-                destinos.append(func["email"])
+            destinos = _emails_colaborador(func, cursor)
             if not destinos:
                 flash("O colaborador não tem e-mail válido cadastrado.", "danger")
                 return redirect(url_for("contracheque", mes=mes_filtro))
             enviar_email(
                 destinos,
                 f"Contra-cheque {nome_mes_extenso(mes_filtro)}",
-                "Segue em anexo o contra-cheque do período.",
+                f"Olá, {func.get('nome_completo') or ''}.\n\nSegue em anexo o contra-cheque de {nome_mes_extenso(mes_filtro)}.\n",
                 [{"nome": nome_arq, "dados": bytes_pdf(buffer)}],
             )
             flash(f"Contra-cheque enviado para {', '.join(destinos)}.", "success")
@@ -4749,6 +4795,8 @@ def pagina_configuracoes():
                             (nome_escola, ano_letivo, email_contato, regime_tributario),
                         )
                         conexao.commit()
+                        session["escola_email_contato"] = (email_contato or "").strip()
+                        session["escola_nome"] = nome_escola or session.get("escola_nome")
                         flash("✅ Parâmetros salvos com sucesso!", "success")
                 except Exception as e:
                     conexao.rollback()
