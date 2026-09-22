@@ -38,6 +38,8 @@
         .vinculo-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; margin-bottom:16px; }
         .vinculo-lista { display:flex; flex-direction:column; gap:8px; max-height:260px; overflow:auto; }
         .vinculo-item { display:flex; justify-content:space-between; align-items:center; gap:10px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; margin:0; }
+        .vinculo-check { display:flex; align-items:center; gap:6px; font-size:.85rem; font-weight:700; white-space:nowrap; }
+        .vinculo-check input { width:18px; height:18px; }
     </style>
 </head>
 <body>
@@ -507,36 +509,47 @@
                     <p class="small text-muted mb-2">O vínculo usa o cadastro em Gestão de Alunos. Tirar da turma não apaga o aluno.</p>
                     {% if pode('pedagogico_cadastro') %}
                     <div class="d-flex flex-wrap gap-2 mb-3">
-                        <a class="btn btn-primary btn-sm" href="{{ url_for('pagina_alunos', turma_id=turma.id, novo=1, voltar=1) }}">Cadastrar aluno já nesta turma</a>
+                        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('pagina_alunos', turma_id=turma.id, novo=1, voltar=1) }}">Cadastrar aluno novo já nesta turma</a>
                     </div>
-                    <div class="mb-2">
-                        <input type="search" class="form-control form-control-sm js-filtro-aluno" placeholder="Buscar aluno cadastrado por nome ou matrícula...">
-                    </div>
-                    <div class="vinculo-lista mb-3">
-                        {% set ns_disp = namespace(qtd=0) %}
-                        {% for aluno in alunos_cadastrados %}
-                            {% if aluno.id not in ids_na_turma and (aluno.status or 'ativo')|lower != 'inativo' %}
-                            {% set ns_disp.qtd = ns_disp.qtd + 1 %}
-                            <form method="POST" class="vinculo-item" data-busca="{{ (aluno.nome_completo or '')|lower }} {{ aluno.matricula or '' }}">
-                                <input type="hidden" name="acao" value="vincular_aluno">
-                                <input type="hidden" name="turma_id" value="{{ turma.id }}">
-                                <input type="hidden" name="aluno_id" value="{{ aluno.id }}">
-                                {{ ctx_turma('alunos') }}
-                                <div>
-                                    <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}">{{ aluno.nome_completo }}</a>
-                                    <div class="small text-muted">
-                                        {% if aluno.matricula %}Mat. {{ aluno.matricula }}{% endif %}
-                                        {% if aluno.turmas_atuais %} · já em {{ aluno.turmas_atuais }}{% else %} · sem turma{% endif %}
-                                    </div>
-                                </div>
-                                <button class="btn btn-sm btn-outline-primary" type="submit">Vincular</button>
-                            </form>
+                    <form method="POST" class="js-form-vinculo">
+                        <input type="hidden" name="acao" value="vincular_aluno">
+                        <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                        {{ ctx_turma('alunos') }}
+                        <div class="mb-2">
+                            <input type="search" class="form-control form-control-sm js-filtro-aluno" placeholder="Buscar aluno cadastrado por nome ou matrícula...">
+                        </div>
+                        <label class="vinculo-item mb-2">
+                            <span><strong>Selecionar todos</strong></span>
+                            <span class="vinculo-check"><input type="checkbox" class="js-todos-alunos"> Sim</span>
+                        </label>
+                        <div class="vinculo-lista mb-3">
+                            {% set ns_disp = namespace(qtd=0) %}
+                            {% for aluno in alunos_cadastrados %}
+                                {% if aluno.id not in ids_na_turma and (aluno.status or 'ativo')|lower != 'inativo' %}
+                                {% set ns_disp.qtd = ns_disp.qtd + 1 %}
+                                <label class="vinculo-item" data-busca="{{ (aluno.nome_completo or '')|lower }} {{ aluno.matricula or '' }}">
+                                    <span>
+                                        <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" onclick="event.stopPropagation();">{{ aluno.nome_completo }}</a>
+                                        <div class="small text-muted">
+                                            {% if aluno.matricula %}Mat. {{ aluno.matricula }}{% endif %}
+                                            {% if aluno.turmas_atuais %} · já em {{ aluno.turmas_atuais }}{% else %} · sem turma{% endif %}
+                                        </div>
+                                    </span>
+                                    <span class="vinculo-check">
+                                        <input class="js-aluno-check" type="checkbox" name="aluno_id" value="{{ aluno.id }}">
+                                        Sim
+                                    </span>
+                                </label>
+                                {% endif %}
+                            {% endfor %}
+                            {% if ns_disp.qtd == 0 %}
+                            <p class="small text-muted mb-0">Nenhum aluno cadastrado disponível. Cadastre em Gestão de Alunos ou todos já estão nesta turma.</p>
                             {% endif %}
-                        {% endfor %}
-                        {% if ns_disp.qtd == 0 %}
-                        <p class="small text-muted mb-0">Nenhum aluno cadastrado disponível. Cadastre em Gestão de Alunos ou todos já estão nesta turma.</p>
+                        </div>
+                        {% if ns_disp.qtd %}
+                        <button class="btn btn-primary" type="submit">Cadastrar selecionados na turma</button>
                         {% endif %}
-                    </div>
+                    </form>
                     {% endif %}
                 </div>
 
@@ -668,11 +681,22 @@
     document.querySelectorAll(".js-filtro-aluno").forEach(function (inp) {
         inp.addEventListener("input", function () {
             var q = (inp.value || "").toLowerCase();
-            var box = inp.closest(".vinculo-box");
-            if (!box) return;
-            box.querySelectorAll(".vinculo-item").forEach(function (el) {
+            var form = inp.closest("form") || inp.closest(".vinculo-box");
+            if (!form) return;
+            form.querySelectorAll(".vinculo-item[data-busca]").forEach(function (el) {
                 var busca = el.getAttribute("data-busca") || "";
                 el.hidden = q && busca.indexOf(q) < 0;
+            });
+        });
+    });
+    document.querySelectorAll(".js-todos-alunos").forEach(function (master) {
+        master.addEventListener("change", function () {
+            var form = master.closest("form");
+            if (!form) return;
+            form.querySelectorAll(".js-aluno-check").forEach(function (cb) {
+                var linha = cb.closest(".vinculo-item");
+                if (linha && linha.hidden) return;
+                cb.checked = master.checked;
             });
         });
     });

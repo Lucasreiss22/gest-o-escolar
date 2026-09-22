@@ -3813,16 +3813,28 @@ def pagina_pedagogico():
                         flash("✅ Turma cadastrada com sucesso!", "success")
 
                     elif acao in ["vincular_aluno", "incluir_aluno"]:
-                        cursor.execute(
-                            """
-                            INSERT INTO turma_alunos (turma_id, aluno_id)
-                            VALUES (%s, %s)
-                            ON CONFLICT (turma_id, aluno_id) DO NOTHING;
-                            """,
-                            (limpar_campo("turma_id"), limpar_campo("aluno_id")),
-                        )
+                        turma_id = limpar_campo("turma_id")
+                        ids = [item for item in request.form.getlist("aluno_id") if str(item).strip()]
+                        if not ids:
+                            unico = limpar_campo("aluno_id")
+                            if unico:
+                                ids = [unico]
+                        vinculados = 0
+                        for aid in ids:
+                            cursor.execute(
+                                """
+                                INSERT INTO turma_alunos (turma_id, aluno_id)
+                                VALUES (%s, %s)
+                                ON CONFLICT (turma_id, aluno_id) DO NOTHING;
+                                """,
+                                (turma_id, aid),
+                            )
+                            vinculados += cursor.rowcount or 0
                         conexao.commit()
-                        flash("Aluno vinculado à turma. O cadastro dele continua o mesmo.", "success")
+                        if vinculados:
+                            flash(f"{vinculados} aluno(s) cadastrado(s) nesta turma.", "success")
+                        else:
+                            flash("Marque pelo menos um aluno com Sim para cadastrar na turma.", "danger")
 
                     elif acao == "desvincular_aluno":
                         cursor.execute(
