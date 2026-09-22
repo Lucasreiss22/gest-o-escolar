@@ -95,7 +95,7 @@
                                 <td>{{ prof.disciplina or '—' }}</td>
                                 <td>{{ prof.email }}</td>
                                 <td>{{ prof.telefone if prof.telefone else '-' }}</td>
-                                <td>R$ {{ "%.2f"|format(prof.salario|float if prof.salario else 0) }}</td>
+                                <td>R$ {{ (prof.salario|float if prof.salario else 0)|moeda }}</td>
                                 <td style="text-align: center;">
                                     <a href="{{ url_for('detalhes_professor', professor_id=prof.id) }}" class="btn btn-info">Turmas</a>
                                     <a href="{{ url_for('gerenciar_usuarios', fid=prof.id) }}" class="btn btn-primary" style="padding:6px 12px; font-size:0.8rem;">Editar cadastro</a>

@@ -227,56 +227,56 @@
         <div class="resumo-grid fin-kpis">
             <a href="{{ url_for('pagina_financeiro', status='Pago', mes=mes_atual, aba='receitas') }}" class="card-resumo recebido">
                 <h4>Total Recebido</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.recebido) }}</div>
+                <div class="valor">R$ {{ (totais.recebido)|moeda }}</div>
                 <span class="hint">🔍 Filtrar Pagos</span>
             </a>
             <a href="{{ url_for('pagina_financeiro', status='Pendente', mes=mes_atual, aba='receitas') }}" class="card-resumo pendente">
                 <h4>Total Pendente</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.pendente) }}</div>
+                <div class="valor">R$ {{ (totais.pendente)|moeda }}</div>
                 <span class="hint">🔍 Filtrar Pendentes</span>
             </a>
             <a href="{{ url_for('pagina_financeiro', status='Atrasado', mes=mes_atual, aba='receitas') }}" class="card-resumo atrasado">
                 <h4>Total Atrasado</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.atrasado) }}</div>
+                <div class="valor">R$ {{ (totais.atrasado)|moeda }}</div>
                 <span class="hint">🔍 Filtrar Atrasados</span>
             </a>
             <div class="card-resumo folha" style="cursor: default;">
                 <h4>Folha e encargos</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.folha_pagamento) }}</div>
-                <span class="hint" style="color: #9b59b6;">Líquido R$ {{ "%.2f"|format(totais_folha.liquido) }} · encargos R$ {{ "%.2f"|format(totais_folha.encargos) }}</span>
+                <div class="valor">R$ {{ (totais.folha_pagamento)|moeda }}</div>
+                <span class="hint" style="color: #9b59b6;">Líquido R$ {{ (totais_folha.liquido)|moeda }} · encargos R$ {{ (totais_folha.encargos)|moeda }}</span>
             </div>
             <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
                 {% if regime_atual == 'simples_nacional' and apuracao_simples %}
                 <h4>DAS ({{ "%.2f"|format(apuracao_simples.aliquota_efetiva_pct) }}% · Anexo {{ apuracao_simples.anexo }})</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.tributos) }}</div>
+                <div class="valor">R$ {{ (totais.tributos)|moeda }}</div>
                 <span class="hint" style="color: #e67e22;">Abrir cálculo e DASN</span>
                 {% elif regime_atual == 'lucro_presumido' and apuracao_presumido %}
                 <h4>Tributos da empresa</h4>
-                <div class="valor">R$ {{ "%.2f"|format(apuracao_presumido.tributos) }}</div>
+                <div class="valor">R$ {{ (apuracao_presumido.tributos)|moeda }}</div>
                 <span class="hint" style="color: #e67e22;">Abrir apuração e DRE</span>
                 {% elif regime_atual == 'lucro_real' %}
                 <h4>PIS+COFINS (1,65% + 7,6%)</h4>
-                <div class="valor">R$ {{ "%.2f"|format(apuracao_pis_cofins.total if apuracao_pis_cofins else 0) }}</div>
+                <div class="valor">R$ {{ (apuracao_pis_cofins.total if apuracao_pis_cofins else 0)|moeda }}</div>
                 <span class="hint" style="color: #e67e22;">Abrir relatório</span>
                 {% else %}
                 <h4>Tributos</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.tributos) }}</div>
+                <div class="valor">R$ {{ (totais.tributos)|moeda }}</div>
                 <span class="hint" style="color: #e67e22;">Abrir relatório</span>
                 {% endif %}
             </a>
             <a href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='custos') }}" class="card-resumo compras">
                 <h4>Compras e custos fixos</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.custos_compras or 0) }}</div>
+                <div class="valor">R$ {{ (totais.custos_compras or 0)|moeda }}</div>
                 <span class="hint">Aluguel, energia, material, parcelados</span>
             </a>
             <a href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='custos') }}" class="card-resumo servicos">
                 <h4>Contratação de serviços</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.custos_servicos or 0) }}</div>
+                <div class="valor">R$ {{ (totais.custos_servicos or 0)|moeda }}</div>
                 <span class="hint">NFS-e e impostos não retidos</span>
             </a>
             <div class="card-resumo liquido" style="cursor: default;">
                 <h4>Caixa restante</h4>
-                <div class="valor">R$ {{ "%.2f"|format(totais.liquido) }}</div>
+                <div class="valor">R$ {{ (totais.liquido)|moeda }}</div>
                 <span class="hint" style="color: #1abc9c;">Recebido − folha − tributos − compras − serviços</span>
             </div>
         </div>
@@ -304,12 +304,12 @@
             <div class="resumo-grid" style="margin-bottom:18px;">
                 <button type="button" class="card-resumo" data-abre="dlg-rbt12">
                     <h4>RBT12</h4>
-                    <div class="valor">R$ {{ "%.2f"|format(ap.rbt12) }}</div>
+                    <div class="valor">R$ {{ (ap.rbt12)|moeda }}</div>
                     <span class="calc-link">Ver o cálculo</span>
                 </button>
                 <button type="button" class="card-resumo folha" data-abre="dlg-fs12">
                     <h4>FS12</h4>
-                    <div class="valor">R$ {{ "%.2f"|format(ap.fs12) }}</div>
+                    <div class="valor">R$ {{ (ap.fs12)|moeda }}</div>
                     <span class="calc-link">Ver o cálculo</span>
                 </button>
                 <button type="button" class="card-resumo" data-abre="dlg-fator">
@@ -319,7 +319,7 @@
                 </button>
                 <button type="button" class="card-resumo tributos" data-abre="dlg-das">
                     <h4>DAS do mês</h4>
-                    <div class="valor">R$ {{ "%.2f"|format(ap.das) }}</div>
+                    <div class="valor">R$ {{ (ap.das)|moeda }}</div>
                     <span class="calc-link">{{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% · ver o cálculo</span>
                 </button>
             </div>
@@ -335,16 +335,16 @@
                         <tr>
                             <td>{{ linha.rotulo }}</td>
                             <td>{% if linha.entra_rbt12 %}Sim{% else %}Não{% endif %}</td>
-                            <td>R$ {{ "%.2f"|format(linha.receita_bruta) }}</td>
+                            <td>R$ {{ (linha.receita_bruta)|moeda }}</td>
                         </tr>
                         {% endfor %}
                         </tbody>
                     </table>
-                    <div class="calc-passo"><strong>Soma dos meses que entram</strong>R$ {{ "%.2f"|format(ap.rbt_acumulado) }} em {{ ap.meses_atividade }} mês(es).</div>
+                    <div class="calc-passo"><strong>Soma dos meses que entram</strong>R$ {{ (ap.rbt_acumulado)|moeda }} em {{ ap.meses_atividade }} mês(es).</div>
                     {% if ap.annualizado %}
-                    <div class="calc-passo"><strong>Annualização</strong>Menos de 12 meses na janela: (R$ {{ "%.2f"|format(ap.rbt_acumulado) }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ "%.2f"|format(ap.rbt12) }}.</div>
+                    <div class="calc-passo"><strong>Annualização</strong>Menos de 12 meses na janela: (R$ {{ (ap.rbt_acumulado)|moeda }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ (ap.rbt12)|moeda }}.</div>
                     {% endif %}
-                    <div class="calc-passo"><strong>RBT12</strong>R$ {{ "%.2f"|format(ap.rbt12) }}</div>
+                    <div class="calc-passo"><strong>RBT12</strong>R$ {{ (ap.rbt12)|moeda }}</div>
                     {% include '_simples_envio.html' %}
                 </div>
             </dialog>
@@ -359,16 +359,16 @@
                         {% for linha in (quadro_simples.linhas if quadro_simples else []) if linha.entra_rbt12 %}
                         <tr>
                             <td>{{ linha.rotulo }}</td>
-                            <td>R$ {{ "%.2f"|format(linha.folha_encargos) }}</td>
+                            <td>R$ {{ (linha.folha_encargos)|moeda }}</td>
                         </tr>
                         {% endfor %}
                         </tbody>
                     </table>
-                    <div class="calc-passo"><strong>Soma da folha</strong>R$ {{ "%.2f"|format(ap.fs_acumulado) }}</div>
+                    <div class="calc-passo"><strong>Soma da folha</strong>R$ {{ (ap.fs_acumulado)|moeda }}</div>
                     {% if ap.annualizado %}
-                    <div class="calc-passo"><strong>Annualização</strong>(R$ {{ "%.2f"|format(ap.fs_acumulado) }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ "%.2f"|format(ap.fs12) }}.</div>
+                    <div class="calc-passo"><strong>Annualização</strong>(R$ {{ (ap.fs_acumulado)|moeda }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ (ap.fs12)|moeda }}.</div>
                     {% endif %}
-                    <div class="calc-passo"><strong>FS12</strong>R$ {{ "%.2f"|format(ap.fs12) }}</div>
+                    <div class="calc-passo"><strong>FS12</strong>R$ {{ (ap.fs12)|moeda }}</div>
                     {% include '_simples_envio.html' %}
                 </div>
             </dialog>
@@ -377,7 +377,7 @@
                 <div class="calc-head"><h3>Cálculo do Fator R</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
                 <div class="calc-body">
                     <div class="calc-passo"><strong>Fórmula</strong>Fator R = FS12 ÷ RBT12</div>
-                    <div class="calc-passo"><strong>Conta</strong>R$ {{ "%.2f"|format(ap.fs12) }} ÷ R$ {{ "%.2f"|format(ap.rbt12) }} = {{ "%.2f"|format(ap.fator_r_pct) }}%</div>
+                    <div class="calc-passo"><strong>Conta</strong>R$ {{ (ap.fs12)|moeda }} ÷ R$ {{ (ap.rbt12)|moeda }} = {{ "%.2f"|format(ap.fator_r_pct) }}%</div>
                     <div class="calc-passo"><strong>Anexo</strong>{% if ap.fator_r_pct >= 28 %}{{ "%.2f"|format(ap.fator_r_pct) }}% é igual ou maior que 28%, então o anexo é o III.{% else %}{{ "%.2f"|format(ap.fator_r_pct) }}% ficou abaixo de 28%, então o anexo é o V.{% endif %}</div>
                     {% include '_simples_envio.html' %}
                 </div>
@@ -386,10 +386,10 @@
             <dialog id="dlg-das" class="calc-painel">
                 <div class="calc-head"><h3>Cálculo do DAS</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
                 <div class="calc-body">
-                    <div class="calc-passo"><strong>Receita do mês de apuração</strong>R$ {{ "%.2f"|format(ap.receita_mes) }}. Este valor não entra na RBT12.</div>
-                    <div class="calc-passo"><strong>Faixa do anexo {{ ap.anexo }}</strong>Faixa {{ ap.faixa }}, alíquota nominal {{ "%.2f"|format(aliq_nom) }}%, parcela a deduzir R$ {{ "%.2f"|format(ap.parcela_deduzir) }}.</div>
-                    <div class="calc-passo"><strong>Alíquota efetiva</strong>((R$ {{ "%.2f"|format(ap.rbt12) }} × {{ "%.2f"|format(aliq_nom) }}%) − R$ {{ "%.2f"|format(ap.parcela_deduzir) }}) ÷ R$ {{ "%.2f"|format(ap.rbt12) }} = {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</div>
-                    <div class="calc-passo"><strong>DAS</strong>R$ {{ "%.2f"|format(ap.receita_mes) }} × {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% = R$ {{ "%.2f"|format(ap.das) }}</div>
+                    <div class="calc-passo"><strong>Receita do mês de apuração</strong>R$ {{ (ap.receita_mes)|moeda }}. Este valor não entra na RBT12.</div>
+                    <div class="calc-passo"><strong>Faixa do anexo {{ ap.anexo }}</strong>Faixa {{ ap.faixa }}, alíquota nominal {{ "%.2f"|format(aliq_nom) }}%, parcela a deduzir R$ {{ (ap.parcela_deduzir)|moeda }}.</div>
+                    <div class="calc-passo"><strong>Alíquota efetiva</strong>((R$ {{ (ap.rbt12)|moeda }} × {{ "%.2f"|format(aliq_nom) }}%) − R$ {{ (ap.parcela_deduzir)|moeda }}) ÷ R$ {{ (ap.rbt12)|moeda }} = {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</div>
+                    <div class="calc-passo"><strong>DAS</strong>R$ {{ (ap.receita_mes)|moeda }} × {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% = R$ {{ (ap.das)|moeda }}</div>
                     {% include '_simples_envio.html' %}
                 </div>
             </dialog>
@@ -504,30 +504,30 @@
             <summary>Tributos do mês</summary>
             <div class="fin-bloco-body">
                 {% if regime_atual == 'simples_nacional' and apuracao_simples %}
-                    <div class="fin-linha"><span>RBT12</span><strong>R$ {{ "%.2f"|format(apuracao_simples.rbt12) }}</strong></div>
-                    <div class="fin-linha"><span>FS12</span><strong>R$ {{ "%.2f"|format(apuracao_simples.fs12) }}</strong></div>
+                    <div class="fin-linha"><span>RBT12</span><strong>R$ {{ (apuracao_simples.rbt12)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>FS12</span><strong>R$ {{ (apuracao_simples.fs12)|moeda }}</strong></div>
                     <div class="fin-linha"><span>Fator R</span><strong>{{ "%.2f"|format(apuracao_simples.fator_r_pct) }}% · Anexo {{ apuracao_simples.anexo }}</strong></div>
                     <div class="fin-linha"><span>Alíquota efetiva</span><strong>{{ "%.4f"|format(apuracao_simples.aliquota_efetiva_pct) }}%</strong></div>
-                    <div class="fin-linha"><span>Receita bruta do mês</span><strong>R$ {{ "%.2f"|format(apuracao_simples.receita_mes) }}</strong></div>
-                    <div class="fin-linha"><span>DAS</span><strong>R$ {{ "%.2f"|format(apuracao_simples.das) }}</strong></div>
+                    <div class="fin-linha"><span>Receita bruta do mês</span><strong>R$ {{ (apuracao_simples.receita_mes)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>DAS</span><strong>R$ {{ (apuracao_simples.das)|moeda }}</strong></div>
                 {% elif regime_atual == 'lucro_presumido' and apuracao_presumido %}
-                    <div class="fin-linha"><span>Faturamento bruto do mês</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.receita_mes) }}</strong></div>
-                    <div class="fin-linha"><span>PIS (0,65%)</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.pis) }}</strong></div>
-                    <div class="fin-linha"><span>COFINS (3%)</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.cofins) }}</strong></div>
-                    <div class="fin-linha"><span>ISS estimado (5%)</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.iss) }}</strong></div>
-                    <div class="fin-linha"><span>Base IRPJ/CSLL (32%)</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.base_presumida) }}</strong></div>
-                    <div class="fin-linha"><span>CSLL (9% da base)</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.csll) }}</strong></div>
-                    <div class="fin-linha"><span>IRPJ (15% da base)</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.irpj) }}</strong></div>
+                    <div class="fin-linha"><span>Faturamento bruto do mês</span><strong>R$ {{ (apuracao_presumido.receita_mes)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>PIS (0,65%)</span><strong>R$ {{ (apuracao_presumido.pis)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>COFINS (3%)</span><strong>R$ {{ (apuracao_presumido.cofins)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>ISS estimado (5%)</span><strong>R$ {{ (apuracao_presumido.iss)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Base IRPJ/CSLL (32%)</span><strong>R$ {{ (apuracao_presumido.base_presumida)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>CSLL (9% da base)</span><strong>R$ {{ (apuracao_presumido.csll)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>IRPJ (15% da base)</span><strong>R$ {{ (apuracao_presumido.irpj)|moeda }}</strong></div>
                     {% if apuracao_presumido.aplica_adicional_irpj %}
-                    <div class="fin-linha"><span>Adicional IRPJ (10%)</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.irpj_adicional) }}</strong></div>
+                    <div class="fin-linha"><span>Adicional IRPJ (10%)</span><strong>R$ {{ (apuracao_presumido.irpj_adicional)|moeda }}</strong></div>
                     {% endif %}
-                    <div class="fin-linha"><span>Subtotal de tributos da empresa</span><strong>R$ {{ "%.2f"|format(apuracao_presumido.tributos) }}</strong></div>
+                    <div class="fin-linha"><span>Subtotal de tributos da empresa</span><strong>R$ {{ (apuracao_presumido.tributos)|moeda }}</strong></div>
                     <p style="font-size: 0.78rem; color: #64748b; margin-top: 8px;">Este bloco mostra só impostos sobre o faturamento. Folha, compras e serviços entram no caixa abaixo.</p>
                 {% elif apuracao_pis_cofins %}
-                    <div class="fin-linha"><span>Receita bruta do mês</span><strong>R$ {{ "%.2f"|format(apuracao_pis_cofins.receita_mes) }}</strong></div>
-                    <div class="fin-linha"><span>PIS ({{ '0,65%' if regime_atual == 'lucro_presumido' else '1,65%' }})</span><strong>R$ {{ "%.2f"|format(apuracao_pis_cofins.pis) }}</strong></div>
-                    <div class="fin-linha"><span>COFINS ({{ '3%' if regime_atual == 'lucro_presumido' else '7,6%' }})</span><strong>R$ {{ "%.2f"|format(apuracao_pis_cofins.cofins) }}</strong></div>
-                    <div class="fin-linha"><span>Total PIS + COFINS</span><strong>R$ {{ "%.2f"|format(apuracao_pis_cofins.total) }}</strong></div>
+                    <div class="fin-linha"><span>Receita bruta do mês</span><strong>R$ {{ (apuracao_pis_cofins.receita_mes)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>PIS ({{ '0,65%' if regime_atual == 'lucro_presumido' else '1,65%' }})</span><strong>R$ {{ (apuracao_pis_cofins.pis)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>COFINS ({{ '3%' if regime_atual == 'lucro_presumido' else '7,6%' }})</span><strong>R$ {{ (apuracao_pis_cofins.cofins)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Total PIS + COFINS</span><strong>R$ {{ (apuracao_pis_cofins.total)|moeda }}</strong></div>
                     {% if regime_atual == 'lucro_presumido' %}
                     <p style="font-size: 0.78rem; color: #64748b; margin-top: 8px;">Lucro Presumido cumulativo. ISS, IRPJ e CSLL não entram neste subtotal.</p>
                     {% else %}
@@ -539,12 +539,12 @@
         <details class="fin-bloco" open>
             <summary>Uso do caixa no mês</summary>
             <div class="fin-bloco-body">
-                <div class="fin-linha"><span>(+) Recebido nas mensalidades</span><strong>R$ {{ "%.2f"|format(totais.recebido) }}</strong></div>
-                <div class="fin-linha"><span>(−) Folha e encargos (custo da escola)</span><strong>R$ {{ "%.2f"|format(totais.folha_pagamento) }}</strong></div>
-                <div class="fin-linha"><span>(−) Tributos da empresa</span><strong>R$ {{ "%.2f"|format(totais.tributos) }}</strong></div>
-                <div class="fin-linha"><span>(−) Compras e custos fixos (aluguel, energia, material)</span><strong>R$ {{ "%.2f"|format(totais.custos_compras or 0) }}</strong></div>
-                <div class="fin-linha"><span>(−) Contratação de serviços (NFS-e)</span><strong>R$ {{ "%.2f"|format(totais.custos_servicos or 0) }}</strong></div>
-                <div class="fin-linha"><span>(=) Caixa restante</span><strong>R$ {{ "%.2f"|format(totais.liquido) }}</strong></div>
+                <div class="fin-linha"><span>(+) Recebido nas mensalidades</span><strong>R$ {{ (totais.recebido)|moeda }}</strong></div>
+                <div class="fin-linha"><span>(−) Folha e encargos (custo da escola)</span><strong>R$ {{ (totais.folha_pagamento)|moeda }}</strong></div>
+                <div class="fin-linha"><span>(−) Tributos da empresa</span><strong>R$ {{ (totais.tributos)|moeda }}</strong></div>
+                <div class="fin-linha"><span>(−) Compras e custos fixos (aluguel, energia, material)</span><strong>R$ {{ (totais.custos_compras or 0)|moeda }}</strong></div>
+                <div class="fin-linha"><span>(−) Contratação de serviços (NFS-e)</span><strong>R$ {{ (totais.custos_servicos or 0)|moeda }}</strong></div>
+                <div class="fin-linha"><span>(=) Caixa restante</span><strong>R$ {{ (totais.liquido)|moeda }}</strong></div>
                 <p style="font-size: 0.78rem; color: #64748b; margin-top: 8px;">Folha e encargos não se misturam com compras nem com serviços prestados por terceiros.</p>
             </div>
         </details>
@@ -555,10 +555,10 @@
             <summary>Folha por tipo de contrato</summary>
             <div class="fin-bloco-body">
                 <p class="hint" style="color:#64748b; font-size:0.85rem;">CLT: INSS progressivo e IRRF. Simples: sem INSS patronal/RAT no custo extra. Horista: horas × valor + DSR. PJ: NFS-e. RPA: INSS autônomo + patronal 20%.</p>
-                <div class="fin-linha"><span>Bruto</span><strong>R$ {{ "%.2f"|format(totais_folha.bruto) }}</strong></div>
-                <div class="fin-linha"><span>Líquido a pagar</span><strong>R$ {{ "%.2f"|format(totais_folha.liquido) }}</strong></div>
-                <div class="fin-linha"><span>Encargos da escola</span><strong>R$ {{ "%.2f"|format(totais_folha.encargos) }}</strong></div>
-                <div class="fin-linha"><span>Custo total</span><strong>R$ {{ "%.2f"|format(totais_folha.custo_escola) }}</strong></div>
+                <div class="fin-linha"><span>Bruto</span><strong>R$ {{ (totais_folha.bruto)|moeda }}</strong></div>
+                <div class="fin-linha"><span>Líquido a pagar</span><strong>R$ {{ (totais_folha.liquido)|moeda }}</strong></div>
+                <div class="fin-linha"><span>Encargos da escola</span><strong>R$ {{ (totais_folha.encargos)|moeda }}</strong></div>
+                <div class="fin-linha"><span>Custo total</span><strong>R$ {{ (totais_folha.custo_escola)|moeda }}</strong></div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;">
                     <a class="btn btn-success" href="{{ url_for('relatorio_pdf_folha', mes=mes_atual) }}">Baixar PDF da folha</a>
                     <form action="{{ url_for('relatorio_pdf_folha') }}" method="POST">
@@ -598,7 +598,7 @@
                         {% with foto_atual=prof.foto_url, foto_nome=prof.nome_completo %}{% include '_foto_mini.html' %}{% endwith %}
                         <span>
                         <strong>{{ prof.nome_completo }}</strong>
-                        <span class="fin-item-meta">{{ prof.cargo }} · {{ prof.rotulo_contrato }} · líquido R$ {{ "%.2f"|format(prof.liquido) }}</span>
+                        <span class="fin-item-meta">{{ prof.cargo }} · {{ prof.rotulo_contrato }} · líquido R$ {{ (prof.liquido)|moeda }}</span>
                         </span>
                     </a>
                     {% else %}
@@ -618,41 +618,41 @@
                     </div>
                     <div class="fin-item-meta">{{ prof.cargo }} · {{ prof.observacao }}</div>
                     {% if prof.tipo_contrato in ['clt_horista','horista'] %}
-                    <div class="fin-linha"><span>Horas × valor da aula</span><strong>R$ {{ "%.2f"|format(prof.salario) }}</strong></div>
-                    <div class="fin-linha"><span>DSR (1/6 ou equivalente do mês)</span><strong>R$ {{ "%.2f"|format(prof.dsr) }}</strong></div>
+                    <div class="fin-linha"><span>Horas × valor da aula</span><strong>R$ {{ (prof.salario)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>DSR (1/6 ou equivalente do mês)</span><strong>R$ {{ (prof.dsr)|moeda }}</strong></div>
                     {% endif %}
                     {% if prof.adicional_he_50 %}
-                    <div class="fin-linha"><span>Hora extra 50% ({{ prof.horas_extras }} h)</span><strong>R$ {{ "%.2f"|format(prof.adicional_he_50) }}</strong></div>
+                    <div class="fin-linha"><span>Hora extra 50% ({{ prof.horas_extras }} h)</span><strong>R$ {{ (prof.adicional_he_50)|moeda }}</strong></div>
                     {% endif %}
                     {% if prof.adicional_he_100 %}
-                    <div class="fin-linha"><span>Hora extra 100% ({{ prof.horas_extras_100 }} h)</span><strong>R$ {{ "%.2f"|format(prof.adicional_he_100) }}</strong></div>
+                    <div class="fin-linha"><span>Hora extra 100% ({{ prof.horas_extras_100 }} h)</span><strong>R$ {{ (prof.adicional_he_100)|moeda }}</strong></div>
                     {% endif %}
                     {% if prof.dsr_he %}
-                    <div class="fin-linha"><span>DSR sobre horas extras</span><strong>R$ {{ "%.2f"|format(prof.dsr_he) }}</strong></div>
+                    <div class="fin-linha"><span>DSR sobre horas extras</span><strong>R$ {{ (prof.dsr_he)|moeda }}</strong></div>
                     {% endif %}
-                    <div class="fin-linha"><span>Bruto</span><strong>R$ {{ "%.2f"|format(prof.bruto) }}</strong></div>
+                    <div class="fin-linha"><span>Bruto</span><strong>R$ {{ (prof.bruto)|moeda }}</strong></div>
                     {% if prof.tipo_contrato in ['pj'] %}
-                    <div class="fin-linha"><span>IRRF 1,5% (se retido)</span><strong>R$ {{ "%.2f"|format(prof.irrf) }}</strong></div>
-                    <div class="fin-linha"><span>PIS / COFINS / CSLL</span><strong>R$ {{ "%.2f"|format((prof.pis or 0) + (prof.cofins or 0) + (prof.csll or 0)) }}</strong></div>
-                    <div class="fin-linha"><span>ISS retido</span><strong>R$ {{ "%.2f"|format(prof.iss or 0) }}</strong></div>
+                    <div class="fin-linha"><span>IRRF 1,5% (se retido)</span><strong>R$ {{ (prof.irrf)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>PIS / COFINS / CSLL</span><strong>R$ {{ ((prof.pis or 0) + (prof.cofins or 0) + (prof.csll or 0))|moeda }}</strong></div>
+                    <div class="fin-linha"><span>ISS retido</span><strong>R$ {{ (prof.iss or 0)|moeda }}</strong></div>
                     {% else %}
-                    <div class="fin-linha"><span>INSS do prestador</span><strong>R$ {{ "%.2f"|format(prof.inss_funcionario) }}</strong></div>
-                    <div class="fin-linha"><span>IRRF</span><strong>R$ {{ "%.2f"|format(prof.irrf) }}</strong></div>
+                    <div class="fin-linha"><span>INSS do prestador</span><strong>R$ {{ (prof.inss_funcionario)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>IRRF</span><strong>R$ {{ (prof.irrf)|moeda }}</strong></div>
                     {% endif %}
-                    <div class="fin-linha"><span>Líquido a pagar</span><strong>R$ {{ "%.2f"|format(prof.liquido) }}</strong></div>
+                    <div class="fin-linha"><span>Líquido a pagar</span><strong>R$ {{ (prof.liquido)|moeda }}</strong></div>
                     {% if prof.tipo_contrato in ['clt_mensalista','clt_horista','horista'] %}
-                    <div class="fin-linha"><span>FGTS 8%</span><strong>R$ {{ "%.2f"|format(prof.fgts) }}</strong></div>
-                    <div class="fin-linha"><span>Provisão 13º (1/12)</span><strong>R$ {{ "%.2f"|format(prof.provisao_13) }}</strong></div>
-                    <div class="fin-linha"><span>Férias + 1/3</span><strong>R$ {{ "%.2f"|format(prof.ferias_terco) }}</strong></div>
-                    <div class="fin-linha"><span>INSS patronal</span><strong>R$ {{ "%.2f"|format(prof.inss_patronal) }}</strong></div>
-                    <div class="fin-linha"><span>RAT</span><strong>R$ {{ "%.2f"|format(prof.rat) }}</strong></div>
-                    <div class="fin-linha"><span>Sistema S</span><strong>R$ {{ "%.2f"|format(prof.sistema_s) }}</strong></div>
+                    <div class="fin-linha"><span>FGTS 8%</span><strong>R$ {{ (prof.fgts)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Provisão 13º (1/12)</span><strong>R$ {{ (prof.provisao_13)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Férias + 1/3</span><strong>R$ {{ (prof.ferias_terco)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>INSS patronal</span><strong>R$ {{ (prof.inss_patronal)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>RAT</span><strong>R$ {{ (prof.rat)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Sistema S</span><strong>R$ {{ (prof.sistema_s)|moeda }}</strong></div>
                     {% elif prof.tipo_contrato in ['rpa','autonomo','extra_pf'] %}
-                    <div class="fin-linha"><span>INSS patronal 20% (escola)</span><strong>R$ {{ "%.2f"|format(prof.inss_patronal) }}</strong></div>
-                    <div class="fin-linha"><span>RAT</span><strong>R$ {{ "%.2f"|format(prof.rat) }}</strong></div>
+                    <div class="fin-linha"><span>INSS patronal 20% (escola)</span><strong>R$ {{ (prof.inss_patronal)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>RAT</span><strong>R$ {{ (prof.rat)|moeda }}</strong></div>
                     {% endif %}
-                    <div class="fin-linha"><span>Encargos da escola</span><strong>R$ {{ "%.2f"|format(prof.encargos) }}</strong></div>
-                    <div class="fin-linha"><span>Custo da escola</span><strong>R$ {{ "%.2f"|format(prof.custo_escola) }}</strong></div>
+                    <div class="fin-linha"><span>Encargos da escola</span><strong>R$ {{ (prof.encargos)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Custo da escola</span><strong>R$ {{ (prof.custo_escola)|moeda }}</strong></div>
                     <form method="POST" class="form-grid" style="margin-top:10px;">
                         <input type="hidden" name="acao" value="atualizar_contrato">
                         <input type="hidden" name="aba" value="folha">
@@ -854,15 +854,15 @@
                                 {% if c.prestador %} · {{ c.prestador }}{% endif %}
                                 {% if c.tipo == 'parcelado' %} · {{ c.parcela_num }}/{{ c.parcelas }}{% endif %}
                                 {% if c.tipo == 'recorrente' and c.data_fim %} · até {{ c.data_fim }}{% endif %}
-                                {% if retencao > 0 %} · retenções R$ {{ "%.2f"|format(retencao) }}{% endif %}
+                                {% if retencao > 0 %} · retenções R$ {{ (retencao)|moeda }}{% endif %}
                             </span>
                         </div>
-                        <span class="valor">R$ {{ "%.2f"|format(c.valor) }}</span>
+                        <span class="valor">R$ {{ (c.valor)|moeda }}</span>
                     </div>
                     {% endfor %}
                     <div class="custo-linha custo-total">
                         <span class="nome">Total do mês</span>
-                        <span class="valor">R$ {{ "%.2f"|format(custos_mes|sum(attribute='valor')) }}</span>
+                        <span class="valor">R$ {{ (custos_mes|sum(attribute='valor'))|moeda }}</span>
                     </div>
                 </div>
                 {% else %}
@@ -983,17 +983,17 @@
             <div class="filtro-cards">
                 <a class="pago {% if status == 'Pago' %}ativo{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='receitas', busca=busca, status='' if status == 'Pago' else 'Pago') }}">
                     <div class="rotulo">Pago</div>
-                    <div class="valor">R$ {{ "%.2f"|format(totais.recebido) }}</div>
+                    <div class="valor">R$ {{ (totais.recebido)|moeda }}</div>
                     <div class="qtd">{{ totais.qtd_pago }} cobrança(s){% if status == 'Pago' %} · clique de novo para ver todas{% endif %}</div>
                 </a>
                 <a class="pendente {% if status == 'Pendente' %}ativo{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='receitas', busca=busca, status='' if status == 'Pendente' else 'Pendente') }}">
                     <div class="rotulo">Pendente</div>
-                    <div class="valor">R$ {{ "%.2f"|format(totais.pendente) }}</div>
+                    <div class="valor">R$ {{ (totais.pendente)|moeda }}</div>
                     <div class="qtd">{{ totais.qtd_pendente }} cobrança(s){% if status == 'Pendente' %} · clique de novo para ver todas{% endif %}</div>
                 </a>
                 <a class="atrasado {% if status == 'Atrasado' %}ativo{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='receitas', busca=busca, status='' if status == 'Atrasado' else 'Atrasado') }}">
                     <div class="rotulo">Atrasado</div>
-                    <div class="valor">R$ {{ "%.2f"|format(totais.atrasado) }}</div>
+                    <div class="valor">R$ {{ (totais.atrasado)|moeda }}</div>
                     <div class="qtd">{{ totais.qtd_atrasado }} cobrança(s){% if status == 'Atrasado' %} · clique de novo para ver todas{% endif %}</div>
                 </a>
             </div>
@@ -1008,7 +1008,7 @@
                                 <input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote">
                                 <strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong>
                             </label>
-                            <strong>R$ {{ "%.2f"|format(item.valor|float if item.valor else 0) }}</strong>
+                            <strong>R$ {{ (item.valor|float if item.valor else 0)|moeda }}</strong>
                     </div>
                         <div class="fin-item-meta">
                             {{ item.descricao or '-' }} · vence
@@ -1104,7 +1104,7 @@
                                 <td><input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote" aria-label="Selecionar {{ item.nome_completo or 'cobrança' }}"></td>
                                 <td><strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong></td>
                                 <td>{{ item.descricao or '-' }}</td>
-                                <td>R$ {{ "%.2f"|format(item.valor|float if item.valor else 0) }}</td>
+                                <td>R$ {{ (item.valor|float if item.valor else 0)|moeda }}</td>
                                 <td>
                                     <div style="display:flex;gap:4px;align-items:center;">
                                         <input type="date" name="data_vencimento" form="edit-{{ item.id }}" required aria-label="Data de vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:4px 6px;border:1px solid #94a3b8;border-radius:4px;font-size:0.75rem;">

@@ -52,7 +52,7 @@
                         <h2 class="mb-0 fw-bold">{{ aluno.nome_completo or aluno.nome }}</h2>
                         <small class="text-muted fs-6">
                             Matrícula: <strong>{{ aluno.matricula or 'Não gerada' }}</strong> |
-                            Mensalidade Base: <strong>R$ {{ "%.2f"|format(aluno.valor_mensalidade or aluno.mensalidade_base or 0.0) }}</strong>
+                            Mensalidade Base: <strong>R$ {{ (aluno.valor_mensalidade or aluno.mensalidade_base or 0.0)|moeda }}</strong>
                             · {{ aluno.contrato_meses or 12 }} meses
                             · {{ rotulo_turno(aluno.turnos_mensalidade) }}
                         </small>
@@ -407,7 +407,7 @@
                                     <tr>
                                         <td>#{{ cobranca_id }}</td>
                                         <td>{{ cobranca.descricao or cobranca[1] }}</td>
-                                        <td>R$ {{ "%.2f"|format(cobranca.valor or cobranca[2] or 0.0) }}</td>
+                                        <td>R$ {{ (cobranca.valor or cobranca[2] or 0.0)|moeda }}</td>
                                         <td>
                                             {% set data_venc = cobranca.data_vencimento or cobranca[3] %}
                                             <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="d-flex gap-1 align-items-center">

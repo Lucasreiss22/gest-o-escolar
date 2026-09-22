@@ -3,6 +3,8 @@
 from calendar import monthrange
 from datetime import date, datetime
 
+from tributacao import br_money
+
 # Portaria Interministerial MPS/MF — tabela 2025/2026 (progressiva)
 TETO_INSS = 8157.41
 FAIXAS_INSS = [
@@ -288,7 +290,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
                 "custo_escola": bruto,
                 "total": bruto,
                 "observacao": "PJ / NFS-e: sem FGTS, férias, 13º ou INSS de folha. Pagamento contra nota. Retenções só se parametrizadas."
-                + (f" Inclui {horas_ex:g} h extras (R$ {adicional_he:.2f})." if adicional_he else ""),
+                + (f" Inclui {horas_ex:g} h extras ({br_money(adicional_he)})." if adicional_he else ""),
             }
         )
         return resultado
@@ -315,7 +317,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
                 "custo_escola": round(bruto + encargos, 2),
                 "total": round(bruto + encargos, 2),
                 "observacao": "RPA: INSS do autônomo + IRRF. Escola recolhe INSS patronal 20% e RAT."
-                + (f" Inclui {horas_ex:g} h extras (R$ {adicional_he:.2f})." if adicional_he else ""),
+                + (f" Inclui {horas_ex:g} h extras ({br_money(adicional_he)})." if adicional_he else ""),
             }
         )
         return resultado
@@ -326,7 +328,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         valor_horas = round(valor_hora * horas, 2)
         dsr = dsr_horista(valor_horas, ano, mes)
         bruto = round(valor_horas + dsr + adicional_he + dsr_he, 2)
-        resultado["observacao"] = f"Horista: {horas:g} h × R$ {valor_hora:.2f} + DSR de R$ {dsr:.2f}."
+        resultado["observacao"] = f"Horista: {horas:g} h × {br_money(valor_hora)} + DSR de {br_money(dsr)}."
     else:
         bruto = round(_num(func.get("salario")) + adicional_he + dsr_he, 2)
         dsr = 0.0
@@ -334,13 +336,13 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
     if adicional_he or dsr_he:
         partes = []
         if he["adicional_he_50"]:
-            partes.append(f"{horas_ex:g} h a 50% × R$ {valor_he:.2f} = R$ {he['adicional_he_50']:.2f}")
+            partes.append(f"{horas_ex:g} h a 50% × {br_money(valor_he)} = {br_money(he['adicional_he_50'])}")
         if he["adicional_he_100"]:
             partes.append(
-                f"{he['horas_extras_100']:g} h a 100% × R$ {he['valor_hora_extra_100']:.2f} = R$ {he['adicional_he_100']:.2f}"
+                f"{he['horas_extras_100']:g} h a 100% × {br_money(he['valor_hora_extra_100'])} = {br_money(he['adicional_he_100'])}"
             )
         if dsr_he:
-            partes.append(f"DSR sobre extras R$ {dsr_he:.2f} (1/6, Súmula 172 TST)")
+            partes.append(f"DSR sobre extras {br_money(dsr_he)} (1/6, Súmula 172 TST)")
         resultado["observacao"] += " Horas extras CLT: " + "; ".join(partes) + "."
 
     inss_f = inss_empregado(bruto)

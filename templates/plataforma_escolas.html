@@ -58,6 +58,12 @@
                 O plano Free do Render bloqueia SMTP. Com BREVO_API_KEY o servidor envia sozinho (e-mail do admin da plataforma).
                 A escola aparece no envio pelo e-mail principal cadastrado em Configurações. Se um professor ou funcionário disparar a mensagem, o destinatário vê o nome dessa pessoa. O To é quem recebe o código, boleto ou contra-cheque.
             </p>
+            {% if diagnostico and not diagnostico.gmail_api %}
+            <p class="alert alert-warning">Hotmail, Outlook, iCloud e Yahoo recusam mensagem enviada pela Brevo com remetente @gmail.com. O Gmail ainda recebe. Conecte o Gmail da plataforma para o envio sair pelo Google.</p>
+            <p><a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Conectar Gmail</a></p>
+            {% elif diagnostico and diagnostico.gmail_api %}
+            <p class="hint">Gmail conectado. Hotmail, iCloud e Yahoo recebem pelo mesmo envio.</p>
+            {% endif %}
         </div>
 
         <div class="card-box">

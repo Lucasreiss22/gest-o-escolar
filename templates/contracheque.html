@@ -73,7 +73,7 @@
                         <td>{{ row.email or '—' }}</td>
                         <td>{{ row.cargo }}</td>
                         <td>{{ row.dia_pagamento }}</td>
-                        <td>R$ {{ "%.2f"|format(row.liquido) }}</td>
+                        <td>R$ {{ (row.liquido)|moeda }}</td>
                         <td class="acoes">
                             <a class="btn" href="{{ url_for('pdf_contracheque_rota', mes=mes_atual, funcionario_id=row.id) }}">PDF</a>
                             <form action="{{ url_for('pdf_contracheque_rota') }}" method="POST">
@@ -120,33 +120,33 @@
                         </div>
                     </div>
                     <p class="hint" id="he-preview">
-                        Hora normal: R$ {{ "%.2f"|format(item.hora_normal or 0) }}.
-                        Extra 50% automática: R$ {{ "%.2f"|format((item.hora_normal or 0) * 1.5) }}.
-                        Extra 100%: R$ {{ "%.2f"|format((item.hora_normal or 0) * 2) }}.
+                        Hora normal: R$ {{ (item.hora_normal or 0)|moeda }}.
+                        Extra 50% automática: R$ {{ ((item.hora_normal or 0) * 1.5)|moeda }}.
+                        Extra 100%: R$ {{ ((item.hora_normal or 0) * 2)|moeda }}.
                     </p>
                     <button class="btn btn-verde" type="submit">Recalcular contra-cheque</button>
                 </div>
             </form>
             {% endif %}
             {% if item.tipo_contrato in ['clt_horista','horista'] %}
-            <div class="linha"><span>Horas do mês</span><strong>R$ {{ "%.2f"|format(item.salario) }}</strong></div>
-            <div class="linha"><span>DSR das horas</span><strong>R$ {{ "%.2f"|format(item.dsr) }}</strong></div>
+            <div class="linha"><span>Horas do mês</span><strong>R$ {{ (item.salario)|moeda }}</strong></div>
+            <div class="linha"><span>DSR das horas</span><strong>R$ {{ (item.dsr)|moeda }}</strong></div>
             {% else %}
-            <div class="linha"><span>Salário</span><strong>R$ {{ "%.2f"|format(item.salario) }}</strong></div>
+            <div class="linha"><span>Salário</span><strong>R$ {{ (item.salario)|moeda }}</strong></div>
             {% endif %}
             {% if item.adicional_he_50 %}
-            <div class="linha"><span>Hora extra 50% ({{ item.horas_extras }} h × R$ {{ "%.2f"|format(item.valor_hora_extra) }})</span><strong>R$ {{ "%.2f"|format(item.adicional_he_50) }}</strong></div>
+            <div class="linha"><span>Hora extra 50% ({{ item.horas_extras }} h × R$ {{ (item.valor_hora_extra)|moeda }})</span><strong>R$ {{ (item.adicional_he_50)|moeda }}</strong></div>
             {% endif %}
             {% if item.adicional_he_100 %}
-            <div class="linha"><span>Hora extra 100% ({{ item.horas_extras_100 }} h × R$ {{ "%.2f"|format(item.valor_hora_extra_100) }})</span><strong>R$ {{ "%.2f"|format(item.adicional_he_100) }}</strong></div>
+            <div class="linha"><span>Hora extra 100% ({{ item.horas_extras_100 }} h × R$ {{ (item.valor_hora_extra_100)|moeda }})</span><strong>R$ {{ (item.adicional_he_100)|moeda }}</strong></div>
             {% endif %}
             {% if item.dsr_he %}
-            <div class="linha"><span>DSR sobre horas extras (1/6)</span><strong>R$ {{ "%.2f"|format(item.dsr_he) }}</strong></div>
+            <div class="linha"><span>DSR sobre horas extras (1/6)</span><strong>R$ {{ (item.dsr_he)|moeda }}</strong></div>
             {% endif %}
-            <div class="linha"><span>Bruto</span><strong>R$ {{ "%.2f"|format(item.bruto) }}</strong></div>
-            <div class="linha"><span>INSS</span><strong>R$ {{ "%.2f"|format(item.inss_funcionario) }}</strong></div>
-            <div class="linha"><span>IRRF</span><strong>R$ {{ "%.2f"|format(item.irrf) }}</strong></div>
-            <div class="linha"><span>Líquido</span><strong>R$ {{ "%.2f"|format(item.liquido) }}</strong></div>
+            <div class="linha"><span>Bruto</span><strong>R$ {{ (item.bruto)|moeda }}</strong></div>
+            <div class="linha"><span>INSS</span><strong>R$ {{ (item.inss_funcionario)|moeda }}</strong></div>
+            <div class="linha"><span>IRRF</span><strong>R$ {{ (item.irrf)|moeda }}</strong></div>
+            <div class="linha"><span>Líquido</span><strong>R$ {{ (item.liquido)|moeda }}</strong></div>
             {% if item.observacao %}
             <p class="hint" style="margin-top:10px;">{{ item.observacao }}</p>
             {% endif %}

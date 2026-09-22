@@ -85,37 +85,37 @@
                     <div class="encargos-grid">
                         <div class="encargo-item">
                             <span>Salário Base</span>
-                            <strong>R$ {{ "%.2f"|format(salario_base) }}</strong>
+                            <strong>R$ {{ (salario_base)|moeda }}</strong>
                         </div>
                         <div class="encargo-item">
                             <span>FGTS (8%)</span>
-                            <strong>R$ {{ "%.2f"|format(fgts) }}</strong>
+                            <strong>R$ {{ (fgts)|moeda }}</strong>
                         </div>
                         <div class="encargo-item">
                             <span>Provisão 13º Salário</span>
-                            <strong>R$ {{ "%.2f"|format(provisao_13) }}</strong>
+                            <strong>R$ {{ (provisao_13)|moeda }}</strong>
                         </div>
                         <div class="encargo-item">
                             <span>Provisão Férias + 1/3</span>
-                            <strong>R$ {{ "%.2f"|format(provisao_ferias) }}</strong>
+                            <strong>R$ {{ (provisao_ferias)|moeda }}</strong>
                         </div>
                         <div class="encargo-item">
                             <span>Reflexos FGTS</span>
-                            <strong>R$ {{ "%.2f"|format(reflexos_fgts) }}</strong>
+                            <strong>R$ {{ (reflexos_fgts)|moeda }}</strong>
                         </div>
                         
                         {% if regime_tributario == "Lucro Presumido/Real" %}
                             <div class="encargo-item">
                                 <span>INSS Patronal (CPP 20%)</span>
-                                <strong>R$ {{ "%.2f"|format(inss_patronal) }}</strong>
+                                <strong>R$ {{ (inss_patronal)|moeda }}</strong>
                             </div>
                             <div class="encargo-item">
                                 <span>RAT (1%)</span>
-                                <strong>R$ {{ "%.2f"|format(rat) }}</strong>
+                                <strong>R$ {{ (rat)|moeda }}</strong>
                             </div>
                             <div class="encargo-item">
                                 <span>Sistema S e Terceiros (5,8%)</span>
-                                <strong>R$ {{ "%.2f"|format(sistema_s) }}</strong>
+                                <strong>R$ {{ (sistema_s)|moeda }}</strong>
                             </div>
                         {% else %}
                             <div class="encargo-item" style="grid-column: span 3; background: #eef2f7; color: #555;">
@@ -125,7 +125,7 @@
                     </div>
 
                     <div class="custo-total-bar">
-                        Custo Total Mensal para a Escola: R$ {{ "%.2f"|format(custo_total) }}
+                        Custo Total Mensal para a Escola: R$ {{ (custo_total)|moeda }}
                     </div>
                 </div>
 

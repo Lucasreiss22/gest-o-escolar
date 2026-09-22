@@ -141,11 +141,16 @@ def identidade_envio():
     return nome_visivel, nome_escola, email_escola
 
 
+def _caixa_gmail(email):
+    texto = normalizar_email(email)
+    return texto.endswith("@gmail.com") or texto.endswith("@googlemail.com")
+
+
 def aviso_caixa_entrada(destinos):
     for item in destinos or []:
         email = normalizar_email(item)
         if email.endswith(_DOMINIOS_MICROSOFT) or email.endswith(
-            ("@yahoo.com", "@yahoo.com.br", "@icloud.com", "@bol.com.br", "@uol.com.br", "@terra.com.br")
+            ("@yahoo.com", "@yahoo.com.br", "@icloud.com", "@me.com", "@mac.com", "@bol.com.br", "@uol.com.br", "@terra.com.br")
         ):
             return (
                 " Se for Hotmail, Outlook, Yahoo ou similar, abra Lixo eletrônico e a aba Outros "
@@ -180,11 +185,11 @@ def emails_contato_aluno(cursor, aluno_id):
     return vistos
 
 
-def obter_access_token_gmail():
+def _credenciais_gmail_envio():
     cfg = carregar_config()
     cid = (cfg.get("GOOGLE_CLIENT_ID") or "").strip()
     secret = (cfg.get("GOOGLE_CLIENT_SECRET") or "").strip()
-    refresh = ""
+    refresh = (os.environ.get("GMAIL_REFRESH_TOKEN") or "").strip()
     remetente = (cfg.get("SMTP_FROM") or cfg.get("SMTP_USER") or "").strip()
     try:
         from database import obter_conexao
@@ -204,12 +209,22 @@ def obter_access_token_gmail():
             if isinstance(row, dict):
                 cid = cid or (row.get("google_client_id") or "").strip()
                 secret = secret or (row.get("google_client_secret") or "").strip()
-                refresh = (row.get("google_refresh_token") or "").strip()
+                refresh = refresh or (row.get("google_refresh_token") or "").strip()
                 remetente = remetente or (row.get("smtp_from") or row.get("smtp_user") or "").strip()
         except Exception:
             pass
         finally:
             conexao.close()
+    return cid, secret, refresh, remetente
+
+
+def gmail_api_pronta():
+    cid, secret, refresh, _remetente = _credenciais_gmail_envio()
+    return bool(cid and secret and refresh and "@" not in cid and "googleusercontent.com" in cid)
+
+
+def obter_access_token_gmail():
+    cid, secret, refresh, remetente = _credenciais_gmail_envio()
     if not (cid and secret and refresh) or "@" in cid:
         return None, remetente
     try:
@@ -227,9 +242,12 @@ def obter_access_token_gmail():
         req = urllib.request.Request("https://oauth2.googleapis.com/token", data=dados, method="POST")
         with urllib.request.urlopen(req, timeout=8) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-        return (payload.get("access_token") or "").strip() or None, remetente
-    except Exception:
-        return None, remetente
+        token = (payload.get("access_token") or "").strip()
+        if not token:
+            raise RuntimeError("o Google não devolveu o acesso")
+        return token, remetente
+    except Exception as e:
+        raise RuntimeError(f"Falha ao renovar o acesso do Gmail: {e}") from e
 
 
 def _chaves_api_email(cfg=None):
@@ -255,19 +273,33 @@ def diagnostico_envio():
     chaves = _chaves_api_email(cfg)
     https_ok = any(chaves.values())
     producao = ambiente_producao()
+    gmail_ok = False
+    try:
+        gmail_ok = gmail_api_pronta()
+    except Exception:
+        gmail_ok = False
+    remetente = (cfg.get("SMTP_FROM") or cfg.get("SUPER_ADMIN_EMAIL") or "").strip()
     if https_ok:
         meio = "Brevo" if chaves["brevo"] else ("Resend" if chaves["resend"] else "SendGrid")
+        detalhe = f"Envio automático por HTTPS ({meio}). O plano Free do Render bloqueia SMTP; a API não usa a porta 587."
+        if _caixa_gmail(remetente) and not gmail_ok:
+            detalhe += (
+                " Hotmail, Outlook, iCloud e Yahoo recusam esse remetente @gmail.com pela Brevo. "
+                "Conecte o Gmail para o envio sair pelo Google e chegar nesses domínios."
+            )
+        elif gmail_ok:
+            detalhe += " Gmail conectado: Hotmail, iCloud e Yahoo recebem pelo envio do Google."
         return {
             "smtp_user": bool(cfg.get("SMTP_USER")),
             "smtp_password": bool(cfg.get("SMTP_PASSWORD")),
             "smtp_host": cfg.get("SMTP_HOST") or "—",
             "smtp_port": cfg.get("SMTP_PORT") or 587,
             "producao_render": producao,
-            "gmail_api": False,
+            "gmail_api": gmail_ok,
             "resend": bool(chaves["resend"]),
             "brevo": bool(chaves["brevo"]),
             "status": "pronto",
-            "detalhe": f"Envio automático por HTTPS ({meio}). O plano Free do Render bloqueia SMTP; a API não usa a porta 587.",
+            "detalhe": detalhe,
         }
     if smtp_ok and producao:
         return {
@@ -622,11 +654,18 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
             de = de or de_api or remetente
         if not token:
             raise RuntimeError("Gmail API sem token.")
-        return enviar_via_gmail_api(token, lista, assunto, corpo, remetente=de, anexos=anexos, html=html)
+        return enviar_via_gmail_api(
+            token, lista, assunto, corpo, remetente=de, anexos=anexos, html=html,
+            nome_remetente=nome_visivel, responder_para=responder_para,
+        )
 
     ordem = []
     if producao and not _forcar_smtp():
-        if not https_ok:
+        if _caixa_gmail(remetente):
+            ordem.append(("Gmail API", tentar_gmail_api))
+        if https_ok:
+            ordem.append(("HTTPS", tentar_https))
+        if not ordem:
             print("envio: BREVO_API_KEY ausente no processo do Render")
             raise RuntimeError(
                 "BREVO_API_KEY não está neste processo. No Render: Environment → "
@@ -634,7 +673,6 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
                 "cole a chave xkeysib-..., Save Changes e espere o deploy acabar. "
                 "Depois use Reenviar e-mail (não cadastre a escola de novo)."
             )
-        ordem.append(("HTTPS", tentar_https))
     else:
         if smtp_ok:
             ordem.append(("SMTP", tentar_smtp))
@@ -675,7 +713,7 @@ def exigencia_email(valor, rotulo="E-mail"):
     return normalizar_email(texto)
 
 
-def enviar_via_gmail_api(access_token, destinos, assunto, corpo, remetente=None, anexos=None, html=None):
+def enviar_via_gmail_api(access_token, destinos, assunto, corpo, remetente=None, anexos=None, html=None, nome_remetente=None, responder_para=None):
     import base64
     import json
     import urllib.error
@@ -687,7 +725,10 @@ def enviar_via_gmail_api(access_token, destinos, assunto, corpo, remetente=None,
     if not access_token:
         raise RuntimeError("Login Google sem permissão de envio.")
     de = (remetente or "").strip() or lista[0]
-    msg = _montar_mensagem(de, lista, assunto, corpo, html=html, anexos=anexos)
+    msg = _montar_mensagem(
+        de, lista, assunto, corpo, html=html, anexos=anexos,
+        nome_remetente=nome_remetente, responder_para=responder_para,
+    )
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode().rstrip("=")
     req = urllib.request.Request(
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
@@ -699,7 +740,7 @@ def enviar_via_gmail_api(access_token, destinos, assunto, corpo, remetente=None,
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=25) as resp:
             resp.read()
     except urllib.error.HTTPError as e:
         detalhe = e.read().decode("utf-8", errors="replace")

@@ -3,7 +3,7 @@
 {% set _rotulo = foto_rotulo|default('Foto') %}
 <div class="foto-widget">
     <label class="foto-circulo" data-foto-preview title="Clique para escolher a foto">
-        <img class="foto-circulo-img" alt="" {% if _atual %}src="{{ url_for('static', filename=_atual) }}"{% else %}src="" hidden{% endif %}>
+        <img class="foto-circulo-img" alt="" {% if _atual %}src="{{ _atual|url_foto }}"{% else %}src="" hidden{% endif %} onerror="this.hidden=true; var ph=this.nextElementSibling; if(ph) ph.hidden=false;">
         <span class="foto-circulo-placeholder"{% if _atual %} hidden{% endif %}></span>
         <input type="file" name="{{ _name }}" accept="image/*">
     </label>

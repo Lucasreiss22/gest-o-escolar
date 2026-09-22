@@ -1,8 +1,10 @@
 {% set _url = foto_atual|default('') %}
 {% set _nome = foto_nome|default('') %}
+{% set _src = _url|url_foto %}
 <span class="foto-mini"{% if foto_grande|default(false) %} style="width:72px;height:72px;font-size:1.45rem;"{% endif %}>
-    {% if _url %}
-    <img src="{{ url_for('static', filename=_url) }}" alt="">
+    {% if _src %}
+    <img src="{{ _src }}" alt="" onerror="this.style.display='none'; var letra=this.nextElementSibling; if(letra) letra.hidden=false;">
+    <span hidden>{{ (_nome or '?')[:1]|upper }}</span>
     {% else %}
     <span>{{ (_nome or '?')[:1]|upper }}</span>
     {% endif %}

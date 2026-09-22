@@ -246,20 +246,45 @@ def _float_form(nome, padrao=0.0):
     return _parse_moeda(request.form.get(nome), padrao)
 
 
-@app.template_filter("moeda_campo")
-def moeda_campo(valor):
+def _moeda_br(valor, vazio_se_zero=False):
     try:
         n = float(valor or 0)
     except (TypeError, ValueError):
+        n = 0.0
+    if vazio_se_zero and n <= 0:
         return ""
-    if n <= 0:
-        return ""
-    inteiro, frac = f"{n:.2f}".split(".")
+    sinal = "-" if n < 0 else ""
+    inteiro, frac = f"{abs(n):.2f}".split(".")
     grupos = []
     while inteiro:
         grupos.append(inteiro[-3:])
         inteiro = inteiro[:-3]
-    return ".".join(reversed(grupos)) + "," + frac
+    return sinal + ".".join(reversed(grupos)) + "," + frac
+
+
+@app.template_filter("moeda")
+def moeda_exibicao(valor):
+    return _moeda_br(valor)
+
+
+@app.template_filter("moeda_campo")
+def moeda_campo(valor):
+    return _moeda_br(valor, vazio_se_zero=True)
+
+
+@app.template_filter("url_foto")
+def url_foto(valor):
+    texto = (valor or "").strip().replace("\\", "/")
+    if not texto:
+        return ""
+    if texto.startswith("midia/"):
+        try:
+            return url_for("servir_midia", midia_id=int(texto.split("/", 1)[1]))
+        except (TypeError, ValueError):
+            return ""
+    if texto.startswith(("http://", "https://", "/")):
+        return texto
+    return url_for("static", filename=texto.lstrip("/"))
 
 
 @app.template_filter("hora_h")
@@ -404,11 +429,65 @@ def _salvar_foto(campo, pasta="fotos"):
     ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else "jpg"
     if ext not in {"jpg", "jpeg", "png", "webp", "gif"}:
         raise ValueError("A foto precisa ser JPG, PNG ou WEBP.")
-    destino = os.path.join(app.root_path, "static", "uploads", pasta)
-    os.makedirs(destino, exist_ok=True)
-    arquivo_nome = f"{uuid.uuid4().hex}.{ext}"
-    arquivo.save(os.path.join(destino, arquivo_nome))
-    return f"uploads/{pasta}/{arquivo_nome}"
+    dados = arquivo.read()
+    if not dados:
+        raise ValueError("A foto chegou vazia. Escolha o arquivo de novo.")
+    if len(dados) > 5 * 1024 * 1024:
+        raise ValueError("A foto precisa ter no máximo 5 MB.")
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif"}[ext]
+    from database import _aplicar_schema, _nome_banco_atual, obter_conexao_nova
+    schema = _nome_banco_atual(master=False)
+    if not schema:
+        raise ValueError("Não foi possível guardar a foto: sessão sem banco da escola.")
+    conexao = obter_conexao_nova()
+    try:
+        _aplicar_schema(conexao, schema)
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS midia (
+                    id SERIAL PRIMARY KEY,
+                    mime VARCHAR(40) NOT NULL,
+                    dados BYTEA NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                "INSERT INTO midia (mime, dados) VALUES (%s, %s) RETURNING id",
+                (mime, dados),
+            )
+            row = cursor.fetchone() or {}
+            mid = row.get("id") if isinstance(row, dict) else row[0]
+        conexao.commit()
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Não foi possível guardar a foto: {e}") from e
+    finally:
+        conexao.close()
+    return f"midia/{mid}"
+
+
+@app.route("/midia/<int:midia_id>")
+def servir_midia(midia_id):
+    if "usuario_id" not in session or not session.get("escola_db"):
+        return "", 404
+    conexao = obter_conexao()
+    if not conexao:
+        return "", 404
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute("SELECT mime, dados FROM midia WHERE id = %s", (midia_id,))
+            row = cursor.fetchone()
+    except Exception:
+        return "", 404
+    finally:
+        conexao.close()
+    if not row or not row.get("dados"):
+        return "", 404
+    resp = app.response_class(bytes(row["dados"]), mimetype=row.get("mime") or "image/jpeg")
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    return resp
 
 
 def _cpf_provisorio(chave):
@@ -1749,7 +1828,44 @@ def login_google():
 
 @app.route("/login/google/callback")
 def login_google_callback():
-    return redirect(url_for("login_conectar_gmail"))
+    code = (request.args.get("code") or "").strip()
+    if not code:
+        flash("Conexão com o Gmail cancelada.", "danger")
+        return redirect(url_for("plataforma_escolas") if session.get("super_admin") else url_for("login"))
+    if not session.get("super_admin") or request.args.get("state") != session.get("oauth_state"):
+        flash("A autorização do Gmail expirou. Entre na plataforma e clique em Conectar Gmail de novo.", "danger")
+        return redirect(url_for("login"))
+    session.pop("oauth_state", None)
+    cred = credenciais_google()
+    destino = url_for("login_google_callback", _external=True)
+    try:
+        import json
+        import urllib.parse
+        import urllib.request
+        corpo = urllib.parse.urlencode(
+            {
+                "code": code,
+                "client_id": (cred.get("client_id") or "").strip(),
+                "client_secret": (cred.get("client_secret") or "").strip(),
+                "redirect_uri": destino,
+                "grant_type": "authorization_code",
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request("https://oauth2.googleapis.com/token", data=corpo, method="POST")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        refresh = (payload.get("refresh_token") or "").strip()
+        if not refresh:
+            raise RuntimeError("O Google não devolveu a autorização permanente. Clique em Conectar Gmail de novo.")
+        salvar_google_refresh(refresh)
+    except Exception as e:
+        flash(
+            f"Não foi possível conectar o Gmail ({e}). No Google Cloud, a URI de redirecionamento tem que ser exatamente {destino}.",
+            "danger",
+        )
+        return redirect(url_for("plataforma_escolas"))
+    flash("Gmail conectado. Hotmail, iCloud e Yahoo passam a receber pelo envio do Google.", "success")
+    return redirect(url_for("plataforma_escolas"))
 
 
 @app.route("/login/codigo", methods=["GET", "POST"])
@@ -1928,8 +2044,33 @@ def _avisar_envio(escola, ok, erro, acao="cadastro"):
 def plataforma_autorizar_gmail():
     if not session.get("super_admin"):
         return redirect(url_for("login"))
-    flash("O envio usa SMTP_USER e SMTP_PASSWORD do Render. Não é preciso entrar no Google.", "success")
-    return redirect(url_for("plataforma_escolas"))
+    cred = credenciais_google()
+    cid = (cred.get("client_id") or "").strip()
+    secret = (cred.get("client_secret") or "").strip()
+    if "@" in cid or "googleusercontent.com" not in cid or not secret:
+        flash(
+            "Hotmail, iCloud e Yahoo não recebem o e-mail enquanto o remetente for @gmail.com pela Brevo. "
+            "No Render, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET e clique em Conectar Gmail de novo.",
+            "danger",
+        )
+        return redirect(url_for("plataforma_escolas"))
+    estado = secrets.token_urlsafe(24)
+    session["oauth_state"] = estado
+    from urllib.parse import urlencode
+    destino = url_for("login_google_callback", _external=True)
+    query = urlencode(
+        {
+            "client_id": cid,
+            "redirect_uri": destino,
+            "response_type": "code",
+            "scope": "https://www.googleapis.com/auth/gmail.send",
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": estado,
+            "login_hint": email_super_admin(),
+        }
+    )
+    return redirect("https://accounts.google.com/o/oauth2/v2/auth?" + query)
 
 
 @app.route("/plataforma/escolas", methods=["GET", "POST"])

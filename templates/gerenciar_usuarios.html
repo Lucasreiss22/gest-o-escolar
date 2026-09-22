@@ -340,32 +340,32 @@
                     <strong>Simulação no regime {{ regime_folha }} — {{ preview_folha.rotulo_contrato }}</strong>
                     <p style="margin: 6px 0 8px;">{{ preview_folha.observacao }}</p>
                     {% if preview_folha.tipo_contrato in ['clt_horista','horista'] %}
-                    <div class="fin-linha-mini"><span>Horas × valor</span><strong>R$ {{ "%.2f"|format(preview_folha.salario) }}</strong></div>
-                    <div class="fin-linha-mini"><span>DSR</span><strong>R$ {{ "%.2f"|format(preview_folha.dsr) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Horas × valor</span><strong>R$ {{ (preview_folha.salario)|moeda }}</strong></div>
+                    <div class="fin-linha-mini"><span>DSR</span><strong>R$ {{ (preview_folha.dsr)|moeda }}</strong></div>
                     {% endif %}
                     {% if preview_folha.adicional_he %}
-                    <div class="fin-linha-mini"><span>Horas extras</span><strong>R$ {{ "%.2f"|format(preview_folha.adicional_he) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Horas extras</span><strong>R$ {{ (preview_folha.adicional_he)|moeda }}</strong></div>
                     {% endif %}
-                    <div class="fin-linha-mini"><span>Bruto</span><strong>R$ {{ "%.2f"|format(preview_folha.bruto) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Bruto</span><strong>R$ {{ (preview_folha.bruto)|moeda }}</strong></div>
                     {% if preview_folha.tipo_contrato not in ['pj'] %}
-                    <div class="fin-linha-mini"><span>INSS do prestador</span><strong>R$ {{ "%.2f"|format(preview_folha.inss_funcionario) }}</strong></div>
-                    <div class="fin-linha-mini"><span>IRRF</span><strong>R$ {{ "%.2f"|format(preview_folha.irrf) }}</strong></div>
+                    <div class="fin-linha-mini"><span>INSS do prestador</span><strong>R$ {{ (preview_folha.inss_funcionario)|moeda }}</strong></div>
+                    <div class="fin-linha-mini"><span>IRRF</span><strong>R$ {{ (preview_folha.irrf)|moeda }}</strong></div>
                     {% else %}
-                    <div class="fin-linha-mini"><span>Retenções (IRRF/PIS/COFINS/CSLL/ISS)</span><strong>R$ {{ "%.2f"|format(preview_folha.descontos) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Retenções (IRRF/PIS/COFINS/CSLL/ISS)</span><strong>R$ {{ (preview_folha.descontos)|moeda }}</strong></div>
                     {% endif %}
-                    <div class="fin-linha-mini"><span>Líquido a pagar</span><strong>R$ {{ "%.2f"|format(preview_folha.liquido) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Líquido a pagar</span><strong>R$ {{ (preview_folha.liquido)|moeda }}</strong></div>
                     {% if preview_folha.tipo_contrato in ['clt_mensalista','clt_horista','horista'] %}
-                    <div class="fin-linha-mini"><span>FGTS 8%</span><strong>R$ {{ "%.2f"|format(preview_folha.fgts) }}</strong></div>
-                    <div class="fin-linha-mini"><span>Provisão 13º</span><strong>R$ {{ "%.2f"|format(preview_folha.provisao_13) }}</strong></div>
-                    <div class="fin-linha-mini"><span>Férias + 1/3</span><strong>R$ {{ "%.2f"|format(preview_folha.ferias_terco) }}</strong></div>
-                    <div class="fin-linha-mini"><span>INSS patronal</span><strong>R$ {{ "%.2f"|format(preview_folha.inss_patronal) }}</strong></div>
-                    <div class="fin-linha-mini"><span>RAT</span><strong>R$ {{ "%.2f"|format(preview_folha.rat) }}</strong></div>
-                    <div class="fin-linha-mini"><span>Sistema S</span><strong>R$ {{ "%.2f"|format(preview_folha.sistema_s) }}</strong></div>
+                    <div class="fin-linha-mini"><span>FGTS 8%</span><strong>R$ {{ (preview_folha.fgts)|moeda }}</strong></div>
+                    <div class="fin-linha-mini"><span>Provisão 13º</span><strong>R$ {{ (preview_folha.provisao_13)|moeda }}</strong></div>
+                    <div class="fin-linha-mini"><span>Férias + 1/3</span><strong>R$ {{ (preview_folha.ferias_terco)|moeda }}</strong></div>
+                    <div class="fin-linha-mini"><span>INSS patronal</span><strong>R$ {{ (preview_folha.inss_patronal)|moeda }}</strong></div>
+                    <div class="fin-linha-mini"><span>RAT</span><strong>R$ {{ (preview_folha.rat)|moeda }}</strong></div>
+                    <div class="fin-linha-mini"><span>Sistema S</span><strong>R$ {{ (preview_folha.sistema_s)|moeda }}</strong></div>
                     {% elif preview_folha.tipo_contrato in ['rpa','autonomo','extra_pf'] %}
-                    <div class="fin-linha-mini"><span>INSS patronal 20%</span><strong>R$ {{ "%.2f"|format(preview_folha.inss_patronal) }}</strong></div>
-                    <div class="fin-linha-mini"><span>RAT</span><strong>R$ {{ "%.2f"|format(preview_folha.rat) }}</strong></div>
+                    <div class="fin-linha-mini"><span>INSS patronal 20%</span><strong>R$ {{ (preview_folha.inss_patronal)|moeda }}</strong></div>
+                    <div class="fin-linha-mini"><span>RAT</span><strong>R$ {{ (preview_folha.rat)|moeda }}</strong></div>
                     {% endif %}
-                    <div class="fin-linha-mini"><span>Custo da escola</span><strong>R$ {{ "%.2f"|format(preview_folha.custo_escola) }}</strong></div>
+                    <div class="fin-linha-mini"><span>Custo da escola</span><strong>R$ {{ (preview_folha.custo_escola)|moeda }}</strong></div>
                 </div>
                 {% endif %}
 
