@@ -246,7 +246,7 @@
                             <option value="">Todos</option>
                             <option value="Manhã" {% if filtro_turno == 'Manhã' %}selected{% endif %}>Manhã</option>
                             <option value="Tarde" {% if filtro_turno == 'Tarde' %}selected{% endif %}>Tarde</option>
-                            <option value="Integral" {% if filtro_turno == 'Integral' %}selected{% endif %}>Integral</option>
+                            <option value="Híbrido" {% if filtro_turno in ['Híbrido', 'Integral'] %}selected{% endif %}>Híbrido (manhã e tarde)</option>
                             <option value="Noite" {% if filtro_turno == 'Noite' %}selected{% endif %}>Noite</option>
                         </select>
                     </div>
@@ -278,7 +278,7 @@
                                 <option value="">Selecione...</option>
                                 <option value="Manhã">Manhã</option>
                                 <option value="Tarde">Tarde</option>
-                                <option value="Integral">Integral</option>
+                                <option value="Híbrido">Híbrido (manhã e tarde)</option>
                                 <option value="Noite">Noite</option>
                             </select>
                         </div>

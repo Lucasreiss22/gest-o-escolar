@@ -277,10 +277,6 @@
                     </div>
 
                     <div class="form-group" data-contratos="clt_mensalista clt_horista pj rpa">
-                        <label>Data de contratação / início</label>
-                        <input type="date" name="data_contratacao" value="{{ cadastro.data_contratacao or cadastro.data_inicio_contrato or '' }}">
-                    </div>
-                    <div class="form-group" data-contratos="clt_mensalista clt_horista pj rpa">
                         <label>Início do contrato</label>
                         <input type="date" name="data_inicio_contrato" value="{{ cadastro.data_inicio_contrato or cadastro.data_contratacao or '' }}">
                     </div>

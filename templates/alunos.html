@@ -82,9 +82,7 @@
                                     <td>{{ aluno.rua or '-' }}{% if aluno.cidade %} — {{ aluno.cidade }}{% endif %}</td>
                                     <td>
                                         {{ aluno.turma_nome or '-' }}
-                                        {% if aluno.turnos_mensalidade == 'integral' %}<div class="small text-muted">Integral</div>
-                                        {% elif aluno.turnos_mensalidade == 'tarde' %}<div class="small text-muted">Tarde</div>
-                                        {% elif aluno.turnos_mensalidade == 'manha' %}<div class="small text-muted">Manhã</div>{% endif %}
+                                        <div class="small text-muted">{{ rotulo_turno(aluno.turnos_mensalidade) }}</div>
                                     </td>
                                     <td>
                                         {% set st = (aluno.status or aluno.situacao or 'ativo') | lower %}
@@ -265,9 +263,10 @@
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Turno da mensalidade</label>
                                         <select name="turnos_mensalidade" class="form-select">
-                                            <option value="manha">Somente manhã</option>
-                                            <option value="tarde">Somente tarde</option>
-                                            <option value="integral">Turno integral (manhã e tarde)</option>
+                                            <option value="manha">Manhã</option>
+                                            <option value="tarde">Tarde</option>
+                                            <option value="hibrido">Híbrido (manhã e tarde)</option>
+                                            <option value="noite">Noite</option>
                                         </select>
                                     </div>
                                     <div class="col-md-4">

@@ -54,7 +54,7 @@
                             Matrícula: <strong>{{ aluno.matricula or 'Não gerada' }}</strong> |
                             Mensalidade Base: <strong>R$ {{ "%.2f"|format(aluno.valor_mensalidade or aluno.mensalidade_base or 0.0) }}</strong>
                             · {{ aluno.contrato_meses or 12 }} meses
-                            · {% if aluno.turnos_mensalidade == 'integral' %}manhã e tarde{% elif aluno.turnos_mensalidade == 'tarde' %}tarde{% else %}manhã{% endif %}
+                            · {{ rotulo_turno(aluno.turnos_mensalidade) }}
                         </small>
                     </div>
                 </div>
@@ -833,9 +833,10 @@
                             <div class="col-md-6">
                                 <label class="form-label small fw-bold">Turno incluso</label>
                                 <select name="turnos" class="form-select">
-                                    <option value="manha">Somente manhã</option>
-                                    <option value="tarde">Somente tarde</option>
-                                    <option value="integral">Dois turnos (manhã e tarde)</option>
+                                    <option value="manha">Manhã</option>
+                                    <option value="tarde">Tarde</option>
+                                    <option value="hibrido">Híbrido (manhã e tarde)</option>
+                                    <option value="noite">Noite</option>
                                 </select>
                             </div>
                         </div>
@@ -916,10 +917,12 @@
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label small fw-bold">Turno da mensalidade</label>
+                                {% set tn = (aluno.turnos_mensalidade or 'manha')|lower %}
                                 <select name="turnos_mensalidade" class="form-select">
-                                    <option value="manha" {% if aluno.turnos_mensalidade != 'tarde' and aluno.turnos_mensalidade != 'integral' %}selected{% endif %}>Somente manhã</option>
-                                    <option value="tarde" {% if aluno.turnos_mensalidade == 'tarde' %}selected{% endif %}>Somente tarde</option>
-                                    <option value="integral" {% if aluno.turnos_mensalidade == 'integral' %}selected{% endif %}>Turno integral (manhã e tarde)</option>
+                                    <option value="manha" {% if tn == 'manha' %}selected{% endif %}>Manhã</option>
+                                    <option value="tarde" {% if tn == 'tarde' %}selected{% endif %}>Tarde</option>
+                                    <option value="hibrido" {% if tn in ['hibrido', 'híbrido', 'integral', 'dois'] %}selected{% endif %}>Híbrido (manhã e tarde)</option>
+                                    <option value="noite" {% if tn == 'noite' %}selected{% endif %}>Noite</option>
                                 </select>
                             </div>
                             <div class="col-md-4">

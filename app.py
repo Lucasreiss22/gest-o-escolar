@@ -413,13 +413,15 @@ def _add_months(data_ref, meses):
 
 def _rotulo_turno_mensalidade(turnos):
     mapa = {
-        "manha": "somente manhã",
-        "tarde": "somente tarde",
-        "noite": "somente noite",
-        "integral": "manhã e tarde",
-        "dois": "manhã e tarde",
+        "manha": "manhã",
+        "tarde": "tarde",
+        "noite": "noite",
+        "hibrido": "híbrido (manhã e tarde)",
+        "híbrido": "híbrido (manhã e tarde)",
+        "integral": "híbrido (manhã e tarde)",
+        "dois": "híbrido (manhã e tarde)",
     }
-    return mapa.get((turnos or "manha").strip().lower(), "somente manhã")
+    return mapa.get((turnos or "manha").strip().lower(), "manhã")
 
 
 def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos, descricao_base="Mensalidade"):
@@ -486,6 +488,7 @@ def inject_acl():
         "origem_plataforma": bool(session.get("origem_plataforma")),
         "cargos_escola": CARGOS_ESCOLA,
         "cargos_escola_planos": cargos_escola_planos(),
+        "rotulo_turno": _rotulo_turno_mensalidade,
     }
 
 
@@ -2002,7 +2005,7 @@ def gerenciar_usuarios():
                         request.form.get("reter_federal") == "1",
                         request.form.get("reter_iss") == "1",
                         _float_form("aliquota_iss", 5.0),
-                        limpar_campo("data_contratacao") or inicio_contrato,
+                        inicio_contrato,
                         inicio_contrato,
                         limpar_campo("data_fim_contrato") or None,
                         dia_pagamento_valido(request.form.get("dia_pagamento")),
@@ -4221,8 +4224,11 @@ def pagina_pedagogico():
                     params_turmas.append(f"%{termo_professor}%")
 
                 if filtro_turno:
-                    query_turmas += " AND t.turno = %s"
-                    params_turmas.append(filtro_turno)
+                    if filtro_turno.lower() in {"híbrido", "hibrido", "integral"}:
+                        query_turmas += " AND t.turno IN ('Híbrido', 'híbrido', 'hibrido', 'Integral', 'integral')"
+                    else:
+                        query_turmas += " AND t.turno = %s"
+                        params_turmas.append(filtro_turno)
 
                 query_turmas += """
                     GROUP BY t.id, t.nome, t.ano_letivo, t.turno, f.nome_completo
