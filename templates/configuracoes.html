@@ -56,7 +56,7 @@
                         <input type="number" name="ano_letivo" value="{{ config.ano_letivo or '2026' }}">
                     </div>
                     <div class="form-group">
-                        <label>E-mail de Contato / Suporte</label>
+                        <label>E-mail de contato da escola (remetente / resposta)</label>
                         <input type="email" name="email_contato" value="{{ config.email_contato or 'contato@escola.com' }}">
                     </div>
                     <div class="form-group" style="grid-column: span 2;">
@@ -68,40 +68,13 @@
                         </select>
                     </div>
                 </div>
-                <h3 class="card-title" style="margin-top:18px;">Envio de e-mail (boletos, boletim, contra-cheque)</h3>
-                <p style="font-size:0.85rem;color:#64748b;margin-bottom:12px;">
-                    Use um e-mail real da escola. No Gmail, ative a verificação em duas etapas e crie uma
-                    <strong>senha de app</strong> (não use a senha normal da conta).
+                <h3 class="card-title" style="margin-top:18px;">Como o e-mail sai</h3>
+                <p style="font-size:0.85rem;color:#64748b;margin-bottom:12px;line-height:1.45;">
+                    A senha SMTP fica só no administrador da plataforma (Brevo / e-mail do sistema).
+                    Esta escola <strong>não precisa de senha de app</strong>.
+                    O servidor envia; o destinatário vê o <strong>nome desta escola</strong> e, ao responder, a mensagem vai para o
+                    <strong>e-mail de contato</strong> acima. O To é o aluno, responsável ou colaborador.
                 </p>
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>Servidor SMTP</label>
-                        <input type="text" name="smtp_host" value="{{ config.smtp_host or 'smtp.gmail.com' }}" placeholder="smtp.gmail.com">
-                    </div>
-                    <div class="form-group">
-                        <label>Porta</label>
-                        <input type="number" name="smtp_port" value="{{ config.smtp_port or 587 }}">
-                    </div>
-                    <div class="form-group">
-                        <label>Usuário SMTP (e-mail de envio)</label>
-                        <input type="email" name="smtp_user" value="{{ config.smtp_user or '' }}" placeholder="escola@gmail.com">
-                    </div>
-                    <div class="form-group">
-                        <label>Senha SMTP / senha de app</label>
-                        <input type="password" name="smtp_password" placeholder="{% if config.smtp_password %}deixe em branco para manter{% else %}senha de app{% endif %}">
-                    </div>
-                    <div class="form-group">
-                        <label>Remetente (From)</label>
-                        <input type="email" name="smtp_from" value="{{ config.smtp_from or config.smtp_user or config.email_contato or '' }}">
-                    </div>
-                    <div class="form-group">
-                        <label>TLS</label>
-                        <select name="smtp_tls">
-                            <option value="1" {% if config.smtp_tls is not defined or config.smtp_tls %}selected{% endif %}>Sim (porta 587)</option>
-                            <option value="0" {% if config.smtp_tls is defined and not config.smtp_tls %}selected{% endif %}>Não</option>
-                        </select>
-                    </div>
-                </div>
                 <button type="submit" class="btn btn-primary">Salvar Parâmetros</button>
             </form>
         </div>

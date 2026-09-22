@@ -391,14 +391,20 @@ def inject_acl():
     cid = (_CFG.get("GOOGLE_CLIENT_ID") or "").strip()
     secret = (_CFG.get("GOOGLE_CLIENT_SECRET") or "").strip()
     google_login = False
-    smtp_ok = bool((_CFG.get("SMTP_PASSWORD") and _CFG.get("SMTP_USER")) or session.get("gmail_envio"))
+    smtp_ok = bool(
+        (_CFG.get("BREVO_API_KEY") or _CFG.get("RESEND_API_KEY") or _CFG.get("SENDGRID_API_KEY"))
+        or (_CFG.get("SMTP_PASSWORD") and _CFG.get("SMTP_USER"))
+        or session.get("gmail_envio")
+    )
     login_publico = (request.endpoint or "") in {
         "login", "logout", "ping", "login_google", "login_google_callback",
         "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
         "plataforma_escolas", "plataforma_autorizar_gmail", "plataforma_voltar",
     }
     if not smtp_ok and not login_publico and not session.get("super_admin"):
-        smtp_ok = (not ambiente_producao()) and bool(_CFG.get("SMTP_PASSWORD") and _CFG.get("SMTP_USER"))
+        smtp_ok = bool(_CFG.get("BREVO_API_KEY")) or (
+            (not ambiente_producao()) and bool(_CFG.get("SMTP_PASSWORD") and _CFG.get("SMTP_USER"))
+        )
     return {
         "papel_atual": papel,
         "rotulo_papel": rotulo_papel(papel),
@@ -4713,46 +4719,22 @@ def pagina_configuracoes():
             ano_letivo = request.form.get("ano_letivo")
             email_contato = request.form.get("email_contato")
             regime_tributario = request.form.get("regime_tributario")
-            smtp_host = (request.form.get("smtp_host") or "").strip()
-            smtp_port = int(request.form.get("smtp_port") or 587)
-            smtp_user = (request.form.get("smtp_user") or "").strip()
-            smtp_password = request.form.get("smtp_password") or ""
-            smtp_from = (request.form.get("smtp_from") or smtp_user or email_contato or "").strip()
-            smtp_tls = request.form.get("smtp_tls") != "0"
-            
             if conexao:
                 try:
                     with conexao.cursor() as cursor:
-                        if not smtp_password:
-                            cursor.execute("SELECT smtp_password FROM configuracoes WHERE id = 1")
-                            atual = cursor.fetchone() or {}
-                            smtp_password = (atual.get("smtp_password") if isinstance(atual, dict) else None) or ""
                         cursor.execute(
                             """
                             INSERT INTO configuracoes (
-                                id, nome_escola, ano_letivo, email_contato, regime_tributario,
-                                smtp_host, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls
+                                id, nome_escola, ano_letivo, email_contato, regime_tributario
                             )
-                            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (id) DO UPDATE 
+                            VALUES (1, %s, %s, %s, %s)
+                            ON CONFLICT (id) DO UPDATE
                             SET nome_escola = EXCLUDED.nome_escola,
                                 ano_letivo = EXCLUDED.ano_letivo,
                                 email_contato = EXCLUDED.email_contato,
-                                regime_tributario = EXCLUDED.regime_tributario,
-                                smtp_host = EXCLUDED.smtp_host,
-                                smtp_port = EXCLUDED.smtp_port,
-                                smtp_user = EXCLUDED.smtp_user,
-                                smtp_password = CASE
-                                    WHEN EXCLUDED.smtp_password = '' THEN configuracoes.smtp_password
-                                    ELSE EXCLUDED.smtp_password
-                                END,
-                                smtp_from = EXCLUDED.smtp_from,
-                                smtp_tls = EXCLUDED.smtp_tls;
+                                regime_tributario = EXCLUDED.regime_tributario;
                             """,
-                            (
-                                nome_escola, ano_letivo, email_contato, regime_tributario,
-                                smtp_host, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls,
-                            ),
+                            (nome_escola, ano_letivo, email_contato, regime_tributario),
                         )
                         conexao.commit()
                         flash("✅ Parâmetros salvos com sucesso!", "success")

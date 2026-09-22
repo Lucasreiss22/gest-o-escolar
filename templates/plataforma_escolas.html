@@ -55,8 +55,8 @@
             <p class="alert alert-danger">{{ diagnostico.detalhe }}</p>
             {% endif %}
             <p class="hint">
-                O plano Free do Render bloqueia SMTP. Com BREVO_API_KEY o servidor envia sozinho por HTTPS.
-                O código só chega no e-mail do destinatário.
+                O plano Free do Render bloqueia SMTP. Com BREVO_API_KEY o servidor envia sozinho (e-mail do admin da plataforma).
+                A escola aparece como remetente (nome + e-mail de contato para resposta). O destinatário é quem recebe o código, boleto ou contra-cheque.
             </p>
         </div>
 

@@ -40,7 +40,7 @@ def carregar_config():
     smtp_pass = (os.environ.get("SMTP_PASSWORD") or os.environ.get("MAIL_PASSWORD") or "").replace(" ", "").strip()
     super_email = (os.environ.get("SUPER_ADMIN_EMAIL") or "lucaslagoasreis@gmail.com").strip().lower()
     smtp_user = smtp_user or (super_email if smtp_pass else "")
-    smtp_from = (os.environ.get("SMTP_FROM") or os.environ.get("MAIL_DEFAULT_SENDER") or smtp_user).strip()
+    smtp_from = (os.environ.get("SMTP_FROM") or os.environ.get("MAIL_DEFAULT_SENDER") or smtp_user or super_email).strip()
     return {
         "SECRET_KEY": secret,
         "DATABASE_URL": "".join((os.environ.get("DATABASE_URL") or "").split()).replace("[", "").replace("]", ""),

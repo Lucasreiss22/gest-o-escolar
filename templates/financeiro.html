@@ -158,8 +158,7 @@
         {% endwith %}
         {% if not smtp_ok %}
         <div class="alert alert-danger">
-            O envio de mensalidade por e-mail ainda não está configurado.
-            Abra <a href="{{ url_for('pagina_configuracoes') }}">Configurações</a> e preencha o SMTP da escola (Gmail: smtp.gmail.com, porta 587 e senha de app).
+            O envio de e-mail do sistema ainda não está pronto. Isso se configura no administrador da plataforma (BREVO_API_KEY), não na senha SMTP da escola.
         </div>
         {% endif %}
 

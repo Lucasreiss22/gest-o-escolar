@@ -99,46 +99,45 @@ def carregar_smtp():
             pass
         finally:
             conexao.close()
-    if smtp_configurado(smtp):
-        return smtp
-    from database import _nome_banco_atual, obter_conexao
-    if not _nome_banco_atual(master=False):
-        return smtp
+    return smtp
+
+
+def identidade_escola():
+    """Nome e e-mail da escola para aparecer como remetente/resposta. A senha SMTP fica só no sistema."""
+    nome = "Gestão Escolar"
+    resposta = ""
     try:
+        from flask import has_request_context, session
+        if has_request_context():
+            nome = (session.get("escola_nome") or nome).strip() or nome
+    except Exception:
+        pass
+    try:
+        from database import _nome_banco_atual, obter_conexao
+        if not _nome_banco_atual(master=False):
+            return nome, resposta
         conexao = obter_conexao()
     except Exception:
-        conexao = None
+        return nome, resposta
     if not conexao:
-        return smtp
+        return nome, resposta
     try:
         with conexao.cursor() as cursor:
             cursor.execute(
-                """
-                SELECT smtp_host, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls
-                FROM configuracoes WHERE id = 1
-                """
+                "SELECT nome_escola, email_contato FROM configuracoes WHERE id = 1"
             )
             row = cursor.fetchone() or {}
-        if not isinstance(row, dict):
-            return smtp
-        if row.get("smtp_host"):
-            smtp["SMTP_HOST"] = (row.get("smtp_host") or "").strip()
-        if row.get("smtp_port"):
-            smtp["SMTP_PORT"] = int(row.get("smtp_port") or 587)
-        if row.get("smtp_user"):
-            smtp["SMTP_USER"] = (row.get("smtp_user") or "").strip()
-        if row.get("smtp_password"):
-            smtp["SMTP_PASSWORD"] = row.get("smtp_password") or ""
-        remetente = (row.get("smtp_from") or row.get("smtp_user") or "").strip()
-        if remetente:
-            smtp["SMTP_FROM"] = remetente
-        if row.get("smtp_tls") is not None:
-            smtp["SMTP_TLS"] = bool(row.get("smtp_tls"))
+        if isinstance(row, dict):
+            nome = (row.get("nome_escola") or nome or "").strip() or nome
+            resposta = (row.get("email_contato") or "").strip()
     except Exception:
         pass
     finally:
-        conexao.close()
-    return corrigir_smtp(smtp)
+        try:
+            conexao.close()
+        except Exception:
+            pass
+    return nome, resposta
 
 
 def emails_contato_aluno(cursor, aluno_id):
@@ -385,11 +384,14 @@ def _tentar_smtp_gmail(cfg, msg, timeout=None):
     raise RuntimeError("Não foi possível conectar ao Gmail para enviar o e-mail.")
 
 
-def _montar_mensagem(remetente, destinos, assunto, corpo, html=None, anexos=None):
+def _montar_mensagem(remetente, destinos, assunto, corpo, html=None, anexos=None, nome_remetente=None, responder_para=None):
+    from email.utils import formataddr
     msg = EmailMessage()
     msg["Subject"] = assunto
-    msg["From"] = remetente
+    msg["From"] = formataddr(((nome_remetente or "Gestão Escolar").strip(), remetente))
     msg["To"] = ", ".join(destinos)
+    if responder_para and email_valido(responder_para) and normalizar_email(responder_para) != normalizar_email(remetente):
+        msg["Reply-To"] = formataddr(((nome_remetente or "Gestão Escolar").strip(), responder_para))
     msg.set_content(corpo)
     if html:
         msg.add_alternative(html, subtype="html")
@@ -419,14 +421,16 @@ def _anexos_api(anexos):
     return itens
 
 
-def _enviar_via_brevo(chave, remetente, destinos, assunto, corpo, html=None, anexos=None):
+def _enviar_via_brevo(chave, remetente, destinos, assunto, corpo, html=None, anexos=None, nome_remetente=None, responder_para=None):
     import requests
     payload = {
-        "sender": {"email": remetente, "name": "Gestão Escolar"},
+        "sender": {"email": remetente, "name": (nome_remetente or "Gestão Escolar").strip()},
         "to": [{"email": item} for item in destinos],
         "subject": assunto,
         "textContent": corpo or "",
     }
+    if responder_para and email_valido(responder_para):
+        payload["replyTo"] = {"email": responder_para, "name": (nome_remetente or "Gestão Escolar").strip()}
     if html:
         payload["htmlContent"] = html
     arquivos = _anexos_api(anexos)
@@ -443,14 +447,17 @@ def _enviar_via_brevo(chave, remetente, destinos, assunto, corpo, html=None, ane
     return destinos
 
 
-def _enviar_via_resend(chave, remetente, destinos, assunto, corpo, html=None, anexos=None):
+def _enviar_via_resend(chave, remetente, destinos, assunto, corpo, html=None, anexos=None, nome_remetente=None, responder_para=None):
     import requests
+    nome = (nome_remetente or "Gestão Escolar").strip()
     payload = {
-        "from": f"Gestão Escolar <{remetente}>",
+        "from": f"{nome} <{remetente}>",
         "to": list(destinos),
         "subject": assunto,
         "text": corpo or "",
     }
+    if responder_para and email_valido(responder_para):
+        payload["reply_to"] = responder_para
     if html:
         payload["html"] = html
     arquivos = _anexos_api(anexos)
@@ -467,17 +474,19 @@ def _enviar_via_resend(chave, remetente, destinos, assunto, corpo, html=None, an
     return destinos
 
 
-def _enviar_via_sendgrid(chave, remetente, destinos, assunto, corpo, html=None, anexos=None):
+def _enviar_via_sendgrid(chave, remetente, destinos, assunto, corpo, html=None, anexos=None, nome_remetente=None, responder_para=None):
     import requests
     conteudo = [{"type": "text/plain", "value": corpo or ""}]
     if html:
         conteudo.append({"type": "text/html", "value": html})
     payload = {
         "personalizations": [{"to": [{"email": item} for item in destinos]}],
-        "from": {"email": remetente, "name": "Gestão Escolar"},
+        "from": {"email": remetente, "name": (nome_remetente or "Gestão Escolar").strip()},
         "subject": assunto,
         "content": conteudo,
     }
+    if responder_para and email_valido(responder_para):
+        payload["reply_to"] = {"email": responder_para, "name": (nome_remetente or "Gestão Escolar").strip()}
     arquivos = _anexos_api(anexos)
     if arquivos:
         payload["attachments"] = [
@@ -500,22 +509,23 @@ def _enviar_via_sendgrid(chave, remetente, destinos, assunto, corpo, html=None, 
     return destinos
 
 
-def _enviar_via_https(remetente, destinos, assunto, corpo, html=None, anexos=None):
+def _enviar_via_https(remetente, destinos, assunto, corpo, html=None, anexos=None, nome_remetente=None, responder_para=None):
     chaves = _chaves_api_email()
     erros = []
+    extra = {"nome_remetente": nome_remetente, "responder_para": responder_para}
     if chaves["brevo"]:
         try:
-            return _enviar_via_brevo(chaves["brevo"], remetente, destinos, assunto, corpo, html=html, anexos=anexos)
+            return _enviar_via_brevo(chaves["brevo"], remetente, destinos, assunto, corpo, html=html, anexos=anexos, **extra)
         except Exception as e:
             erros.append(str(e))
     if chaves["resend"]:
         try:
-            return _enviar_via_resend(chaves["resend"], remetente, destinos, assunto, corpo, html=html, anexos=anexos)
+            return _enviar_via_resend(chaves["resend"], remetente, destinos, assunto, corpo, html=html, anexos=anexos, **extra)
         except Exception as e:
             erros.append(str(e))
     if chaves["sendgrid"]:
         try:
-            return _enviar_via_sendgrid(chaves["sendgrid"], remetente, destinos, assunto, corpo, html=html, anexos=anexos)
+            return _enviar_via_sendgrid(chaves["sendgrid"], remetente, destinos, assunto, corpo, html=html, anexos=anexos, **extra)
         except Exception as e:
             erros.append(str(e))
     if erros:
@@ -532,31 +542,31 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
         raise RuntimeError("Nenhum e-mail válido para envio. Cadastre o e-mail do responsável, professor ou destinatário.")
 
     cfg = carregar_config()
-    smtp = corrigir_smtp(
-        {
-            "SMTP_HOST": (cfg.get("SMTP_HOST") or os.environ.get("SMTP_HOST") or "smtp.gmail.com").strip(),
-            "SMTP_PORT": cfg.get("SMTP_PORT") or int(os.environ.get("SMTP_PORT") or 587),
-            "SMTP_USER": (cfg.get("SMTP_USER") or os.environ.get("SMTP_USER") or "").strip(),
-            "SMTP_PASSWORD": cfg.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD") or "",
-            "SMTP_FROM": (cfg.get("SMTP_FROM") or os.environ.get("SMTP_FROM") or cfg.get("SMTP_USER") or "").strip(),
-            "SMTP_TLS": True,
-        }
-    )
-    remetente = (smtp.get("SMTP_FROM") or smtp.get("SMTP_USER") or "").strip()
+    smtp = carregar_smtp()
+    nome_escola, email_escola = identidade_escola()
+    remetente = (smtp.get("SMTP_FROM") or smtp.get("SMTP_USER") or cfg.get("SUPER_ADMIN_EMAIL") or "").strip()
     if not remetente:
-        remetente = lista[0]
+        raise RuntimeError(
+            "Falta o e-mail remetente do sistema. No Render, cadastre SMTP_FROM (o Gmail do admin da plataforma, verificado na Brevo)."
+        )
     erros = []
     producao = ambiente_producao()
     https_ok = _tem_envio_https(cfg)
     smtp_ok = smtp_configurado(smtp)
 
     def tentar_https():
-        return _enviar_via_https(remetente, lista, assunto, corpo, html=html, anexos=anexos)
+        return _enviar_via_https(
+            remetente, lista, assunto, corpo, html=html, anexos=anexos,
+            nome_remetente=nome_escola, responder_para=email_escola,
+        )
 
     def tentar_smtp():
         if not smtp_ok:
-            raise RuntimeError("Faltam SMTP_USER e SMTP_PASSWORD.")
-        msg = _montar_mensagem(remetente, lista, assunto, corpo, html=html, anexos=anexos)
+            raise RuntimeError("Faltam SMTP_USER e SMTP_PASSWORD do sistema.")
+        msg = _montar_mensagem(
+            remetente, lista, assunto, corpo, html=html, anexos=anexos,
+            nome_remetente=nome_escola, responder_para=email_escola,
+        )
         _tentar_smtp_gmail(smtp, msg)
         return lista
 
