@@ -509,9 +509,73 @@ input, select, textarea, button {
     position: relative;
 }
 
+.endereco-correios {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 10px 12px;
+    width: 100%;
+}
+
+.endereco-correios label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+    color: #334155;
+}
+
+.endereco-correios input {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 0.9rem;
+}
+
+.endereco-correios .ec-hint {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 4px;
+}
+
+.endereco-correios .ec-cep { grid-column: span 3; }
+.endereco-correios .ec-uf { grid-column: span 2; }
+.endereco-correios .ec-cidade { grid-column: span 5; }
+.endereco-correios .ec-num { grid-column: span 2; }
+.endereco-correios .ec-rua { grid-column: span 8; }
+.endereco-correios .ec-bairro { grid-column: span 4; }
+
+.endereco-correios .ec-buscar {
+    margin-top: 8px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #1e3a5f;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.endereco-correios .ec-buscar:hover {
+    background: #eef6fc;
+    border-color: var(--accent);
+}
+
+@media (max-width: 960px) {
+    .endereco-correios .ec-cep,
+    .endereco-correios .ec-uf,
+    .endereco-correios .ec-cidade,
+    .endereco-correios .ec-num,
+    .endereco-correios .ec-rua,
+    .endereco-correios .ec-bairro {
+        grid-column: 1 / -1;
+    }
+}
+
 .cep-sugestoes {
     position: absolute;
-    z-index: 30;
+    z-index: 1080;
     left: 0;
     right: 0;
     top: 100%;

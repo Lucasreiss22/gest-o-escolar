@@ -92,10 +92,16 @@
         return String(cep || "");
     }
 
+    function montarEnderecoTexto(dados, numero) {
+        var rua = dados.logradouro || "";
+        if (numero) rua = rua ? rua + ", " + numero : numero;
+        return [rua, dados.bairro, dados.localidade ? (dados.uf ? dados.localidade + "/" + dados.uf : dados.localidade) : dados.uf, formatarCep(dados.cep)].filter(Boolean).join(" — ");
+    }
+
     function preencherEndereco(form, dados) {
         if (!form || !dados) return;
         function setar(nomes, valor) {
-            if (!valor) return;
+            if (valor === undefined || valor === null || valor === "") return;
             var el = campoForm(form, nomes);
             if (el) el.value = valor;
         }
@@ -105,10 +111,13 @@
         setar(["cidade"], dados.localidade);
         setar(["estado", "estado_uf"], dados.uf);
         if (dados.complemento) setar(["complemento"], dados.complemento);
+        var numEl = campoForm(form, ["numero"]);
+        var completo = campoForm(form, ["endereco"]);
+        if (completo) completo.value = montarEnderecoTexto(dados, numEl ? numEl.value : "");
     }
 
     function caixaSugestoes(campo) {
-        var wrap = campo.closest(".endereco-logradouro") || campo.parentElement;
+        var wrap = (campo && (campo.closest(".endereco-logradouro") || campo.closest("[data-endereco-correios]") || campo.parentElement)) || null;
         if (!wrap) return null;
         wrap.classList.add("endereco-logradouro");
         var box = wrap.querySelector(".cep-sugestoes");
@@ -128,11 +137,35 @@
         });
     }
 
+    function partesBusca(form, textoRua) {
+        var t = (textoRua || "").trim();
+        var cidadeEl = campoForm(form, ["cidade"]);
+        var ufEl = campoForm(form, ["estado", "estado_uf"]);
+        var localidade = ((cidadeEl && cidadeEl.value) || "").trim();
+        var uf = ((ufEl && ufEl.value) || "").trim().toUpperCase();
+        var logradouro = t;
+        var extra = t.match(/^(.*?)[,\-–]\s*([^,\-–/]+?)[,\-–/\s]+([A-Za-z]{2})\s*$/);
+        if (extra) {
+            logradouro = extra[1].trim();
+            localidade = extra[2].trim();
+            uf = extra[3].toUpperCase();
+        } else {
+            var soCidade = t.match(/^(.*?)[,\-–]\s*([^,\-–]+)\s*$/);
+            if (soCidade && uf.length === 2) {
+                logradouro = soCidade[1].trim();
+                localidade = soCidade[2].trim();
+            }
+        }
+        if (ufEl && uf) ufEl.value = uf;
+        return { logradouro: logradouro, localidade: localidade, uf: uf };
+    }
+
     function buscarCep(campo) {
-        if (!campo || !campo.hasAttribute("data-cep")) return;
+        if (!campo) return;
+        if (!campo.hasAttribute("data-cep") && campo.name !== "cep") return;
         var cep = (campo.value || "").replace(/\D/g, "");
         if (cep.length !== 8) return;
-        var form = campo.form || document;
+        var form = campo.form || campo.closest("form") || document;
         campo.value = formatarCep(cep);
         fetch("https://viacep.com.br/ws/" + cep + "/json/")
             .then(function (resp) { return resp.json(); })
@@ -151,22 +184,17 @@
         if (!campo) return;
         var form = campo.form || campo.closest("form") || document;
         if (form._buscaLogradouro) return;
-        var rua = campoForm(form, ["rua", "logradouro"]);
-        var cidade = campoForm(form, ["cidade"]);
-        var ufEl = campoForm(form, ["estado", "estado_uf"]);
-        var logradouro = ((rua && rua.value) || "").trim();
-        var localidade = ((cidade && cidade.value) || "").trim();
-        var uf = ((ufEl && ufEl.value) || "").trim().toUpperCase();
-        if (ufEl && uf) ufEl.value = uf;
+        var rua = campoForm(form, ["rua", "logradouro"]) || campo;
+        var partes = partesBusca(form, (rua && rua.value) || "");
         var box = caixaSugestoes(rua || campo);
-        if (uf.length !== 2 || localidade.length < 3 || logradouro.length < 3) {
+        if (partes.uf.length !== 2 || partes.localidade.length < 3 || partes.logradouro.length < 3) {
             if (forcar && box) {
                 box.hidden = false;
-                box.innerHTML = '<div class="cep-vazio">Informe UF, cidade e pelo menos 3 letras da rua para buscar nos Correios.</div>';
+                box.innerHTML = '<div class="cep-vazio">Informe UF, cidade e pelo menos 3 letras da rua para buscar nos Correios. Ex.: Rua do Imperador, Petrópolis, RJ</div>';
             }
             return;
         }
-        var url = "https://viacep.com.br/ws/" + encodeURIComponent(uf) + "/" + encodeURIComponent(localidade) + "/" + encodeURIComponent(logradouro) + "/json/";
+        var url = "https://viacep.com.br/ws/" + encodeURIComponent(partes.uf) + "/" + encodeURIComponent(partes.localidade) + "/" + encodeURIComponent(partes.logradouro) + "/json/";
         fetch(url)
             .then(function (resp) { return resp.json(); })
             .then(function (lista) {
@@ -198,13 +226,23 @@
             });
     }
 
+    function ligarTodosCep() {
+        document.querySelectorAll("input[name='cep'], input[data-cep]").forEach(function (el) {
+            el.setAttribute("data-cep", "");
+            var form = el.form || el.closest("form");
+            if (!form) return;
+            var rua = campoForm(form, ["rua", "logradouro"]);
+            if (rua) rua.setAttribute("data-logradouro", "");
+        });
+    }
+
     document.addEventListener("blur", function (event) {
         buscarCep(event.target);
     }, true);
     document.addEventListener("input", function (event) {
         var campo = event.target;
         if (!campo) return;
-        if (campo.hasAttribute("data-cep") && (campo.value || "").replace(/\D/g, "").length === 8) {
+        if ((campo.hasAttribute("data-cep") || campo.name === "cep") && (campo.value || "").replace(/\D/g, "").length === 8) {
             buscarCep(campo);
         }
         if (campo.name === "estado" || campo.name === "estado_uf") {
@@ -216,7 +254,7 @@
                 buscarLogradouro(campo, false);
             }, 450);
         }
-        if (campo.name === "cidade" || campo.name === "estado" || campo.name === "estado_uf") {
+        if (campo.name === "cidade" || campo.name === "estado" || campo.name === "estado_uf" || campo.name === "numero") {
             clearTimeout(timerLogradouro);
             timerLogradouro = setTimeout(function () {
                 var form = campo.form || document;
@@ -234,7 +272,7 @@
             buscarLogradouro(rua || botao, true);
             return;
         }
-        if (!event.target.closest(".endereco-logradouro")) {
+        if (!event.target.closest(".endereco-logradouro") && !event.target.closest("[data-endereco-correios]")) {
             fecharSugestoes(document);
         }
     });
@@ -279,9 +317,11 @@
         document.addEventListener("DOMContentLoaded", function () {
             aplicarCamposContrato();
             aplicarCamposCusto();
+            ligarTodosCep();
         });
     } else {
         aplicarCamposContrato();
         aplicarCamposCusto();
+        ligarTodosCep();
     }
 })();

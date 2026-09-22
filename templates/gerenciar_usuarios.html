@@ -195,16 +195,11 @@
                         </div>
                         <input name="formacao_curso" value="{{ cadastro.formacao or '' }}" placeholder="Curso / instituição">
                     </div>
-                    <div class="form-group"><label>CEP</label><input name="cep" data-cep value="{{ cadastro.cep or '' }}" placeholder="00000-000" autocomplete="postal-code"></div>
-                    <div class="form-group"><label>UF</label><input name="estado" maxlength="2" value="{{ cadastro.estado or '' }}"></div>
-                    <div class="form-group span2"><label>Cidade</label><input name="cidade" value="{{ cadastro.cidade or '' }}"></div>
-                    <div class="form-group span2 endereco-logradouro">
-                        <label>Rua / Logradouro (busca nos Correios)</label>
-                        <input name="rua" value="{{ cadastro.rua or '' }}" data-logradouro autocomplete="off" placeholder="Digite a rua, avenida...">
-                        <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px;width:auto;" data-buscar-logradouro>Buscar logradouro nos Correios</button>
+                    <div class="form-group" style="grid-column:1/-1;">
+                        {% with cep=cadastro.cep, rua=cadastro.rua, numero=cadastro.numero, bairro=cadastro.bairro, cidade=cadastro.cidade, estado=cadastro.estado %}
+                        {% include '_endereco_correios.html' %}
+                        {% endwith %}
                     </div>
-                    <div class="form-group"><label>Número</label><input name="numero" value="{{ cadastro.numero or '' }}"></div>
-                    <div class="form-group"><label>Bairro</label><input name="bairro" value="{{ cadastro.bairro or '' }}"></div>
                 </div>
 
                 <h4 class="card-title">Pagamento e contrato</h4>

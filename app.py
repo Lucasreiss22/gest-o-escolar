@@ -516,6 +516,29 @@ def limpar_campo(campo_nome, *args, **kwargs):
     return None
 
 
+def _endereco_do_form():
+    rua = limpar_campo("rua") or limpar_campo("logradouro")
+    numero = limpar_campo("numero")
+    bairro = limpar_campo("bairro")
+    cidade = limpar_campo("cidade")
+    estado = (limpar_campo("estado") or "")[:2] or None
+    cep = limpar_campo("cep")
+    if rua or cidade or cep:
+        partes = []
+        if rua:
+            partes.append(f"{rua}, {numero}" if numero else rua)
+        if bairro:
+            partes.append(bairro)
+        if cidade and estado:
+            partes.append(f"{cidade}/{estado}")
+        elif cidade or estado:
+            partes.append(cidade or estado)
+        if cep:
+            partes.append(cep)
+        return " — ".join(partes)
+    return limpar_campo("endereco")
+
+
 def _materias_da_turma(cursor, turma_id):
     if not turma_id:
         return []
@@ -2957,7 +2980,7 @@ def pagina_alunos():
                                         limpar_campo("cpf"),
                                         limpar_campo("telefone"),
                                         limpar_campo("vinculo") or limpar_campo("grau_parentesco"),
-                                        limpar_campo("endereco"),
+                                        _endereco_do_form(),
                                         foto_aut,
                                         aut_id,
                                         aluno_id,
@@ -3479,9 +3502,9 @@ def adicionar_autorizado(aluno_id):
                 cursor.execute("""
                     INSERT INTO pessoas_autorizadas (aluno_id, nome_completo, cpf, telefone, vinculo, endereco, foto_url)
                     VALUES (%s, %s, %s, %s, %s, %s, %s);
-                """, (aluno_id, limpar_campo("nome_completo"), limpar_campo("cpf"), 
-                      limpar_campo("telefone"), limpar_campo("vinculo") or limpar_campo("grau_parentesco"), 
-                      limpar_campo("endereco"), foto_aut))
+                """, (aluno_id, limpar_campo("nome_completo"), limpar_campo("cpf"),
+                      limpar_campo("telefone"), limpar_campo("vinculo") or limpar_campo("grau_parentesco"),
+                      _endereco_do_form(), foto_aut))
                 conexao.commit()
                 flash("✅ Pessoa autorizada cadastrada com sucesso!", "success")
         except Exception as e:

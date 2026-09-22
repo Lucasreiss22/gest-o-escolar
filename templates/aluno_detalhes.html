@@ -348,8 +348,8 @@
                                                                     {% with foto_name='foto', foto_atual=aut.foto_url, foto_rotulo='Foto de quem busca' %}{% include '_foto_circulo.html' %}{% endwith %}
                                                                 </div>
                                                                 <div class="mb-3">
-                                                                    <label class="form-label small fw-bold">Endereço Completo</label>
-                                                                    <input type="text" name="endereco" class="form-control" value="{{ aut.endereco or '' }}">
+                                                                    {% include '_endereco_correios.html' %}
+                                                                    <input type="hidden" name="endereco" value="{{ aut.endereco or '' }}">
                                                                 </div>
                                                             </div>
                                                             <div class="modal-footer justify-content-between">
@@ -779,8 +779,8 @@
                             </div>
 
                             <div class="col-md-12">
-                                <label class="form-label small fw-bold">Endereço Completo</label>
-                                <input type="text" name="endereco" class="form-control">
+                                {% include '_endereco_correios.html' %}
+                                <input type="hidden" name="endereco" value="">
                             </div>
                         </div>
                     </div>
@@ -896,32 +896,12 @@
                                 <input type="email" name="email" class="form-control" value="{{ aluno.email or '' }}" required>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label small fw-bold">CEP</label>
-                                <input type="text" name="cep" class="form-control" value="{{ aluno.cep or '' }}" placeholder="00000-000" data-cep autocomplete="postal-code">
-                            </div>
-                            <div class="col-md-4">
                                 {% with foto_name='foto', foto_atual=aluno.foto_url, foto_rotulo='Foto do aluno' %}{% include '_foto_circulo.html' %}{% endwith %}
                             </div>
-                            <div class="col-md-2">
-                                <label class="form-label small fw-bold">UF</label>
-                                <input type="text" name="estado" class="form-control" maxlength="2" value="{{ aluno.estado or '' }}">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label small fw-bold">Cidade</label>
-                                <input type="text" name="cidade" class="form-control" value="{{ aluno.cidade or '' }}">
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label small fw-bold">Número</label>
-                                <input type="text" name="numero" class="form-control" value="{{ aluno.numero or '' }}">
-                            </div>
-                            <div class="col-md-8 endereco-logradouro">
-                                <label class="form-label small fw-bold">Logradouro / Rua</label>
-                                <input type="text" name="rua" class="form-control" value="{{ aluno.rua or aluno.logradouro or '' }}" data-logradouro autocomplete="off" placeholder="Digite o logradouro para buscar nos Correios">
-                                <button type="button" class="btn btn-outline-secondary btn-sm mt-2" data-buscar-logradouro>Buscar logradouro nos Correios</button>
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label small fw-bold">Bairro</label>
-                                <input type="text" name="bairro" class="form-control" value="{{ aluno.bairro or '' }}">
+                            <div class="col-12">
+                                {% with cep=aluno.cep, rua=aluno.rua or aluno.logradouro, numero=aluno.numero, bairro=aluno.bairro, cidade=aluno.cidade, estado=aluno.estado %}
+                                {% include '_endereco_correios.html' %}
+                                {% endwith %}
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label small fw-bold">Mensalidade (R$)</label>
