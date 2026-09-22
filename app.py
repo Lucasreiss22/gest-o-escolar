@@ -1724,34 +1724,43 @@ def gerenciar_usuarios():
                     papel = normalizar_papel(limpar_campo("papel") or "funcionario")
                     uid = request.form.get("usuario_id", type=int)
                     fid = request.form.get("funcionario_id", type=int)
+                    criar_login = request.form.get("criar_login") == "1"
                     if not nome or not email:
-                        raise ValueError("Informe nome e e-mail.")
+                        raise ValueError("Informe nome e e-mail para receber contra-cheque e avisos.")
                     exigencia_email(email, "E-mail do colaborador")
-                    novo_login = not uid
-                    if novo_login and not senha:
-                        senha = secrets.token_urlsafe(9)
 
-                    if uid:
-                        if senha:
-                            cursor.execute(
-                                "UPDATE usuarios SET nome = %s, email = %s, senha = %s, papel = %s WHERE id = %s",
-                                (nome, email, senha, papel, uid),
-                            )
+                    if criar_login:
+                        novo_login = not uid
+                        if novo_login and not senha:
+                            senha = secrets.token_urlsafe(9)
+                        if uid:
+                            if senha:
+                                cursor.execute(
+                                    "UPDATE usuarios SET nome = %s, email = %s, senha = %s, papel = %s WHERE id = %s",
+                                    (nome, email, senha, papel, uid),
+                                )
+                            else:
+                                cursor.execute(
+                                    "UPDATE usuarios SET nome = %s, email = %s, papel = %s WHERE id = %s",
+                                    (nome, email, papel, uid),
+                                )
                         else:
                             cursor.execute(
-                                "UPDATE usuarios SET nome = %s, email = %s, papel = %s WHERE id = %s",
-                                (nome, email, papel, uid),
+                                """
+                                INSERT INTO usuarios (nome, email, senha, papel)
+                                VALUES (%s, %s, %s, %s)
+                                RETURNING id
+                                """,
+                                (nome, email, senha, papel),
                             )
+                            uid = cursor.fetchone()["id"]
                     else:
-                        cursor.execute(
-                            """
-                            INSERT INTO usuarios (nome, email, senha, papel)
-                            VALUES (%s, %s, %s, %s)
-                            RETURNING id
-                            """,
-                            (nome, email, senha, papel),
-                        )
-                        uid = cursor.fetchone()["id"]
+                        novo_login = False
+                        if uid:
+                            cursor.execute(
+                                "UPDATE usuarios SET nome = %s, email = %s WHERE id = %s",
+                                (nome, email, uid),
+                            )
 
                     cargo = limpar_campo("cargo") or _cargo_do_papel(papel)
                     cpf = limpar_campo("cpf") or _cpf_provisorio(email)
@@ -1762,11 +1771,12 @@ def gerenciar_usuarios():
                         cursor.execute(
                             """
                             SELECT id FROM funcionarios
-                            WHERE usuario_id = %s OR LOWER(COALESCE(email, '')) = LOWER(%s)
+                            WHERE (%s IS NOT NULL AND usuario_id = %s)
+                               OR LOWER(COALESCE(email, '')) = LOWER(%s)
                             ORDER BY CASE WHEN usuario_id = %s THEN 0 ELSE 1 END
                             LIMIT 1
                             """,
-                            (uid, email, uid),
+                            (uid, uid, email, uid),
                         )
                         existente = cursor.fetchone()
                         if existente:
@@ -1836,17 +1846,19 @@ def gerenciar_usuarios():
                         )
                         fid = cursor.fetchone()["id"]
                     conexao.commit()
-                    flash("Cadastro de usuário e folha salvo. A pessoa já aparece em Equipe / Professores.", "success")
-                    if novo_login or senha_informada:
+                    flash("Cadastro da equipe salvo. Contra-cheque e avisos vão para o e-mail informado.", "success")
+                    if criar_login and (novo_login or senha_informada):
                         try:
                             ok, erro = _enviar_codigo_colaborador(email, nome)
                             if ok:
-                                flash(f"Código de acesso enviado para {email}.", "success")
+                                flash(f"Código de acesso ao painel enviado para {email}.", "success")
                             else:
                                 flash(f"Cadastro salvo, mas o código de acesso não saiu: {erro}", "danger")
                         except Exception as e:
                             flash(f"Cadastro salvo, mas o e-mail de acesso não saiu: {e}", "danger")
-                    return redirect(url_for("gerenciar_usuarios", uid=uid))
+                    if uid:
+                        return redirect(url_for("gerenciar_usuarios", uid=uid))
+                    return redirect(url_for("gerenciar_usuarios", fid=fid))
             except Exception as e:
                 conexao.rollback()
                 flash(f"Erro ao salvar usuário: {e}", "danger")

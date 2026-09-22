@@ -76,7 +76,7 @@
                 {% endfor %}
             </div>
             {% if sem_login %}
-            <p class="hint" style="margin-top:14px;">Equipe na folha sem login — clique para completar o acesso:</p>
+            <p class="hint" style="margin-top:14px;">Equipe só na folha (recebe e-mail, sem entrar no painel):</p>
             <div class="user-pick">
                 {% for u in sem_login %}
                 <a class="{% if cadastro.funcionario_id == u.funcionario_id %}sel{% endif %}" href="{{ url_for('gerenciar_usuarios', fid=u.funcionario_id, q=busca_u) }}">
@@ -95,24 +95,42 @@
                 <input type="hidden" name="usuario_id" value="{{ cadastro.usuario_id or '' }}">
                 <input type="hidden" name="funcionario_id" value="{{ cadastro.funcionario_id or '' }}">
 
-                <h4 class="card-title">Acesso ao sistema</h4>
+                <h4 class="card-title">Dados da pessoa</h4>
+                <p class="hint" style="margin-top:-8px;margin-bottom:12px;">
+                    Funcionário simples (como a Angela) só precisa de nome e e-mail.
+                    O sistema envia contra-cheque e avisos para esse e-mail. Não existe senha SMTP dela.
+                </p>
                 <div class="form-grid">
                     <div class="form-group span2">
                         <label>Nome completo</label>
                         <input name="nome" value="{{ cadastro.nome or '' }}" required>
                     </div>
-                    <div class="form-group">
-                        <label>E-mail de login (Google ou senha)</label>
+                    <div class="form-group span2">
+                        <label>E-mail para receber contra-cheque e avisos</label>
                         <input type="email" name="email" value="{{ cadastro.email or '' }}" required placeholder="nome@dominio.com">
                     </div>
                     <div class="form-group">
-                        <label>Senha {% if cadastro.usuario_id %}(em branco mantém){% else %}(em branco: enviamos código para o colaborador criar){% endif %}</label>
-                        <input type="password" name="senha" placeholder="******">
+                        <label>Situação na folha</label>
+                        <select name="ativo">
+                            <option value="1" {% if cadastro.ativo %}selected{% endif %}>Ativo</option>
+                            <option value="0" {% if not cadastro.ativo %}selected{% endif %}>Inativo</option>
+                        </select>
+                    </div>
+                </div>
+
+                <label class="hint" style="display:flex;gap:8px;align-items:flex-start;margin:8px 0 12px;">
+                    <input type="checkbox" name="criar_login" value="1" id="criarLogin" {% if cadastro.usuario_id %}checked{% endif %}>
+                    <span>Esta pessoa também entra no painel da escola (secretaria, professor, admin). Funcionário que só recebe contra-cheque deixa desmarcado.</span>
+                </label>
+                <div class="form-grid" id="blocoLogin" {% if not cadastro.usuario_id %}hidden{% endif %}>
+                    <div class="form-group">
+                        <label>Senha de entrada no painel (opcional)</label>
+                        <input type="password" name="senha" autocomplete="new-password" placeholder="Só se ela for entrar no sistema">
                     </div>
                     <div class="form-group">
                         <label>Perfil de permissão</label>
-                        <select name="papel" required>
-                            {% set p = cadastro.papel or 'professor' %}
+                        <select name="papel">
+                            {% set p = cadastro.papel or 'funcionario' %}
                             <option value="admin" {% if p == 'admin' %}selected{% endif %}>Administrador</option>
                             <option value="supervisor" {% if p == 'supervisor' %}selected{% endif %}>Supervisor administrativo</option>
                             <option value="financeiro" {% if p == 'financeiro' %}selected{% endif %}>Financeiro</option>
@@ -120,13 +138,6 @@
                             <option value="secretaria" {% if p == 'secretaria' %}selected{% endif %}>Secretaria</option>
                             <option value="professor" {% if p == 'professor' %}selected{% endif %}>Professor</option>
                             <option value="funcionario" {% if p == 'funcionario' %}selected{% endif %}>Funcionário</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Situação na folha</label>
-                        <select name="ativo">
-                            <option value="1" {% if cadastro.ativo %}selected{% endif %}>Ativo</option>
-                            <option value="0" {% if not cadastro.ativo %}selected{% endif %}>Inativo</option>
                         </select>
                     </div>
                 </div>
@@ -330,18 +341,30 @@
                     <button class="btn btn-success" type="submit">Salvar cadastro</button>
                     {% if cadastro.usuario_id %}
                     <a class="btn btn-secondary" href="{{ url_for('pagina_financeiro', aba='folha', colab=cadastro.funcionario_id) }}">Ver na folha</a>
+                    {% elif cadastro.funcionario_id %}
+                    <a class="btn btn-secondary" href="{{ url_for('pagina_financeiro', aba='folha', colab=cadastro.funcionario_id) }}">Ver na folha</a>
                     {% endif %}
                 </div>
             </form>
             {% if cadastro.usuario_id %}
-            <form method="POST" style="margin-top:16px;" onsubmit="return confirm('Remover o login deste usuário? O registro da folha permanece.');">
+            <form method="POST" style="margin-top:16px;" onsubmit="return confirm('Remover o acesso ao painel? O cadastro na folha e o e-mail de contra-cheque permanecem.');">
                 <input type="hidden" name="acao" value="excluir">
                 <input type="hidden" name="usuario_id" value="{{ cadastro.usuario_id }}">
-                <button class="btn btn-danger" type="submit">Excluir acesso</button>
+                <button class="btn btn-danger" type="submit">Remover acesso ao painel</button>
             </form>
             {% endif %}
         </div>
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    (function () {
+        var box = document.getElementById("criarLogin");
+        var bloco = document.getElementById("blocoLogin");
+        if (!box || !bloco) return;
+        function sync() { bloco.hidden = !box.checked; }
+        box.addEventListener("change", sync);
+        sync();
+    })();
+    </script>
 </body>
 </html>
