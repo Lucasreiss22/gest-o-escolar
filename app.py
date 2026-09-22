@@ -4819,6 +4819,9 @@ def pagina_financeiro():
                                 data_pag = datetime.now().strftime("%Y-%m-%d")
                         else:
                             data_pag = None
+                        data_venc_edit = (request.form.get("data_vencimento") or "").strip()
+                        if len(data_venc_edit) >= 7:
+                            mes_redir = data_venc_edit[:7]
                         cursor.execute(
                             """
                             UPDATE financeiro_mensalidades
@@ -4837,6 +4840,38 @@ def pagina_financeiro():
                         )
                         conexao.commit()
                         flash("Cobrança atualizada no extrato.", "success")
+
+                    elif acao == "alterar_data_vencimento":
+                        data_venc = (request.form.get("data_vencimento") or "").strip()
+                        cobranca_id = request.form.get("cobranca_id")
+                        try:
+                            datetime.strptime(data_venc, "%Y-%m-%d")
+                            valida = True
+                        except ValueError:
+                            valida = False
+                        if not valida:
+                            flash("Informe a data de vencimento.", "danger")
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE financeiro_mensalidades
+                                SET data_vencimento = %s,
+                                    status = CASE
+                                        WHEN status = 'Pago' THEN status
+                                        WHEN %s::date < CURRENT_DATE THEN 'Atrasado'
+                                        ELSE 'Pendente'
+                                    END
+                                WHERE id = %s
+                                """,
+                                (data_venc, data_venc, cobranca_id),
+                            )
+                            conexao.commit()
+                            if cursor.rowcount:
+                                dia = datetime.strptime(data_venc, "%Y-%m-%d").strftime("%d/%m/%Y")
+                                flash(f"Vencimento alterado para {dia}.", "success")
+                                mes_redir = data_venc[:7]
+                            else:
+                                flash("Não foi possível alterar o vencimento.", "danger")
 
                     elif acao == "alterar_data_pagamento":
                         data_pag = (request.form.get("data_pagamento") or "").strip()
@@ -5124,7 +5159,7 @@ def pagina_financeiro():
             finally:
                 conexao.close()
         voltar_aluno = request.form.get("voltar_aluno")
-        if voltar_aluno and str(voltar_aluno).isdigit() and acao in ("tirar_baixa", "dar_baixa", "alterar_data_pagamento", "editar_cobranca"):
+        if voltar_aluno and str(voltar_aluno).isdigit() and acao in ("tirar_baixa", "dar_baixa", "alterar_data_pagamento", "alterar_data_vencimento", "editar_cobranca"):
             return redirect(url_for("detalhes_aluno", aluno_id=int(voltar_aluno)))
         params_redir = {"mes": mes_redir, "aba": aba_redir}
         if request.form.get("status"):

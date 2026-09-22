@@ -408,7 +408,16 @@
                                         <td>#{{ cobranca_id }}</td>
                                         <td>{{ cobranca.descricao or cobranca[1] }}</td>
                                         <td>R$ {{ "%.2f"|format(cobranca.valor or cobranca[2] or 0.0) }}</td>
-                                        <td>{{ cobranca.data_vencimento or cobranca[3] }}</td>
+                                        <td>
+                                            {% set data_venc = cobranca.data_vencimento or cobranca[3] %}
+                                            <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="d-flex gap-1 align-items-center">
+                                                <input type="hidden" name="acao" value="alterar_data_vencimento">
+                                                <input type="hidden" name="cobranca_id" value="{{ cobranca_id }}">
+                                                <input type="hidden" name="voltar_aluno" value="{{ aluno.id or aluno[0] }}">
+                                                <input type="date" name="data_vencimento" class="form-control form-control-sm" required aria-label="Data de vencimento" value="{{ data_venc.strftime('%Y-%m-%d') if data_venc and data_venc.strftime is defined else (data_venc or '') }}" style="max-width: 150px;">
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary">Salvar</button>
+                                            </form>
+                                        </td>
                                         <td>
                                             {% if cobranca_status == 'Pago' %}
                                                 {% set data_pag = cobranca.data_pagamento or cobranca[4] %}
