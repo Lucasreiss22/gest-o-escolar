@@ -107,11 +107,63 @@ def _brl(valor):
 
 
 def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, receitas_mes):
-    pdf = RelatorioPDF("Relatório Simples Nacional")
+    ap = apuracao or {}
+    quadro = ap.get("quadro") or {}
+    pdf = RelatorioPDF("Memória de cálculo — Simples Nacional")
     pdf.add_page()
-    pdf.paragrafo(f"{escola} · {mes_label} · {nome_regime(regime)}")
-    pdf.linha("Receita do mês", _brl((apuracao or {}).get("receita_mes")))
-    pdf.linha("DAS", _brl((apuracao or {}).get("das")), negrito=True)
+    pdf.paragrafo(f"{escola} · apuração de {mes_label} · {nome_regime(regime)}")
+    pdf.paragrafo(
+        "A RBT12 soma a receita bruta dos 12 meses anteriores ao mês de apuração. "
+        "O mês vigente não entra nessa soma: ele é a base do DAS. "
+        "Mês anterior ao primeiro lançamento do sistema fica de fora quando sai da janela."
+    )
+
+    pdf.secao("RBT12 — receita dos 12 meses anteriores")
+    linhas_rbt = []
+    for linha in quadro.get("linhas") or []:
+        linhas_rbt.append([
+            linha.get("rotulo") or linha.get("competencia") or "",
+            "Sim" if linha.get("entra_rbt12") else "Não",
+            _brl(linha.get("receita_bruta")),
+        ])
+    if linhas_rbt:
+        pdf.tabela(["Competência", "Entra", "Receita bruta"], linhas_rbt, [55, 30, 70])
+    pdf.linha("Soma dos meses que entram", _brl(ap.get("rbt_acumulado")))
+    pdf.linha("Meses considerados", ap.get("meses_atividade") or 0)
+    if ap.get("annualizado"):
+        pdf.paragrafo("Menos de 12 meses na janela: o valor foi annualizado (soma ÷ meses × 12).")
+    pdf.linha("RBT12 usada na faixa", _brl(ap.get("rbt12")), negrito=True)
+
+    pdf.secao("FS12 — folha e encargos dos mesmos meses")
+    linhas_fs = []
+    for linha in quadro.get("linhas") or []:
+        if not linha.get("entra_rbt12"):
+            continue
+        linhas_fs.append([
+            linha.get("rotulo") or linha.get("competencia") or "",
+            _brl(linha.get("folha_encargos")),
+        ])
+    if linhas_fs:
+        pdf.tabela(["Competência", "Folha e encargos"], linhas_fs, [80, 70])
+    pdf.linha("Soma da folha", _brl(ap.get("fs_acumulado")))
+    pdf.linha("FS12", _brl(ap.get("fs12")), negrito=True)
+
+    pdf.secao("Fator R")
+    pdf.linha("Fórmula", "FS12 ÷ RBT12")
+    pdf.linha("Cálculo", f"{_brl(ap.get('fs12'))} ÷ {_brl(ap.get('rbt12'))}")
+    pdf.linha("Fator R", f"{float(ap.get('fator_r_pct') or 0):.2f}%", negrito=True)
+    pdf.linha("Anexo", f"{ap.get('anexo') or '-'} (Anexo III se Fator R ≥ 28%)")
+
+    pdf.secao("DAS do mês")
+    aliq_nom = float(ap.get("aliquota_nominal") or 0) * 100
+    pdf.linha("Receita bruta do mês de apuração", _brl(ap.get("receita_mes")))
+    pdf.linha("Faixa", ap.get("faixa") or "-")
+    pdf.linha("Alíquota nominal", f"{aliq_nom:.2f}%")
+    pdf.linha("Parcela a deduzir", _brl(ap.get("parcela_deduzir")))
+    pdf.paragrafo("Alíquota efetiva = ((RBT12 × alíquota nominal) − parcela a deduzir) ÷ RBT12")
+    pdf.linha("Alíquota efetiva", f"{float(ap.get('aliquota_efetiva_pct') or 0):.4f}%")
+    pdf.paragrafo("DAS = receita bruta do mês × alíquota efetiva")
+    pdf.linha("DAS", _brl(ap.get("das")), negrito=True)
     return _saida(pdf)
 
 

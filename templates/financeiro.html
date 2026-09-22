@@ -110,6 +110,24 @@
         .simples-acoes { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 12px 0; }
         .simples-acoes .form-group { min-width: 180px; }
         .simples-hint { font-size: 0.8rem; color: #64748b; line-height: 1.45; margin: 0 0 12px; }
+        button.card-resumo { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+        .calc-link { font-size: 0.72rem; color: #3498db; margin-top: 5px; display: block; font-weight: 600; }
+        button.card-resumo:hover { box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12); }
+        dialog.calc-painel {
+            border: none; border-radius: 18px; padding: 0; width: min(640px, calc(100% - 24px));
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28); color: #1e293b;
+        }
+        dialog.calc-painel::backdrop { background: rgba(15, 23, 42, 0.45); }
+        .calc-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 16px 18px 8px; }
+        .calc-head h3 { margin: 0; font-size: 1.05rem; }
+        .calc-body { padding: 0 18px 18px; max-height: min(72vh, 640px); overflow: auto; }
+        .calc-passo { background: #f8fafc; border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 0.88rem; }
+        .calc-passo strong { display: block; margin-bottom: 4px; }
+        .calc-lista { width: 100%; border-collapse: collapse; font-size: 0.84rem; min-width: 0; margin: 8px 0 12px; }
+        .calc-lista th, .calc-lista td { padding: 7px 8px; }
+        .calc-envio { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; margin-top: 12px; }
+        .calc-envio .form-group { min-width: 0; }
+        @media (max-width: 720px) { .calc-envio { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -241,12 +259,114 @@
                 {% if quadro_simples and quadro_simples.primeira %}Primeiro mês lançado no sistema: <strong>{{ quadro_simples.primeira }}</strong>.{% endif %}
             </p>
             {% if apuracao_simples %}
+            {% set ap = apuracao_simples %}
+            {% set aliq_nom = (ap.aliquota_nominal or 0) * 100 %}
             <div class="resumo-grid" style="margin-bottom:18px;">
-                <div class="card-resumo"><h4>RBT12</h4><div class="valor">R$ {{ "%.2f"|format(apuracao_simples.rbt12) }}</div></div>
-                <div class="card-resumo folha"><h4>FS12</h4><div class="valor">R$ {{ "%.2f"|format(apuracao_simples.fs12) }}</div></div>
-                <div class="card-resumo"><h4>Fator R</h4><div class="valor">{{ "%.2f"|format(apuracao_simples.fator_r_pct) }}%</div><span class="hint">Anexo {{ apuracao_simples.anexo }}</span></div>
-                <div class="card-resumo tributos"><h4>DAS do mês</h4><div class="valor">R$ {{ "%.2f"|format(apuracao_simples.das) }}</div><span class="hint">{{ "%.4f"|format(apuracao_simples.aliquota_efetiva_pct) }}%</span></div>
+                <button type="button" class="card-resumo" data-abre="dlg-rbt12">
+                    <h4>RBT12</h4>
+                    <div class="valor">R$ {{ "%.2f"|format(ap.rbt12) }}</div>
+                    <span class="calc-link">Ver o cálculo</span>
+                </button>
+                <button type="button" class="card-resumo folha" data-abre="dlg-fs12">
+                    <h4>FS12</h4>
+                    <div class="valor">R$ {{ "%.2f"|format(ap.fs12) }}</div>
+                    <span class="calc-link">Ver o cálculo</span>
+                </button>
+                <button type="button" class="card-resumo" data-abre="dlg-fator">
+                    <h4>Fator R</h4>
+                    <div class="valor">{{ "%.2f"|format(ap.fator_r_pct) }}%</div>
+                    <span class="calc-link">Anexo {{ ap.anexo }} · ver o cálculo</span>
+                </button>
+                <button type="button" class="card-resumo tributos" data-abre="dlg-das">
+                    <h4>DAS do mês</h4>
+                    <div class="valor">R$ {{ "%.2f"|format(ap.das) }}</div>
+                    <span class="calc-link">{{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% · ver o cálculo</span>
+                </button>
             </div>
+
+            <dialog id="dlg-rbt12" class="calc-painel">
+                <div class="calc-head"><h3>Cálculo da RBT12</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
+                <div class="calc-body">
+                    <p class="simples-hint">Soma da receita bruta dos 12 meses anteriores a {{ mes_label }}. O mês de apuração fica de fora desta conta.</p>
+                    <table class="calc-lista">
+                        <thead><tr><th>Competência</th><th>Entra</th><th>Receita</th></tr></thead>
+                        <tbody>
+                        {% for linha in (quadro_simples.linhas if quadro_simples else []) %}
+                        <tr>
+                            <td>{{ linha.rotulo }}</td>
+                            <td>{% if linha.entra_rbt12 %}Sim{% else %}Não{% endif %}</td>
+                            <td>R$ {{ "%.2f"|format(linha.receita_bruta) }}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    <div class="calc-passo"><strong>Soma dos meses que entram</strong>R$ {{ "%.2f"|format(ap.rbt_acumulado) }} em {{ ap.meses_atividade }} mês(es).</div>
+                    {% if ap.annualizado %}
+                    <div class="calc-passo"><strong>Annualização</strong>Menos de 12 meses na janela: (R$ {{ "%.2f"|format(ap.rbt_acumulado) }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ "%.2f"|format(ap.rbt12) }}.</div>
+                    {% endif %}
+                    <div class="calc-passo"><strong>RBT12</strong>R$ {{ "%.2f"|format(ap.rbt12) }}</div>
+                    {% include '_simples_envio.html' %}
+                </div>
+            </dialog>
+
+            <dialog id="dlg-fs12" class="calc-painel">
+                <div class="calc-head"><h3>Cálculo da FS12</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
+                <div class="calc-body">
+                    <p class="simples-hint">Folha e encargos dos mesmos meses que entram na RBT12.</p>
+                    <table class="calc-lista">
+                        <thead><tr><th>Competência</th><th>Folha e encargos</th></tr></thead>
+                        <tbody>
+                        {% for linha in (quadro_simples.linhas if quadro_simples else []) if linha.entra_rbt12 %}
+                        <tr>
+                            <td>{{ linha.rotulo }}</td>
+                            <td>R$ {{ "%.2f"|format(linha.folha_encargos) }}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    <div class="calc-passo"><strong>Soma da folha</strong>R$ {{ "%.2f"|format(ap.fs_acumulado) }}</div>
+                    {% if ap.annualizado %}
+                    <div class="calc-passo"><strong>Annualização</strong>(R$ {{ "%.2f"|format(ap.fs_acumulado) }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ "%.2f"|format(ap.fs12) }}.</div>
+                    {% endif %}
+                    <div class="calc-passo"><strong>FS12</strong>R$ {{ "%.2f"|format(ap.fs12) }}</div>
+                    {% include '_simples_envio.html' %}
+                </div>
+            </dialog>
+
+            <dialog id="dlg-fator" class="calc-painel">
+                <div class="calc-head"><h3>Cálculo do Fator R</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
+                <div class="calc-body">
+                    <div class="calc-passo"><strong>Fórmula</strong>Fator R = FS12 ÷ RBT12</div>
+                    <div class="calc-passo"><strong>Conta</strong>R$ {{ "%.2f"|format(ap.fs12) }} ÷ R$ {{ "%.2f"|format(ap.rbt12) }} = {{ "%.2f"|format(ap.fator_r_pct) }}%</div>
+                    <div class="calc-passo"><strong>Anexo</strong>{% if ap.fator_r_pct >= 28 %}{{ "%.2f"|format(ap.fator_r_pct) }}% é igual ou maior que 28%, então o anexo é o III.{% else %}{{ "%.2f"|format(ap.fator_r_pct) }}% ficou abaixo de 28%, então o anexo é o V.{% endif %}</div>
+                    {% include '_simples_envio.html' %}
+                </div>
+            </dialog>
+
+            <dialog id="dlg-das" class="calc-painel">
+                <div class="calc-head"><h3>Cálculo do DAS</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
+                <div class="calc-body">
+                    <div class="calc-passo"><strong>Receita do mês de apuração</strong>R$ {{ "%.2f"|format(ap.receita_mes) }}. Este valor não entra na RBT12.</div>
+                    <div class="calc-passo"><strong>Faixa do anexo {{ ap.anexo }}</strong>Faixa {{ ap.faixa }}, alíquota nominal {{ "%.2f"|format(aliq_nom) }}%, parcela a deduzir R$ {{ "%.2f"|format(ap.parcela_deduzir) }}.</div>
+                    <div class="calc-passo"><strong>Alíquota efetiva</strong>((R$ {{ "%.2f"|format(ap.rbt12) }} × {{ "%.2f"|format(aliq_nom) }}%) − R$ {{ "%.2f"|format(ap.parcela_deduzir) }}) ÷ R$ {{ "%.2f"|format(ap.rbt12) }} = {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</div>
+                    <div class="calc-passo"><strong>DAS</strong>R$ {{ "%.2f"|format(ap.receita_mes) }} × {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% = R$ {{ "%.2f"|format(ap.das) }}</div>
+                    {% include '_simples_envio.html' %}
+                </div>
+            </dialog>
+            <script>
+            document.querySelectorAll("[data-abre]").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var dlg = document.getElementById(btn.getAttribute("data-abre"));
+                    if (dlg && dlg.showModal) dlg.showModal();
+                });
+            });
+            document.querySelectorAll("[data-fecha]").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var dlg = btn.closest("dialog");
+                    if (dlg) dlg.close();
+                });
+            });
+            </script>
             {% endif %}
 
             <div class="simples-acoes">

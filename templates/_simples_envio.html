@@ -1,0 +1,21 @@
+<div class="calc-passo">
+    <strong>PDF e e-mail</strong>
+    <a class="btn btn-success" href="{{ url_for('memoria_simples_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Gerar PDF</a>
+    <form method="POST" action="{{ url_for('enviar_memoria_simples') }}" class="calc-envio">
+        <input type="hidden" name="mes" value="{{ mes_atual }}">
+        <div class="form-group">
+            <label>E-mail cadastrado</label>
+            <select name="email_cadastrado">
+                <option value="">Escolher</option>
+                {% for em in emails_escola or [] %}
+                <option value="{{ em }}">{{ em }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Ou digite outro e-mail</label>
+            <input type="email" name="email" placeholder="nome@escola.com" autocomplete="email">
+        </div>
+        <button class="btn btn-primary" type="submit">Enviar PDF</button>
+    </form>
+</div>

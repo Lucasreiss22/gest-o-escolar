@@ -4774,6 +4774,7 @@ def pagina_financeiro():
         return redirect(url_for("pagina_financeiro", **params_redir))
 
     lancamentos, alunos, professores_detalhes = [], [], []
+    emails_escola = []
     custos_mes = []
     totais = {
         "recebido": 0.0,
@@ -4810,7 +4811,7 @@ def pagina_financeiro():
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                 # BUSCA O REGIME TRIBUTÁRIO CONFIGURADO NO BANCO[cite: 5]
-                cursor.execute("SELECT nome_escola, regime_tributario FROM configuracoes WHERE id = 1;")
+                cursor.execute("SELECT nome_escola, regime_tributario, email_contato FROM configuracoes WHERE id = 1;")
                 config_regime = cursor.fetchone()
                 nome_escola = "Gestão Escolar"
                 if config_regime:
@@ -4914,6 +4915,25 @@ def pagina_financeiro():
 
                 cursor.execute("SELECT id, nome_completo, valor_mensalidade FROM alunos ORDER BY nome_completo ASC;")
                 alunos = cursor.fetchall()
+                vistos_email = set()
+
+                def _guardar_email(valor):
+                    texto = (valor or "").strip()
+                    chave = texto.lower()
+                    if email_valido(texto) and chave not in vistos_email:
+                        vistos_email.add(chave)
+                        emails_escola.append(texto)
+
+                _guardar_email((config_regime or {}).get("email_contato"))
+                _guardar_email(session.get("usuario_email"))
+                try:
+                    cursor.execute(
+                        "SELECT email FROM usuarios WHERE COALESCE(TRIM(email), '') <> '' ORDER BY email"
+                    )
+                    for row_email in cursor.fetchall() or []:
+                        _guardar_email(row_email.get("email"))
+                except Exception:
+                    pass
                 if aba == "simples" and quadro_simples is None:
                     quadro_simples = montar_quadro_simples(cursor, mes_filtro)
                     if apuracao_simples is None:
@@ -4952,6 +4972,7 @@ def pagina_financeiro():
         apuracao_pis_cofins=apuracao_pis_cofins,
         apuracao_presumido=apuracao_presumido,
         nome_escola=nome_escola,
+        emails_escola=emails_escola,
         mes_label=nome_mes_extenso(mes_filtro),
         colab_q=colab_q,
         colab_id=colab_id,
@@ -4977,6 +4998,78 @@ def excluir_financeiro(id):
         finally:
             conexao.close()
     return redirect(url_for("pagina_financeiro"))
+
+
+def _pdf_memoria_simples(mes_filtro):
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        return None, None, "Sem conexão com o banco para gerar a memória de cálculo."
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT nome_escola, regime_tributario FROM configuracoes WHERE id = 1;")
+            config = cursor.fetchone() or {}
+            escola = config.get("nome_escola") or "Gestão Escolar"
+            apuracao, _colabs = calcular_apuracao_simples(cursor, mes_filtro)
+            buffer = pdf_simples_nacional(
+                escola,
+                nome_mes_extenso(mes_filtro),
+                "simples_nacional",
+                apuracao,
+                [],
+                [],
+            )
+        return buffer, f"memoria_simples_{mes_filtro}.pdf", None
+    finally:
+        conexao.close()
+
+
+@app.route("/financeiro/simples/pdf")
+def memoria_simples_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    mes_filtro = (request.args.get("mes") or "").strip() or datetime.now().strftime("%Y-%m")
+    try:
+        buffer, nome_arq, erro = _pdf_memoria_simples(mes_filtro)
+    except Exception as e:
+        flash(f"Não foi possível gerar o PDF: {e}", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro, aba="simples"))
+    if erro or buffer is None:
+        flash(erro or "Não foi possível gerar o PDF.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro, aba="simples"))
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=nome_arq)
+
+
+@app.route("/financeiro/simples/enviar", methods=["POST"])
+def enviar_memoria_simples():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    mes_filtro = (request.form.get("mes") or "").strip() or datetime.now().strftime("%Y-%m")
+    destino = url_for("pagina_financeiro", mes=mes_filtro, aba="simples")
+    escolhido = (request.form.get("email_cadastrado") or "").strip()
+    manual = (request.form.get("email") or "").strip()
+    destinos = []
+    for bruto in (escolhido, manual):
+        if email_valido(bruto) and bruto.lower() not in {item.lower() for item in destinos}:
+            destinos.append(bruto)
+    if not destinos:
+        flash("Escolha um e-mail cadastrado ou digite um e-mail válido.", "danger")
+        return redirect(destino)
+    try:
+        buffer, nome_arq, erro = _pdf_memoria_simples(mes_filtro)
+        if erro or buffer is None:
+            flash(erro or "Não foi possível gerar o PDF.", "danger")
+            return redirect(destino)
+        enviar_email(
+            destinos,
+            f"Memória de cálculo do Simples Nacional — {nome_mes_extenso(mes_filtro)}",
+            "Segue em anexo o PDF com o cálculo da RBT12, da FS12, do Fator R e do DAS.",
+            [{"nome": nome_arq, "dados": bytes_pdf(buffer)}],
+        )
+        flash(f"Memória de cálculo enviada para {', '.join(destinos)}.", "success")
+    except Exception as e:
+        flash(f"Não foi possível enviar o PDF: {e}", "danger")
+    return redirect(destino)
 
 
 @app.route("/financeiro/relatorio-tributario")
