@@ -78,6 +78,58 @@
         });
     }
 
+    function buscarCep(campo) {
+        if (!campo || !campo.hasAttribute("data-cep")) return;
+        var cep = (campo.value || "").replace(/\D/g, "");
+        if (cep.length !== 8) return;
+        var form = campo.form || document;
+        fetch("https://viacep.com.br/ws/" + cep + "/json/")
+            .then(function (resp) { return resp.json(); })
+            .then(function (dados) {
+                if (!dados || dados.erro) return;
+                function preencher(nome, valor) {
+                    var el = form.querySelector("[name='" + nome + "']");
+                    if (el && valor) el.value = valor;
+                }
+                preencher("rua", dados.logradouro);
+                preencher("logradouro", dados.logradouro);
+                preencher("bairro", dados.bairro);
+                preencher("cidade", dados.localidade);
+                preencher("estado", dados.uf);
+                preencher("estado_uf", dados.uf);
+            })
+            .catch(function () {});
+    }
+
+    document.addEventListener("blur", function (event) {
+        buscarCep(event.target);
+    }, true);
+    document.addEventListener("input", function (event) {
+        var campo = event.target;
+        if (!campo) return;
+        if (campo.hasAttribute("data-cep") && (campo.value || "").replace(/\D/g, "").length === 8) {
+            buscarCep(campo);
+        }
+    });
+
+    document.addEventListener("blur", function (event) {
+        var campo = event.target;
+        if (!campo || !campo.hasAttribute("data-moeda")) return;
+        var bruto = (campo.value || "").trim();
+        if (!bruto) {
+            campo.value = "0.00";
+            return;
+        }
+        var s = bruto.replace("R$", "").replace(/\s/g, "");
+        if (s.indexOf(",") >= 0) s = s.replace(/\./g, "").replace(",", ".");
+        var n = parseFloat(s);
+        if (isNaN(n)) {
+            campo.value = bruto;
+            return;
+        }
+        campo.value = n.toFixed(2);
+    }, true);
+
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", function () {
             aplicarCamposContrato();

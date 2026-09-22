@@ -106,8 +106,8 @@
                         <input type="email" name="email" value="{{ cadastro.email or '' }}" required placeholder="nome@dominio.com">
                     </div>
                     <div class="form-group">
-                        <label>Senha {% if cadastro.usuario_id %}(em branco mantém){% endif %}</label>
-                        <input type="password" name="senha" {% if not cadastro.usuario_id %}required{% endif %} placeholder="******">
+                        <label>Senha {% if cadastro.usuario_id %}(em branco mantém){% else %}(em branco: enviamos código para o colaborador criar){% endif %}</label>
+                        <input type="password" name="senha" placeholder="******">
                     </div>
                     <div class="form-group">
                         <label>Perfil de permissão</label>
@@ -139,8 +139,19 @@
                     <div class="form-group"><label>Telefone</label><input name="telefone" value="{{ cadastro.telefone or '' }}" placeholder="(00) 00000-0000"></div>
                     <div class="form-group"><label>Cargo</label><input name="cargo" value="{{ cadastro.cargo or '' }}" placeholder="Professor, secretaria..."></div>
                     <div class="form-group"><label>Disciplina / especialidade</label><input name="especialidade" value="{{ cadastro.especialidade or '' }}"></div>
-                    <div class="form-group span2"><label>Formação</label><input name="formacao" value="{{ cadastro.formacao or '' }}"></div>
-                    <div class="form-group"><label>CEP</label><input name="cep" value="{{ cadastro.cep or '' }}"></div>
+                    <div class="form-group span2">
+                        <label>Formação</label>
+                        {% set formacao_txt = (cadastro.formacao or '') %}
+                        <div class="check" style="display:flex;flex-wrap:wrap;gap:10px 16px;margin:6px 0 8px;">
+                            {% for nivel in ['Ensino médio', 'Magistério', 'Técnico', 'Graduação', 'Especialização', 'Mestrado', 'Doutorado'] %}
+                            <label style="font-weight:500;font-size:.85rem;">
+                                <input type="checkbox" name="formacao_flag" value="{{ nivel }}" {% if nivel in formacao_txt %}checked{% endif %}> {{ nivel }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                        <input name="formacao_curso" value="{{ cadastro.formacao or '' }}" placeholder="Curso / instituição">
+                    </div>
+                    <div class="form-group"><label>CEP</label><input name="cep" data-cep value="{{ cadastro.cep or '' }}" placeholder="00000-000"></div>
                     <div class="form-group span2"><label>Rua</label><input name="rua" value="{{ cadastro.rua or '' }}"></div>
                     <div class="form-group"><label>Número</label><input name="numero" value="{{ cadastro.numero or '' }}"></div>
                     <div class="form-group"><label>Bairro</label><input name="bairro" value="{{ cadastro.bairro or '' }}"></div>
@@ -170,7 +181,7 @@
                         <label data-contratos="clt_mensalista">Salário mensal bruto (R$)</label>
                         <label data-contratos="pj">Valor da NFS-e (R$)</label>
                         <label data-contratos="rpa">Valor bruto do RPA (R$)</label>
-                        <input name="salario" data-obrigatorio value="{{ '%.2f'|format(cadastro.salario|float if cadastro.salario else 0) }}">
+                        <input name="salario" data-obrigatorio data-moeda value="{{ '%.2f'|format(cadastro.salario|float if cadastro.salario else 0) }}">
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa">
                         <label>PIS / NIT</label>
@@ -183,7 +194,7 @@
                     </div>
                     <div class="form-group" data-contratos="clt_horista">
                         <label>Valor da hora-aula (R$)</label>
-                        <input name="valor_hora" data-obrigatorio value="{{ '%.2f'|format(cadastro.valor_hora|float if cadastro.valor_hora else 0) }}">
+                        <input name="valor_hora" data-obrigatorio data-moeda value="{{ '%.2f'|format(cadastro.valor_hora|float if cadastro.valor_hora else 0) }}">
                     </div>
                     <div class="form-group" data-contratos="clt_horista">
                         <label>Horas trabalhadas no mês</label>
@@ -244,7 +255,7 @@
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Valor da hora extra (R$). Em branco usa 50% sobre a hora/salário</label>
-                        <input name="valor_hora_extra" value="{{ '%.2f'|format(cadastro.valor_hora_extra|float if cadastro.valor_hora_extra else 0) }}">
+                        <input name="valor_hora_extra" data-moeda value="{{ '%.2f'|format(cadastro.valor_hora_extra|float if cadastro.valor_hora_extra else 0) }}">
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Enviar contra-cheque no dia</label>
@@ -267,7 +278,13 @@
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Tipo da conta</label>
-                        <input name="tipo_conta" value="{{ cadastro.tipo_conta or '' }}" placeholder="Corrente, poupança">
+                        {% set tconta = (cadastro.tipo_conta or '')|lower %}
+                        <select name="tipo_conta">
+                            <option value="">Selecione</option>
+                            <option value="Corrente" {% if 'corrente' in tconta %}selected{% endif %}>Corrente</option>
+                            <option value="Salário" {% if 'sal' in tconta %}selected{% endif %}>Salário</option>
+                            <option value="Poupança" {% if 'poup' in tconta %}selected{% endif %}>Poupança</option>
+                        </select>
                     </div>
                     <div class="form-group span2" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Chave Pix</label>

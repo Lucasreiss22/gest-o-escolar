@@ -58,12 +58,14 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
                 matricula, nome_completo, cpf, rg, certidao_nascimento, data_nascimento, sexo,
                 telefone_principal, telefone_secundario, email,
                 cep, rua, numero, bairro, cidade, estado,
-                valor_mensalidade, desconto_tipo, desconto_valor, status
+                valor_mensalidade, desconto_tipo, desconto_valor, status,
+                contrato_meses, contrato_inicio, turnos_mensalidade, foto_url
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s,
                 %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, 'ativo'
+                %s, %s, %s, 'ativo',
+                %s, %s, %s, %s
             ) RETURNING id;
         """
 
@@ -87,6 +89,10 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
             dados_aluno.get("valor_mensalidade", 0.00),
             dados_aluno.get("desconto_tipo") or "nenhum",
             dados_aluno.get("desconto_valor", 0.00),
+            dados_aluno.get("contrato_meses") or 12,
+            dados_aluno.get("contrato_inicio") or None,
+            dados_aluno.get("turnos_mensalidade") or "manha",
+            dados_aluno.get("foto_url"),
         )
 
         cursor.execute(sql_aluno, valores_aluno)
@@ -104,8 +110,8 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
         sql_resp = """
             INSERT INTO responsaveis_aluno (
                 aluno_id, tipo_responsavel, nome_completo, cpf, grau_parentesco,
-                telefone, email, local_trabalho, telefone_trabalho
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
+                telefone, email, local_trabalho, telefone_trabalho, foto_url
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
         """
 
         if responsavel_1 and responsavel_1.get("nome_completo"):
@@ -118,6 +124,7 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
                 responsavel_1.get("email"),
                 responsavel_1.get("local_trabalho"),
                 responsavel_1.get("telefone_trabalho"),
+                responsavel_1.get("foto_url"),
             ))
 
         if responsavel_2 and responsavel_2.get("nome_completo"):
@@ -130,6 +137,7 @@ def cadastrar_aluno(dados_aluno: dict, responsavel_1: dict = None, responsavel_2
                 responsavel_2.get("email"),
                 responsavel_2.get("local_trabalho"),
                 responsavel_2.get("telefone_trabalho"),
+                responsavel_2.get("foto_url"),
             ))
 
         conexao.commit()
@@ -164,6 +172,10 @@ def listar_alunos(termo: str = None):
                         a.nome_completo,
                         a.email,
                         a.telefone_principal,
+                        a.cidade,
+                        a.rua,
+                        a.foto_url,
+                        a.turnos_mensalidade,
                         COALESCE(NULLIF(a.status, ''), 'ativo') AS status,
                         STRING_AGG(t.nome, ', ') AS turma_nome
                     FROM alunos a
@@ -172,7 +184,8 @@ def listar_alunos(termo: str = None):
                     WHERE a.nome_completo ILIKE %s
                        OR COALESCE(a.matricula, '') ILIKE %s
                        OR CAST(a.id AS TEXT) ILIKE %s
-                    GROUP BY a.id, a.matricula, a.nome_completo, a.email, a.telefone_principal, a.status
+                    GROUP BY a.id, a.matricula, a.nome_completo, a.email, a.telefone_principal, a.status,
+                             a.cidade, a.rua, a.foto_url, a.turnos_mensalidade
                     ORDER BY a.id DESC;
                     """,
                     (filtro, filtro, filtro),
@@ -186,12 +199,17 @@ def listar_alunos(termo: str = None):
                         a.nome_completo,
                         a.email,
                         a.telefone_principal,
+                        a.cidade,
+                        a.rua,
+                        a.foto_url,
+                        a.turnos_mensalidade,
                         COALESCE(NULLIF(a.status, ''), 'ativo') AS status,
                         STRING_AGG(t.nome, ', ') AS turma_nome
                     FROM alunos a
                     LEFT JOIN turma_alunos ta ON ta.aluno_id = a.id
                     LEFT JOIN turmas t ON t.id = ta.turma_id
-                    GROUP BY a.id, a.matricula, a.nome_completo, a.email, a.telefone_principal, a.status
+                    GROUP BY a.id, a.matricula, a.nome_completo, a.email, a.telefone_principal, a.status,
+                             a.cidade, a.rua, a.foto_url, a.turnos_mensalidade
                     ORDER BY a.id DESC;
                     """
                 )
@@ -216,12 +234,13 @@ def atualizar_responsavel(resp_id, dados):
             cursor.execute("""
                 UPDATE responsaveis_aluno 
                 SET nome_completo = %s, cpf = %s, grau_parentesco = %s, 
-                    telefone = %s, email = %s, local_trabalho = %s, telefone_trabalho = %s
+                    telefone = %s, email = %s, local_trabalho = %s, telefone_trabalho = %s,
+                    foto_url = COALESCE(%s, foto_url)
                 WHERE id = %s;
             """, (
                 dados.get("nome_completo"), dados.get("cpf"), dados.get("grau_parentesco"),
                 dados.get("telefone"), dados.get("email"), dados.get("local_trabalho"),
-                dados.get("telefone_trabalho"), resp_id
+                dados.get("telefone_trabalho"), dados.get("foto_url"), resp_id
             ))
             conexao.commit()
     except Exception as e:

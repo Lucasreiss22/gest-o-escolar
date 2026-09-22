@@ -85,6 +85,7 @@
 
         <div class="card-box">
             <h3>Escolas cadastradas</h3>
+            <p class="hint">Último caso: se o e-mail com código não chegar, defina a senha no campo ao lado de Redefinir senha. A escola entra com o e-mail admin e essa senha, sem código.</p>
             {% for e in escolas %}
             <div class="escola">
                 <h4>{{ e.nome }}</h4>
@@ -102,18 +103,18 @@
                         <input type="hidden" name="escola_id" value="{{ e.id }}">
                         <button class="btn-sm btn-azul" type="submit">Acessar dados</button>
                     </form>
-                    <form method="POST">
+                    <form method="POST" class="acoes" style="gap:6px;">
                         <input type="hidden" name="acao" value="redefinir_senha">
                         <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <input type="password" name="nova_senha" minlength="6" placeholder="Nova senha (mín. 6)" required style="padding:8px;border:1px solid #ccc;border-radius:6px;min-width:180px;">
                         <button class="btn-sm btn-ambar" type="submit">Redefinir senha</button>
                     </form>
-                    {% if e.convite_token and e.ativo %}
                     <form method="POST">
                         <input type="hidden" name="acao" value="reenviar_convite">
-                        <input type="hidden" name="token" value="{{ e.convite_token }}">
-                        <button class="btn-sm btn-cinza" type="submit">Reenviar e-mail</button>
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        {% if e.convite_token %}<input type="hidden" name="token" value="{{ e.convite_token }}">{% endif %}
+                        <button class="btn-sm btn-cinza" type="submit">{% if e.senha_definida %}Reenviar código de senha{% else %}Reenviar e-mail{% endif %}</button>
                     </form>
-                    {% endif %}
                     {% if e.ativo %}
                     <form method="POST" onsubmit="return confirm('Pausar {{ e.nome }}? Ninguém dessa escola entra até retomar.');">
                         <input type="hidden" name="acao" value="pausar_escola">

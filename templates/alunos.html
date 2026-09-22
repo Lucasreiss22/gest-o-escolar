@@ -60,7 +60,9 @@
                             <tr>
                                 <th>Matrícula</th>
                                 <th>Nome do Aluno</th>
-                                <th>Turma</th>
+                                <th>Telefone</th>
+                                <th>Endereço</th>
+                                <th>Turma / Turno</th>
                                 <th>Status</th>
                                 <th class="text-end">Ações</th>
                             </tr>
@@ -71,11 +73,21 @@
                                 <tr>
                                     <td>{{ aluno.matricula }}</td>
                                     <td>
-                                        <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="text-primary text-decoration-none fw-bold">
+                                        <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="text-primary text-decoration-none fw-bold d-flex align-items-center gap-2">
+                                            {% if aluno.foto_url %}
+                                            <img src="{{ url_for('static', filename=aluno.foto_url) }}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:50%;">
+                                            {% endif %}
                                             {{ aluno.nome_completo or aluno.nome }}
                                         </a>
                                     </td>
-                                    <td>{{ aluno.turma_nome or '-' }}</td>
+                                    <td>{{ aluno.telefone_principal or aluno.telefone or '-' }}</td>
+                                    <td>{{ aluno.rua or '-' }}{% if aluno.cidade %} — {{ aluno.cidade }}{% endif %}</td>
+                                    <td>
+                                        {{ aluno.turma_nome or '-' }}
+                                        {% if aluno.turnos_mensalidade == 'integral' %}<div class="small text-muted">Integral</div>
+                                        {% elif aluno.turnos_mensalidade == 'tarde' %}<div class="small text-muted">Tarde</div>
+                                        {% elif aluno.turnos_mensalidade == 'manha' %}<div class="small text-muted">Manhã</div>{% endif %}
+                                    </td>
                                     <td>
                                         {% set st = (aluno.status or aluno.situacao or 'ativo') | lower %}
                                         {% if st == 'ativo' %}
@@ -98,7 +110,7 @@
                                 {% endfor %}
                             {% else %}
                                 <tr>
-                                    <td colspan="5" class="text-center py-4 text-muted">Nenhum aluno cadastrado no momento.</td>
+                                    <td colspan="7" class="text-center py-4 text-muted">Nenhum aluno cadastrado no momento.</td>
                                 </tr>
                             {% endif %}
                         </tbody>
@@ -113,6 +125,8 @@
                             <div class="meta">
                                 Matrícula {{ aluno.matricula or '-' }}
                                 · {{ aluno.turma_nome or 'Sem turma' }}
+                                · {{ aluno.telefone_principal or aluno.telefone or 'sem telefone' }}
+                                · {{ aluno.rua or aluno.cidade or 'sem endereço' }}
                                 · {{ 'Ativo' if st == 'ativo' else 'Inativo' }}
                             </div>
                             <div class="acoes">
@@ -136,7 +150,7 @@
                     <h5 class="modal-title fw-bold"><i class="bi bi-person-plus-fill me-2"></i>Cadastrar Novo Aluno</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <form action="{{ url_for('pagina_alunos') }}" method="POST">
+                <form action="{{ url_for('pagina_alunos') }}" method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="acao" value="cadastrar_aluno">
                     <div class="modal-body p-4">
                         
@@ -191,6 +205,10 @@
                                         </select>
                                     </div>
                                     <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Foto do aluno</label>
+                                        <input type="file" name="foto" class="form-control" accept="image/*">
+                                    </div>
+                                    <div class="col-md-4">
                                         <label class="form-label small fw-bold">Turma Inicial (Opcional)</label>
                                         <select name="turma_id" class="form-select">
                                             <option value="">Nenhuma turma vinculada</option>
@@ -221,7 +239,7 @@
                                     </div>
                                     <div class="col-md-3">
                                         <label class="form-label small fw-bold">CEP</label>
-                                        <input type="text" name="cep" class="form-control" placeholder="00000-000">
+                                        <input type="text" name="cep" class="form-control" placeholder="00000-000" data-cep>
                                     </div>
                                     <div class="col-md-7">
                                         <label class="form-label small fw-bold">Rua / Logradouro</label>
@@ -251,7 +269,7 @@
                                 <div class="row g-3">
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Valor da Mensalidade (R$)</label>
-                                        <input type="text" name="valor_mensalidade" class="form-control" placeholder="0.00" value="0.00">
+                                        <input type="text" name="valor_mensalidade" class="form-control" placeholder="0.00" value="0.00" data-moeda>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Duração do contrato</label>
@@ -269,7 +287,7 @@
                                         <select name="turnos_mensalidade" class="form-select">
                                             <option value="manha">Somente manhã</option>
                                             <option value="tarde">Somente tarde</option>
-                                            <option value="integral">Dois turnos (manhã e tarde)</option>
+                                            <option value="integral">Turno integral (manhã e tarde)</option>
                                         </select>
                                     </div>
                                     <div class="col-md-4">
@@ -283,7 +301,7 @@
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Valor do Desconto</label>
-                                        <input type="text" name="desconto_valor" class="form-control" placeholder="0.00" value="0.00">
+                                        <input type="text" name="desconto_valor" class="form-control" placeholder="0.00" value="0.00" data-moeda>
                                     </div>
                                 </div>
                             </div>
@@ -315,6 +333,10 @@
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Local de Trabalho</label>
                                         <input type="text" name="resp1_trabalho" class="form-control" placeholder="Empresa">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Foto do responsável 1</label>
+                                        <input type="file" name="resp1_foto" class="form-control" accept="image/*">
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Telefone do Trabalho</label>
@@ -349,6 +371,10 @@
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Local de Trabalho</label>
                                         <input type="text" name="resp2_trabalho" class="form-control" placeholder="Empresa">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold">Foto do responsável 2</label>
+                                        <input type="file" name="resp2_foto" class="form-control" accept="image/*">
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Telefone do Trabalho</label>

@@ -227,12 +227,23 @@ def excluir_escola(escola_id):
     return escola
 
 
-def regenerar_convite_escola(escola_id):
+def definir_senha_escola_por_admin(escola_id, senha):
+    """Último recurso: o admin da plataforma define a senha da escola, sem código."""
     escola = buscar_escola_por_id(escola_id)
     if not escola:
         raise ValueError("Escola não encontrada.")
     if not escola.get("ativo", True):
         raise ValueError("Retome a escola antes de redefinir a senha.")
+    ativar_escola(escola, senha)
+    return buscar_escola_por_id(escola_id)
+
+
+def regenerar_convite_escola(escola_id):
+    escola = buscar_escola_por_id(escola_id)
+    if not escola:
+        raise ValueError("Escola não encontrada.")
+    if not escola.get("ativo", True):
+        raise ValueError("Retome a escola antes de reenviar o convite.")
     convite_token = secrets.token_urlsafe(24)
     convite_codigo = f"{secrets.randbelow(1000000):06d}"
     expira = datetime.now() + timedelta(days=7)
@@ -255,45 +266,65 @@ def regenerar_convite_escola(escola_id):
         conexao.close()
 
 
+def _codigo_otp_limpo(codigo):
+    return "".join(ch for ch in str(codigo or "") if ch.isdigit())
+
+
 def gerar_otp(email, finalidade):
     garantir_plataforma()
-    codigo = f"{secrets.randbelow(1000000):06d}"
-    expira = datetime.now() + timedelta(minutes=20)
+    email_n = normalizar_email(email)
     conexao = obter_conexao(master=True)
     if not conexao:
-        return codigo
+        return f"{secrets.randbelow(1000000):06d}"
     try:
         with conexao.cursor() as cursor:
             cursor.execute(
-                "UPDATE plataforma_otp SET usado = TRUE WHERE LOWER(email) = %s AND finalidade = %s",
-                (normalizar_email(email), finalidade),
+                """
+                SELECT codigo FROM plataforma_otp
+                WHERE LOWER(email) = %s AND usado = FALSE AND expira > NOW()
+                ORDER BY id DESC LIMIT 1
+                """,
+                (email_n,),
+            )
+            existente = cursor.fetchone()
+            if existente and existente.get("codigo"):
+                return existente["codigo"]
+            codigo = f"{secrets.randbelow(1000000):06d}"
+            expira = datetime.now() + timedelta(minutes=20)
+            cursor.execute(
+                "UPDATE plataforma_otp SET usado = TRUE WHERE LOWER(email) = %s AND usado = FALSE",
+                (email_n,),
             )
             cursor.execute(
                 """
                 INSERT INTO plataforma_otp (email, codigo, finalidade, expira)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (normalizar_email(email), codigo, finalidade, expira),
+                (email_n, codigo, finalidade, expira),
             )
         conexao.commit()
+        return codigo
     except Exception as e:
         try:
             conexao.rollback()
         except Exception:
             pass
         print(f"OTP não gravou no Postgres (o código ainda vale nesta sessão): {e}")
+        return f"{secrets.randbelow(1000000):06d}"
     finally:
         conexao.close()
-    return codigo
 
 
-def validar_otp(email, codigo, finalidade):
-    codigo = (codigo or "").strip()
+def validar_otp(email, codigo, finalidade=None):
+    codigo = _codigo_otp_limpo(codigo)
+    if len(codigo) != 6:
+        return False
     try:
         from flask import has_request_context, session
         if has_request_context():
-            local = (session.get("otp_local") or "").strip()
-            if local and codigo == local and session.get("login_email") == normalizar_email(email):
+            local = _codigo_otp_limpo(session.get("otp_local"))
+            email_sessao = normalizar_email(session.get("login_email") or "")
+            if local and codigo == local and email_sessao == normalizar_email(email):
                 session.pop("otp_local", None)
                 return True
     except Exception:
@@ -306,11 +337,11 @@ def validar_otp(email, codigo, finalidade):
             cursor.execute(
                 """
                 SELECT id FROM plataforma_otp
-                WHERE LOWER(email) = %s AND codigo = %s AND finalidade = %s
+                WHERE LOWER(email) = %s AND codigo = %s
                   AND usado = FALSE AND expira > NOW()
                 ORDER BY id DESC LIMIT 1
                 """,
-                (normalizar_email(email), (codigo or "").strip(), finalidade),
+                (normalizar_email(email), codigo),
             )
             row = cursor.fetchone()
             if not row:

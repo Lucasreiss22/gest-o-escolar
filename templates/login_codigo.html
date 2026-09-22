@@ -15,7 +15,7 @@
 <body class="login-page">
     <div class="login-card">
         <h2>Confirme o e-mail</h2>
-        <p class="hint">Digite o código de 6 dígitos enviado para {{ email }}. Confira também a pasta Spam.</p>
+        <p class="hint">Digite o código de 6 dígitos enviado para {{ email }}. Confira também a pasta Spam. Se pedir de novo, o mesmo código continua válido até 20 minutos.</p>
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}

@@ -164,17 +164,17 @@
         {% endif %}
 
         <div class="resumo-grid fin-kpis">
-            <a href="{{ url_for('pagina_financeiro', status='Pago', mes=mes_atual) }}" class="card-resumo recebido">
+            <a href="{{ url_for('pagina_financeiro', status='Pago', mes=mes_atual, aba='receitas') }}" class="card-resumo recebido">
                 <h4>Total Recebido</h4>
                 <div class="valor">R$ {{ "%.2f"|format(totais.recebido) }}</div>
                 <span class="hint">🔍 Filtrar Pagos</span>
             </a>
-            <a href="{{ url_for('pagina_financeiro', status='Pendente', mes=mes_atual) }}" class="card-resumo pendente">
+            <a href="{{ url_for('pagina_financeiro', status='Pendente', mes=mes_atual, aba='receitas') }}" class="card-resumo pendente">
                 <h4>Total Pendente</h4>
                 <div class="valor">R$ {{ "%.2f"|format(totais.pendente) }}</div>
                 <span class="hint">🔍 Filtrar Pendentes</span>
             </a>
-            <a href="{{ url_for('pagina_financeiro', status='Atrasado', mes=mes_atual) }}" class="card-resumo atrasado">
+            <a href="{{ url_for('pagina_financeiro', status='Atrasado', mes=mes_atual, aba='receitas') }}" class="card-resumo atrasado">
                 <h4>Total Atrasado</h4>
                 <div class="valor">R$ {{ "%.2f"|format(totais.atrasado) }}</div>
                 <span class="hint">🔍 Filtrar Atrasados</span>
@@ -598,7 +598,7 @@
                     </div>
                     <div class="form-group" style="margin-bottom: 12px;">
                         <label>Valor mensal (R$)</label>
-                        <input type="text" name="valor" placeholder="0.00" required>
+                        <input type="text" name="valor" placeholder="0.00" required data-moeda>
                     </div>
                     <div class="form-group" style="margin-bottom: 12px;">
                         <label>Primeiro vencimento</label>
@@ -617,7 +617,7 @@
                         <select name="turnos">
                             <option value="manha">Somente manhã</option>
                             <option value="tarde">Somente tarde</option>
-                            <option value="integral">Dois turnos (manhã e tarde)</option>
+                            <option value="integral">Turno integral (manhã e tarde)</option>
                         </select>
                     </div>
                     <input type="hidden" name="aba" value="receitas">
@@ -675,13 +675,30 @@
                             {% else %}
                                 <span class="badge badge-atrasado">Atrasado</span>
                             {% endif %}
-                    </div>
+                            </div>
+                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="fin-item-meta" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+                            <input type="hidden" name="acao" value="editar_cobranca">
+                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                            <input type="hidden" name="aba" value="receitas">
+                            <input type="hidden" name="mes" value="{{ mes_atual }}">
+                            <input name="descricao" value="{{ item.descricao or '' }}" style="flex:1;min-width:140px;padding:6px;border:1px solid #ccc;border-radius:4px;" placeholder="Descrição">
+                            <input name="valor" data-moeda value="{{ '%.2f'|format(item.valor|float if item.valor else 0) }}" style="width:90px;padding:6px;border:1px solid #ccc;border-radius:4px;">
+                            <input type="date" name="data_vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:6px;border:1px solid #ccc;border-radius:4px;">
+                            <select name="status" style="padding:6px;border:1px solid #ccc;border-radius:4px;">
+                                <option value="Pendente" {% if item.status == 'Pendente' %}selected{% endif %}>Pendente</option>
+                                <option value="Atrasado" {% if item.status == 'Atrasado' %}selected{% endif %}>Atrasado</option>
+                                <option value="Pago" {% if item.status == 'Pago' %}selected{% endif %}>Pago</option>
+                            </select>
+                            <button type="submit" class="btn btn-secondary" style="padding:6px 10px;font-size:0.8rem;">Salvar</button>
+                        </form>
                         <div class="fin-item-acoes">
                             {% if item.status != 'Pago' %}
                             <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center; flex: 1;">
                                 <input type="hidden" name="acao" value="dar_baixa">
                                 <input type="hidden" name="cobranca_id" value="{{ item.id }}">
                                 <input type="hidden" name="data_pagamento" value="{{ data_hoje }}">
+                                <input type="hidden" name="aba" value="receitas">
+                                <input type="hidden" name="mes" value="{{ mes_atual }}">
                                 <select name="forma_pagamento" style="padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.8rem; flex:1;" required>
                                     <option value="Dinheiro">Dinheiro</option>
                                     <option value="Pix">Pix</option>
@@ -751,11 +768,28 @@
                                 </td>
                                 <td>
                                     <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                                            <input type="hidden" name="acao" value="editar_cobranca">
+                                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                            <input type="hidden" name="aba" value="receitas">
+                                            <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                            <input name="descricao" value="{{ item.descricao or '' }}" style="width:120px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
+                                            <input name="valor" data-moeda value="{{ '%.2f'|format(item.valor|float if item.valor else 0) }}" style="width:80px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
+                                            <input type="date" name="data_vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
+                                            <select name="status" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
+                                                <option value="Pendente" {% if item.status == 'Pendente' %}selected{% endif %}>Pendente</option>
+                                                <option value="Atrasado" {% if item.status == 'Atrasado' %}selected{% endif %}>Atrasado</option>
+                                                <option value="Pago" {% if item.status == 'Pago' %}selected{% endif %}>Pago</option>
+                                            </select>
+                                            <button type="submit" class="btn btn-secondary" style="padding:5px 10px;font-size:0.75rem;">Salvar</button>
+                                        </form>
                                         {% if item.status != 'Pago' %}
                                         <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center;">
                                             <input type="hidden" name="acao" value="dar_baixa">
                                             <input type="hidden" name="cobranca_id" value="{{ item.id }}">
                                             <input type="hidden" name="data_pagamento" value="{{ data_hoje }}">
+                                            <input type="hidden" name="aba" value="receitas">
+                                            <input type="hidden" name="mes" value="{{ mes_atual }}">
                                             <select name="forma_pagamento" style="padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.75rem;" required>
                                                 <option value="Dinheiro">Dinheiro</option>
                                                 <option value="Pix">Pix</option>

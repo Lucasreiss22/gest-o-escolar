@@ -53,6 +53,7 @@ from plataforma import (
     cadastrar_escola,
     atualizar_email_admin_escola,
     definir_status_escola,
+    definir_senha_escola_por_admin,
     excluir_escola,
     regenerar_convite_escola,
     buscar_escola_por_id,
@@ -193,12 +194,40 @@ def _log(mensagem):
         pass
 
 
-def _float_form(nome, padrao=0.0):
-    bruto = (request.form.get(nome) or "").strip().replace(",", ".")
+def _parse_moeda(bruto, padrao=0.0):
+    if bruto is None:
+        return padrao
+    s = str(bruto).strip().replace("R$", "").replace("\xa0", "").replace(" ", "")
+    if not s:
+        return padrao
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif s.count(".") > 1:
+        s = s.replace(".", "")
+    elif s.count(".") == 1:
+        esquerda, direita = s.split(".")
+        if len(direita) == 3 and esquerda.replace("-", "").isdigit():
+            s = esquerda + direita
     try:
-        return float(bruto) if bruto else padrao
+        return float(s)
     except ValueError:
         return padrao
+
+
+def _float_form(nome, padrao=0.0):
+    return _parse_moeda(request.form.get(nome), padrao)
+
+
+def _formacao_do_form():
+    flags = [item.strip() for item in request.form.getlist("formacao_flag") if (item or "").strip()]
+    curso = (request.form.get("formacao_curso") or request.form.get("formacao") or "").strip()
+    partes = []
+    for item in flags:
+        if item not in partes:
+            partes.append(item)
+    if curso and curso not in partes:
+        partes.append(curso)
+    return " | ".join(partes)[:150]
 
 
 def _efeito_caixa_custo(custo):
@@ -276,6 +305,21 @@ def _data_iso(valor):
     if hasattr(valor, "strftime"):
         return valor.strftime("%Y-%m-%d")
     return str(valor)[:10]
+
+
+def _salvar_foto(campo, pasta="fotos"):
+    arquivo = request.files.get(campo) if request.files else None
+    if not arquivo or not (arquivo.filename or "").strip():
+        return None
+    nome = secure_filename(arquivo.filename)
+    ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else "jpg"
+    if ext not in {"jpg", "jpeg", "png", "webp", "gif"}:
+        raise ValueError("A foto precisa ser JPG, PNG ou WEBP.")
+    destino = os.path.join(app.root_path, "static", "uploads", pasta)
+    os.makedirs(destino, exist_ok=True)
+    arquivo_nome = f"{uuid.uuid4().hex}.{ext}"
+    arquivo.save(os.path.join(destino, arquivo_nome))
+    return f"uploads/{pasta}/{arquivo_nome}"
 
 
 def _cpf_provisorio(chave):
@@ -1055,24 +1099,41 @@ def _voltar_ou(padrao):
     return padrao
 
 
-def _enviar_codigo_plataforma(email, access_token=None):
-    codigo = gerar_otp(email, "login_plataforma")
+def _enviar_codigo_acesso(email, finalidade="login"):
+    codigo = gerar_otp(email, finalidade)
     session["otp_local"] = codigo
     session["otp_email_ok"] = False
     session["login_email"] = email
+    session["otp_finalidade"] = finalidade
     corpo = (
         f"Seu código de confirmação da Gestão Escolar é: {codigo}\n\n"
-        "Ele vale por 20 minutos. Se você não pediu este acesso, ignore o e-mail."
+        "Ele vale por 20 minutos. Use este mesmo código se receber o e-mail mais de uma vez.\n"
+        "Se você não pediu este acesso, ignore o e-mail."
     )
-    assunto = "Código de acesso da plataforma"
-    token = access_token
-    ok, erro = enviar_codigo(email, codigo, assunto, corpo, access_token=token)
+    ok, erro = enviar_codigo(email, codigo, "Código de acesso — Gestão Escolar", corpo)
     session["otp_email_ok"] = bool(ok)
     if ok:
         flash("Enviamos um código de 6 dígitos para o seu e-mail. Confira a caixa de entrada e o Spam.", "success")
     else:
         flash(f"Não foi possível enviar o código por e-mail. ({erro})", "danger")
     return redirect(url_for("login_codigo"))
+
+
+def _enviar_codigo_colaborador(email, nome):
+    codigo = gerar_otp(email, "login_escola")
+    corpo = (
+        f"Olá, {nome}.\n\n"
+        f"Seu acesso à Gestão Escolar foi criado.\n"
+        f"Entre em {request.host_url}login com este e-mail: {email}\n"
+        f"Código de confirmação: {codigo}\n\n"
+        "O código vale por 20 minutos. Na tela de login clique em Continuar e depois em "
+        "Esqueci a senha ou Receber código, e informe estes 6 dígitos para criar sua senha.\n"
+    )
+    return enviar_codigo(email, codigo, "Acesso à Gestão Escolar — código de login", corpo)
+
+
+def _enviar_codigo_plataforma(email, access_token=None):
+    return _enviar_codigo_acesso(email, "login_plataforma")
 
 
 @app.route("/login/esqueci-senha")
@@ -1082,11 +1143,15 @@ def login_esqueci_senha():
     if not email:
         flash("Informe o e-mail na tela inicial.", "danger")
         return redirect(url_for("login"))
-    if not eh_super_admin(email):
-        flash("Redefinição por código está disponível para o administrador da plataforma. Escolas usam o convite enviado no cadastro.", "danger")
-        return redirect(url_for("login_senha"))
-    session["redefinir_senha"] = True
-    return _enviar_codigo_plataforma(email)
+    if eh_super_admin(email):
+        session["redefinir_senha"] = True
+        return _enviar_codigo_acesso(email, "login_plataforma")
+    escola = buscar_escola_por_email(email) or localizar_escola_do_email(email)
+    if not escola:
+        flash("Este e-mail não está cadastrado.", "danger")
+        return redirect(url_for("login"))
+    session["redefinir_senha_escola"] = True
+    return _enviar_codigo_acesso(email, "login_escola")
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -1100,6 +1165,8 @@ def login():
             flash(str(e), "danger")
             return render_template("login.html")
         session["login_email"] = email
+        if request.form.get("acao") == "codigo":
+            return redirect(url_for("login_conectar_gmail"))
         if eh_super_admin(email):
             admin = buscar_admin_plataforma(email)
             if admin and admin.get("senha") and admin.get("email_confirmado"):
@@ -1110,9 +1177,13 @@ def login():
             if not escola.get("ativo", True):
                 flash("Esta escola está pausada. O acesso de todos os usuários dessa escola está bloqueado.", "danger")
                 return render_template("login.html")
-            if not escola.get("senha_definida"):
+            email_admin = (escola.get("email_admin") or "").strip().lower()
+            if not escola.get("senha_definida") and email_admin == email.strip().lower():
                 flash("Esta escola ainda precisa ativar o acesso. O código foi enviado ao e-mail cadastrado.", "danger")
                 return redirect(url_for("ativar_escola", token=escola.get("convite_token")))
+            if not escola.get("senha_definida"):
+                flash("A escola ainda não ativou o acesso. Peça ao administrador da plataforma para concluir o cadastro.", "danger")
+                return render_template("login.html")
             return redirect(url_for("login_senha"))
         flash("Este e-mail não está cadastrado. Escolas entram com o e-mail convite. O admin da plataforma é o Gmail principal.", "danger")
     return render_template("login.html")
@@ -1124,17 +1195,28 @@ def login_conectar_gmail():
         garantir_plataforma()
     except Exception as e:
         print(f"garantir_plataforma: {e}")
-    email = session.get("login_email") or email_super_admin()
+    email = (
+        request.form.get("email")
+        or request.form.get("smtp_user")
+        or session.get("login_email")
+        or ""
+    ).strip()
     if not email:
-        flash("Informe o e-mail na tela inicial.", "danger")
-        return redirect(url_for("login"))
+        flash("Informe o e-mail para receber o código.", "danger")
+        return render_template("login_conectar_gmail.html", email="")
     try:
         email = exigencia_email(email, "E-mail")
     except ValueError as e:
         flash(str(e), "danger")
-        return redirect(url_for("login"))
+        return render_template("login_conectar_gmail.html", email=email)
     session["login_email"] = email
-    return _enviar_codigo_plataforma(email)
+    if eh_super_admin(email):
+        return _enviar_codigo_acesso(email, "login_plataforma")
+    escola = buscar_escola_por_email(email) or localizar_escola_do_email(email)
+    if escola:
+        return _enviar_codigo_acesso(email, "login_escola")
+    flash("Informe um e-mail cadastrado para receber o código.", "danger")
+    return redirect(url_for("login"))
 
 
 @app.route("/login/google")
@@ -1154,12 +1236,18 @@ def login_codigo():
         return redirect(url_for("login"))
     if request.method == "POST":
         codigo = (request.form.get("codigo") or "").strip()
-        if validar_otp(email, codigo, "login_plataforma"):
+        finalidade = session.get("otp_finalidade") or "login_plataforma"
+        if validar_otp(email, codigo, finalidade) or validar_otp(email, codigo):
             session["otp_ok"] = True
-            session["login_tipo"] = "plataforma"
-            session["redefinir_senha"] = True
             session.pop("otp_local", None)
-            flash("Código confirmado. Agora defina a senha de acesso da plataforma.", "success")
+            if eh_super_admin(email) or finalidade == "login_plataforma":
+                session["login_tipo"] = "plataforma"
+                session["redefinir_senha"] = True
+                flash("Código confirmado. Agora defina a senha de acesso da plataforma.", "success")
+            else:
+                session["login_tipo"] = "escola"
+                session["redefinir_senha_escola"] = True
+                flash("Código confirmado. Agora defina a nova senha de acesso.", "success")
             return redirect(url_for("login_senha"))
         flash("Código inválido ou vencido. Use os 6 dígitos enviados ao e-mail.", "danger")
     return render_template(
@@ -1189,11 +1277,16 @@ def _login_senha(email):
         if criar and not session.get("otp_ok"):
             flash("Confirme o código enviado ao e-mail antes de criar ou redefinir a senha.", "danger")
             return redirect(url_for("login_conectar_gmail"))
+    elif session.get("redefinir_senha_escola"):
+        criar = True
+        if not session.get("otp_ok"):
+            flash("Confirme o código enviado ao e-mail antes de redefinir a senha.", "danger")
+            return redirect(url_for("login_conectar_gmail"))
     if request.method != "POST":
         return render_template("login_senha.html", email=email, criar=criar)
     senha = (request.form.get("senha") or "").strip()
     senha2 = (request.form.get("senha2") or "").strip()
-    if criar:
+    if criar and eh_super_admin(email):
         if senha != senha2:
             flash("As senhas não coincidem.", "danger")
             return render_template("login_senha.html", email=email, criar=True)
@@ -1205,6 +1298,39 @@ def _login_senha(email):
         session.pop("redefinir_senha", None)
         _entrar_plataforma(admin)
         return redirect(url_for("plataforma_escolas"))
+    if criar and session.get("redefinir_senha_escola"):
+        if senha != senha2:
+            flash("As senhas não coincidem.", "danger")
+            return render_template("login_senha.html", email=email, criar=True)
+        if len(senha) < 6:
+            flash("A senha deve ter pelo menos 6 caracteres.", "danger")
+            return render_template("login_senha.html", email=email, criar=True)
+        escola = buscar_escola_por_email(email) or localizar_escola_do_email(email)
+        if not escola:
+            flash("E-mail não encontrado.", "danger")
+            return redirect(url_for("login"))
+        token = definir_banco_escola(escola["db_nome"])
+        try:
+            conexao = obter_conexao()
+            if not conexao:
+                raise RuntimeError("Sem conexão com o banco da escola.")
+            with conexao.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE usuarios SET senha = %s WHERE LOWER(email) = %s",
+                    (senha, email),
+                )
+            conexao.commit()
+            conexao.close()
+        finally:
+            limpar_banco_escola(token)
+        session.pop("otp_ok", None)
+        session.pop("redefinir_senha_escola", None)
+        usuario, escola = usuario_da_escola(email, senha, escola)
+        if usuario:
+            _entrar_escola(usuario, email, escola)
+            return redirect(url_for("dashboard"))
+        flash("Senha atualizada. Entre com o e-mail e a nova senha.", "success")
+        return redirect(url_for("login_senha"))
     if eh_super_admin(email):
         admin = buscar_admin_plataforma(email)
         armazenada = (admin.get("senha") if admin else "") or ""
@@ -1213,7 +1339,7 @@ def _login_senha(email):
             return redirect(url_for("plataforma_escolas"))
         flash("Senha incorreta. Use a senha que você criou neste sistema (não a do Gmail e não 123456, a menos que tenha escolhido essa).", "danger")
         return render_template("login_senha.html", email=email, criar=False)
-    escola = buscar_escola_por_email(email)
+    escola = buscar_escola_por_email(email) or localizar_escola_do_email(email)
     if not escola:
         flash("E-mail ou senha incorretos.", "danger")
         return render_template("login_senha.html", email=email, criar=False)
@@ -1367,15 +1493,36 @@ def plataforma_escolas():
                 flash(f"Não foi possível cadastrar a escola: {e}", "danger")
         elif acao == "reenviar_convite":
             token = request.form.get("token")
-            escola = buscar_escola_por_token(token)
+            escola_id = request.form.get("escola_id")
+            escola = buscar_escola_por_token(token) if token else buscar_escola_por_id(escola_id)
             if not escola:
                 flash("Escola não encontrada.", "danger")
-            elif not escola.get("convite_codigo"):
-                flash(
-                    f"A escola {escola['nome']} já definiu senha, então o código antigo foi apagado. "
-                    "Use Redefinir senha para gerar um código novo, ou Acessar dados para entrar no perfil.",
-                    "danger",
+            elif escola.get("senha_definida"):
+                codigo = gerar_otp(escola["email_admin"], "login_escola")
+                corpo = (
+                    f"Seu código para alterar a senha da Gestão Escolar é: {codigo}\n\n"
+                    "Na tela de login informe este e-mail, clique em Continuar e depois em Esqueci a senha. "
+                    "Use os 6 dígitos. O código vale 20 minutos.\n"
+                    "Se o e-mail não chegar, peça ao administrador da plataforma para usar Redefinir senha."
                 )
+                ok, erro = enviar_codigo(
+                    escola["email_admin"],
+                    codigo,
+                    "Código para alterar a senha — Gestão Escolar",
+                    corpo,
+                )
+                if ok:
+                    flash(
+                        f"Código enviado para {escola['email_admin']}. "
+                        "A escola entra em Esqueci a senha e usa este código. "
+                        "Se não chegar, use Redefinir senha (último caso).",
+                        "success",
+                    )
+                else:
+                    flash(
+                        f"O e-mail não saiu ({erro}). Use Redefinir senha ao lado para definir a senha manualmente.",
+                        "danger",
+                    )
             else:
                 ok, erro, _link = _enviar_convite_escola(escola)
                 _avisar_envio(escola, ok, erro, acao="reenviar")
@@ -1412,9 +1559,16 @@ def plataforma_escolas():
                 flash(f"Não foi possível excluir: {e}", "danger")
         elif acao == "redefinir_senha":
             try:
-                escola = regenerar_convite_escola(request.form.get("escola_id"))
-                ok, erro, _link = _enviar_convite_escola(escola)
-                _avisar_envio(escola, ok, erro, acao="reenviar")
+                nova = (request.form.get("nova_senha") or "").strip()
+                if len(nova) < 6:
+                    raise ValueError("Informe a nova senha (mínimo 6 caracteres) no campo ao lado de Redefinir senha.")
+                escola = definir_senha_escola_por_admin(request.form.get("escola_id"), nova)
+                flash(
+                    f"Senha da escola {escola.get('nome')} redefinida pelo administrador da plataforma. "
+                    f"A escola entra com {escola.get('email_admin')} e a senha que você acabou de definir. "
+                    "Não é preciso código por e-mail.",
+                    "success",
+                )
             except Exception as e:
                 flash(f"Não foi possível redefinir a senha: {e}", "danger")
         elif acao == "acessar_escola":
@@ -1559,13 +1713,17 @@ def gerenciar_usuarios():
 
                     nome = limpar_campo("nome")
                     email = limpar_campo("email")
-                    senha = (request.form.get("senha") or "").strip()
+                    senha_informada = (request.form.get("senha") or "").strip()
+                    senha = senha_informada
                     papel = normalizar_papel(limpar_campo("papel") or "funcionario")
                     uid = request.form.get("usuario_id", type=int)
                     fid = request.form.get("funcionario_id", type=int)
                     if not nome or not email:
                         raise ValueError("Informe nome e e-mail.")
                     exigencia_email(email, "E-mail do colaborador")
+                    novo_login = not uid
+                    if novo_login and not senha:
+                        senha = secrets.token_urlsafe(9)
 
                     if uid:
                         if senha:
@@ -1579,8 +1737,6 @@ def gerenciar_usuarios():
                                 (nome, email, papel, uid),
                             )
                     else:
-                        if not senha:
-                            raise ValueError("Informe a senha do primeiro acesso.")
                         cursor.execute(
                             """
                             INSERT INTO usuarios (nome, email, senha, papel)
@@ -1613,7 +1769,7 @@ def gerenciar_usuarios():
                     inicio_contrato = limpar_campo("data_inicio_contrato") or limpar_campo("data_contratacao") or datetime.now().strftime("%Y-%m-%d")
                     valores_folha = (
                         nome, cpf, nasc, cargo, telefone, email,
-                        limpar_campo("especialidade"), limpar_campo("formacao"),
+                        limpar_campo("especialidade"), _formacao_do_form(),
                         limpar_campo("rg"), limpar_campo("cep"), limpar_campo("rua"),
                         limpar_campo("numero"), limpar_campo("bairro"), limpar_campo("cidade"),
                         (limpar_campo("estado") or "")[:2] or None,
@@ -1675,6 +1831,15 @@ def gerenciar_usuarios():
                         fid = cursor.fetchone()["id"]
                     conexao.commit()
                     flash("Cadastro de usuário e folha salvo. A pessoa já aparece em Equipe / Professores.", "success")
+                    if novo_login or senha_informada:
+                        try:
+                            ok, erro = _enviar_codigo_colaborador(email, nome)
+                            if ok:
+                                flash(f"Código de acesso enviado para {email}.", "success")
+                            else:
+                                flash(f"Cadastro salvo, mas o código de acesso não saiu: {erro}", "danger")
+                        except Exception as e:
+                            flash(f"Cadastro salvo, mas o e-mail de acesso não saiu: {e}", "danger")
                     return redirect(url_for("gerenciar_usuarios", uid=uid))
             except Exception as e:
                 conexao.rollback()
@@ -2517,7 +2682,17 @@ def pagina_alunos():
                     status_bruto = status_bruto.strip().lower()
                 status = "inativo" if status_bruto in ["inativo", "inactive", "false", "0", "off"] else "ativo"
                 
-                telefone_principal = limpar_campo("telefone_principal") or request.form.get("telefone_principal")
+                telefone_principal = (
+                    limpar_campo("telefone_principal")
+                    or request.form.get("telefone_principal")
+                    or limpar_campo("telefone")
+                    or request.form.get("telefone")
+                )
+                foto_aluno = None
+                try:
+                    foto_aluno = _salvar_foto("foto")
+                except ValueError as e:
+                    flash(str(e), "danger")
 
                 conexao = obter_conexao()
                 if conexao:
@@ -2532,14 +2707,17 @@ def pagina_alunos():
                                     data_nascimento = %s,
                                     telefone_principal = %s,
                                     email = %s,
+                                    cep = %s,
                                     rua = %s,
                                     numero = %s,
                                     bairro = %s,
                                     cidade = %s,
                                     estado = %s,
+                                    valor_mensalidade = COALESCE(%s, valor_mensalidade),
                                     contrato_meses = COALESCE(%s, contrato_meses),
                                     contrato_inicio = COALESCE(%s::date, contrato_inicio),
-                                    turnos_mensalidade = COALESCE(%s, turnos_mensalidade)
+                                    turnos_mensalidade = COALESCE(%s, turnos_mensalidade),
+                                    foto_url = COALESCE(%s, foto_url)
                                 WHERE id = %s;
                             """, (
                                 limpar_campo("nome_completo"),
@@ -2549,14 +2727,17 @@ def pagina_alunos():
                                 limpar_campo("data_nascimento") or "2000-01-01",
                                 telefone_principal,
                                 limpar_campo("email"),
+                                limpar_campo("cep"),
                                 limpar_campo("rua") or limpar_campo("logradouro"),
                                 limpar_campo("numero"),
                                 limpar_campo("bairro"),
                                 limpar_campo("cidade"),
-                                limpar_campo("estado") or limpar_campo("estado_uf"),
+                                (limpar_campo("estado") or limpar_campo("estado_uf") or "")[:2] or None,
+                                _float_form("valor_mensalidade") or None,
                                 request.form.get("contrato_meses") or None,
                                 limpar_campo("contrato_inicio"),
                                 limpar_campo("turnos_mensalidade"),
+                                foto_aluno,
                                 aluno_id
                             ))
                             conexao.commit()
@@ -2569,17 +2750,8 @@ def pagina_alunos():
                 return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
 
         if acao == "cadastrar_aluno":
-            valor_mensalidade_raw = request.form.get("valor_mensalidade", "").strip()
-            try:
-                valor_mensalidade = float(valor_mensalidade_raw.replace(",", ".")) if valor_mensalidade_raw else 0.0
-            except ValueError:
-                valor_mensalidade = 0.0
-
-            desconto_valor_raw = request.form.get("desconto_valor", "0.0").strip()
-            try:
-                desconto_valor = float(desconto_valor_raw.replace(",", ".")) if desconto_valor_raw else 0.0
-            except ValueError:
-                desconto_valor = 0.0
+            valor_mensalidade = _parse_moeda(request.form.get("valor_mensalidade"), 0.0)
+            desconto_valor = _parse_moeda(request.form.get("desconto_valor"), 0.0)
 
             desconto_tipo_raw = request.form.get("desconto_tipo", "nenhum").strip().lower()
             mapeamento_desconto = {
@@ -2612,6 +2784,10 @@ def pagina_alunos():
                 "desconto_tipo": desconto_tipo,
                 "desconto_valor": desconto_valor,
                 "turma_id": request.form.get("turma_id") or None,
+                "contrato_meses": request.form.get("contrato_meses") or 12,
+                "contrato_inicio": limpar_campo("contrato_inicio") or None,
+                "turnos_mensalidade": limpar_campo("turnos_mensalidade") or "manha",
+                "foto_url": _salvar_foto("foto"),
             }
 
             resp1_nome = limpar_campo("resp1_nome")
@@ -2623,6 +2799,7 @@ def pagina_alunos():
                 "email": limpar_campo("resp1_email"),
                 "local_trabalho": limpar_campo("resp1_trabalho"),
                 "telefone_trabalho": limpar_campo("resp1_tel_trabalho"),
+                "foto_url": _salvar_foto("resp1_foto"),
             } if resp1_nome else None
 
             resp2_nome = limpar_campo("resp2_nome")
@@ -2634,6 +2811,7 @@ def pagina_alunos():
                 "email": limpar_campo("resp2_email"),
                 "local_trabalho": limpar_campo("resp2_trabalho"),
                 "telefone_trabalho": limpar_campo("resp2_tel_trabalho"),
+                "foto_url": _salvar_foto("resp2_foto"),
             } if resp2_nome else None
 
             try:
@@ -2689,7 +2867,18 @@ def pagina_alunos():
 
     termo_busca = request.args.get("q", "").strip()
     alunos = listar_alunos(termo_busca)
-    return render_template("alunos.html", alunos=alunos, termo_busca=termo_busca)
+    turmas = []
+    conexao_t = obter_conexao()
+    if conexao_t:
+        try:
+            with conexao_t.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("SELECT id, nome FROM turmas ORDER BY nome")
+                turmas = cursor.fetchall()
+        except Exception:
+            turmas = []
+        finally:
+            conexao_t.close()
+    return render_template("alunos.html", alunos=alunos, termo_busca=termo_busca, turmas=turmas)
 
 
 @app.route("/cadastrar_aluno", methods=["POST"])
@@ -2905,6 +3094,7 @@ def salvar_responsavel(aluno_id):
             if not resp_id:
                 raise ValueError("Responsável não encontrado.")
             email_resp = exigencia_email(limpar_campo("email"), "E-mail do responsável")
+            foto_resp = _salvar_foto("foto")
             atualizar_responsavel(resp_id, {
                 "nome_completo": limpar_campo("nome_completo"),
                 "cpf": limpar_campo("cpf"),
@@ -2913,6 +3103,7 @@ def salvar_responsavel(aluno_id):
                 "email": email_resp,
                 "local_trabalho": limpar_campo("local_trabalho"),
                 "telefone_trabalho": limpar_campo("telefone_trabalho"),
+                "foto_url": foto_resp,
             })
             flash("Responsável atualizado.", "success")
     except Exception as e:
@@ -2945,16 +3136,18 @@ def adicionar_responsavel(aluno_id):
                 parentesco = limpar_campo("grau_parentesco") or limpar_campo("parentesco")
                 telefone = limpar_campo("telefone") or limpar_campo("telefone_principal")
                 email_resp = exigencia_email(limpar_campo("email"), "E-mail do responsável")
+                foto_resp = _salvar_foto("foto")
 
                 cursor.execute("""
                     INSERT INTO responsaveis_aluno (
-                        aluno_id, tipo_responsavel, nome_completo, cpf, grau_parentesco, 
-                        telefone, email, local_trabalho, telefone_trabalho
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
+                        aluno_id, tipo_responsavel, nome_completo, cpf, grau_parentesco,
+                        telefone, email, local_trabalho, telefone_trabalho, foto_url
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                 """, (
                     aluno_id, proximo_tipo, limpar_campo("nome_completo"), limpar_campo("cpf"),
                     parentesco, telefone, email_resp,
-                    limpar_campo("local_trabalho"), limpar_campo("telefone_trabalho")
+                    limpar_campo("local_trabalho"), limpar_campo("telefone_trabalho"),
+                    foto_resp
                 ))
                 conexao.commit()
                 flash("✅ Responsável legal adicionado com sucesso!", "success")
@@ -3761,8 +3954,7 @@ def pagina_financeiro():
                     if acao == "criar_cobranca":
                         aluno_id = request.form.get("aluno_id")
                         descricao = limpar_campo("descricao") or "Mensalidade"
-                        valor_raw = request.form.get("valor", "0").replace(",", ".")
-                        valor = float(valor_raw) if valor_raw else 0.0
+                        valor = _parse_moeda(request.form.get("valor"), 0.0)
                         data_vencimento = request.form.get("data_vencimento") or datetime.now().strftime("%Y-%m-%d")
                         try:
                             duracao = int(request.form.get("duracao") or 1)
@@ -3808,6 +4000,27 @@ def pagina_financeiro():
                         conexao.commit()
                         flash(f"Lote gerado: {geradas} cobrança(s) no mês, respeitando o prazo do contrato.", "success")
 
+                    elif acao == "editar_cobranca":
+                        cobranca_id = request.form.get("cobranca_id")
+                        valor_edit = _parse_moeda(request.form.get("valor"), 0.0)
+                        status_edit = request.form.get("status") or "Pendente"
+                        cursor.execute(
+                            """
+                            UPDATE financeiro_mensalidades
+                            SET descricao = %s, valor = %s, data_vencimento = %s, status = %s
+                            WHERE id = %s
+                            """,
+                            (
+                                limpar_campo("descricao") or "Mensalidade",
+                                valor_edit,
+                                request.form.get("data_vencimento") or datetime.now().strftime("%Y-%m-%d"),
+                                status_edit,
+                                cobranca_id,
+                            ),
+                        )
+                        conexao.commit()
+                        flash("Cobrança atualizada no extrato.", "success")
+
                     elif acao == "dar_baixa":
                         cursor.execute(
                             """
@@ -3825,9 +4038,9 @@ def pagina_financeiro():
                         flash("✅ Baixa realizada com sucesso!", "success")
 
                     elif acao == "salvar_funcionario":
-                        salario = float((request.form.get("salario") or "0").replace(",", ".") or 0)
-                        valor_hora = float((request.form.get("valor_hora") or "0").replace(",", ".") or 0)
-                        horas_mes = float((request.form.get("horas_mes") or "0").replace(",", ".") or 0)
+                        salario = _float_form("salario")
+                        valor_hora = _float_form("valor_hora")
+                        horas_mes = _float_form("horas_mes")
                         cursor.execute(
                             """
                             INSERT INTO funcionarios (
@@ -3856,9 +4069,9 @@ def pagina_financeiro():
 
                     elif acao == "atualizar_contrato":
                         fid = request.form.get("funcionario_id")
-                        salario = float((request.form.get("salario") or "0").replace(",", ".") or 0)
-                        valor_hora = float((request.form.get("valor_hora") or "0").replace(",", ".") or 0)
-                        horas_mes = float((request.form.get("horas_mes") or "0").replace(",", ".") or 0)
+                        salario = _float_form("salario")
+                        valor_hora = _float_form("valor_hora")
+                        horas_mes = _float_form("horas_mes")
                         horas_extras = float((request.form.get("horas_extras") or "0").replace(",", ".") or 0)
                         valor_hora_extra = float((request.form.get("valor_hora_extra") or "0").replace(",", ".") or 0)
                         cursor.execute(
@@ -4008,6 +4221,8 @@ def pagina_financeiro():
     busca = request.args.get("busca", "").strip()
     status_filtro = request.args.get("status", "").strip()
     aba = request.args.get("aba") or "resumo"
+    if status_filtro and aba == "resumo":
+        aba = "receitas"
     
     mes_filtro = request.args.get("mes", "").strip()
     if not mes_filtro:
@@ -4104,8 +4319,17 @@ def pagina_financeiro():
                     params.append(f"%{busca}%")
 
                 if status_filtro:
-                    query_lancamentos += " AND f.status = %s"
-                    params.append(status_filtro)
+                    status_norm = status_filtro.strip().lower()
+                    if status_norm == "atrasado":
+                        query_lancamentos += """
+                            AND (
+                                LOWER(COALESCE(f.status, '')) = 'atrasado'
+                                OR (f.data_vencimento < CURRENT_DATE AND LOWER(COALESCE(f.status, '')) <> 'pago')
+                            )
+                        """
+                    else:
+                        query_lancamentos += " AND LOWER(COALESCE(f.status, '')) = %s"
+                        params.append(status_norm)
 
                 query_lancamentos += " ORDER BY f.data_vencimento DESC;"
 

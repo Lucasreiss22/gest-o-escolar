@@ -772,6 +772,8 @@ def garantir_tabelas_folha():
                 ("alunos", "valor_mensalidade", "NUMERIC(12,2) DEFAULT 0"),
                 ("alunos", "desconto_tipo", "VARCHAR(20) DEFAULT 'nenhum'"),
                 ("alunos", "desconto_valor", "NUMERIC(12,2) DEFAULT 0"),
+                ("alunos", "foto_url", "VARCHAR(255)"),
+                ("responsaveis_aluno", "foto_url", "VARCHAR(255)"),
                 ("alunos", "cep", "VARCHAR(9)"),
                 ("alunos", "rua", "VARCHAR(150)"),
                 ("alunos", "numero", "VARCHAR(20)"),
