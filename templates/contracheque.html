@@ -108,11 +108,11 @@
                     <div class="grade-ajuste">
                         <div>
                             <label>Horas extras 50% (dias úteis)</label>
-                            {% with hora_name='horas_extras', hora_valor=item.horas_extras or 0, hora_atalhos=[1, 2, 4, 6, 8, 10, 12] %}{% include '_hora_picker.html' %}{% endwith %}
+                            {% with hora_name='horas_extras', hora_valor=item.horas_extras or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div>
                             <label>Horas extras 100% (domingo/feriado)</label>
-                            {% with hora_name='horas_extras_100', hora_valor=item.horas_extras_100 or 0, hora_atalhos=[1, 2, 4, 6, 8, 10, 12] %}{% include '_hora_picker.html' %}{% endwith %}
+                            {% with hora_name='horas_extras_100', hora_valor=item.horas_extras_100 or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div>
                             <label>Valor da hora extra 50% (vazio = automático)</label>

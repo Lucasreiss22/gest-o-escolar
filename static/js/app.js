@@ -353,20 +353,9 @@
                 var h = parseInt(selH.value, 10) || 0;
                 var m = parseInt(selM.value, 10) || 0;
                 hidden.value = (h + m / 60).toFixed(2);
-                box.querySelectorAll("[data-hora-atalho]").forEach(function (btn) {
-                    btn.classList.toggle("sel", parseInt(btn.getAttribute("data-hora-atalho"), 10) === h && m === 0);
-                });
             }
             selH.addEventListener("change", gravar);
             selM.addEventListener("change", gravar);
-            box.addEventListener("click", function (event) {
-                var btn = event.target.closest("[data-hora-atalho]");
-                if (!btn) return;
-                event.preventDefault();
-                selH.value = String(parseInt(btn.getAttribute("data-hora-atalho"), 10) || 0);
-                selM.value = "0";
-                gravar();
-            });
             gravar();
         });
     }
