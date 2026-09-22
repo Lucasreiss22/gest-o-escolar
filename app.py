@@ -96,6 +96,7 @@ from plataforma import (
     salvar_senha_plataforma,
     salvar_smtp_plataforma,
     localizar_escola_do_email,
+    garantir_login_colaborador,
     usuario_da_escola,
     validar_otp,
     ativar_escola as concluir_ativacao_escola,
@@ -1584,7 +1585,11 @@ def _enviar_codigo_acesso(email, finalidade="login"):
     ok, erro = enviar_codigo(email, codigo, "Código de acesso — Gestão Escolar", corpo)
     session["otp_email_ok"] = bool(ok)
     if ok:
-        flash("Enviamos um código de 6 dígitos para o seu e-mail. Confira a caixa de entrada e o Spam.", "success")
+        flash(
+            "Enviamos um código de 6 dígitos para o seu e-mail. Confira a caixa de entrada e o Spam."
+            + aviso_caixa_entrada([email]),
+            "success",
+        )
     else:
         flash(f"Não foi possível enviar o código por e-mail. ({erro})", "danger")
     return redirect(url_for("login_codigo"))
@@ -1636,8 +1641,8 @@ def login():
             flash(str(e), "danger")
             return render_template("login.html")
         session["login_email"] = email
-        if request.form.get("acao") == "codigo":
-            return redirect(url_for("login_conectar_gmail"))
+        acoes = request.form.getlist("acao")
+        quer_codigo = "codigo" in acoes
         if eh_super_admin(email):
             admin = buscar_admin_plataforma(email)
             if admin and admin.get("senha") and admin.get("email_confirmado"):
@@ -1655,8 +1660,15 @@ def login():
             if not escola.get("senha_definida"):
                 flash("A escola ainda não ativou o acesso. Peça ao administrador da plataforma para concluir o cadastro.", "danger")
                 return render_template("login.html")
+            login_novo = garantir_login_colaborador(email, escola)
+            if quer_codigo or login_novo:
+                return _enviar_codigo_acesso(email, "login_escola")
             return redirect(url_for("login_senha"))
-        flash("Este e-mail não está cadastrado. Escolas entram com o e-mail convite. O admin da plataforma é o Gmail principal.", "danger")
+        flash(
+            "Este e-mail não está na equipe da escola. Cadastre a pessoa em Usuários, com o perfil Professor, "
+            "e use o mesmo e-mail iCloud. Não crie uma escola nova para o professor.",
+            "danger",
+        )
     return render_template("login.html")
 
 
@@ -2183,7 +2195,7 @@ def gerenciar_usuarios():
                         return redirect(url_for("gerenciar_usuarios"))
 
                     nome = limpar_campo("nome")
-                    email = limpar_campo("email")
+                    email = exigencia_email(limpar_campo("email"), "E-mail do colaborador")
                     senha_informada = (request.form.get("senha") or "").strip()
                     senha = senha_informada
                     papel = normalizar_papel(limpar_campo("papel") or "funcionario")
@@ -2192,7 +2204,6 @@ def gerenciar_usuarios():
                     criar_login = request.form.get("criar_login") == "1"
                     if not nome or not email:
                         raise ValueError("Informe nome e e-mail para receber contra-cheque e avisos.")
-                    exigencia_email(email, "E-mail do colaborador")
 
                     if criar_login:
                         novo_login = not uid

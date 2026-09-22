@@ -5,7 +5,13 @@ from datetime import datetime, timedelta
 import psycopg2
 
 from config import carregar_config
-from database import definir_banco_escola, limpar_banco_escola, obter_conexao, obter_conexao_nova
+from database import (
+    _schema_seguro,
+    definir_banco_escola,
+    limpar_banco_escola,
+    obter_conexao,
+    obter_conexao_nova,
+)
 from email_envio import enviar_email, exigencia_email, normalizar_email, smtp_configurado
 
 
@@ -606,6 +612,12 @@ def cadastrar_escola(nome, email_admin):
         raise ValueError("Informe o nome da escola.")
     if eh_super_admin(email_admin):
         raise ValueError("Este e-mail é o administrador da plataforma e não pode ser usado como escola.")
+    ja_na_escola = localizar_escola_do_email(email_admin)
+    if ja_na_escola and (ja_na_escola.get("email_admin") or "").lower() != email_admin:
+        raise ValueError(
+            "Este e-mail já pertence a um professor ou funcionário de uma escola. "
+            "Cadastre a pessoa em Usuários da escola, com o perfil Professor. Não crie uma escola nova."
+        )
     existente = buscar_escola_por_email(email_admin)
     if existente:
         raise ValueError(
@@ -743,8 +755,51 @@ def ativar_escola(escola, senha):
         master.close()
 
 
+def _papel_pelo_cargo(cargo):
+    texto = (cargo or "").lower()
+    if "professor" in texto:
+        return "professor"
+    if "secret" in texto:
+        return "secretaria"
+    if "diret" in texto or "direç" in texto or "direc" in texto:
+        return "direcao"
+    if "financ" in texto:
+        return "financeiro"
+    if "supervis" in texto:
+        return "supervisor"
+    if "admin" in texto:
+        return "admin"
+    return "funcionario"
+
+
+def _pessoa_no_schema(cursor, schema, email):
+    nome = _schema_seguro(schema)
+    if not nome or nome == "public":
+        return None
+    cursor.execute(
+        f'SELECT papel FROM "{nome}".usuarios WHERE LOWER(TRIM(email)) = %s LIMIT 1',
+        (email,),
+    )
+    usuario = cursor.fetchone()
+    if usuario:
+        return {"origem": "usuario", "papel": usuario.get("papel") or "funcionario"}
+    cursor.execute(
+        f'SELECT id, nome_completo, cargo FROM "{nome}".funcionarios WHERE LOWER(TRIM(email)) = %s LIMIT 1',
+        (email,),
+    )
+    pessoa = cursor.fetchone()
+    if pessoa:
+        return {
+            "origem": "funcionario",
+            "papel": _papel_pelo_cargo(pessoa.get("cargo")),
+            "funcionario_id": pessoa.get("id"),
+            "nome": pessoa.get("nome_completo"),
+        }
+    return None
+
+
 def localizar_escola_do_email(email):
-    """Encontra a escola pelo e-mail do admin ou de qualquer usuário daquele banco."""
+    """Encontra a escola pelo e-mail do admin, de um usuário ou de alguém da folha."""
     email = normalizar_email(email)
     direta = buscar_escola_por_email(email)
     if direta:
@@ -759,11 +814,7 @@ def localizar_escola_do_email(email):
                 continue
             try:
                 with conexao.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT 1 FROM usuarios WHERE LOWER(email) = %s LIMIT 1",
-                        (email,),
-                    )
-                    if cursor.fetchone():
+                    if _pessoa_no_schema(cursor, escola.get("db_nome"), email):
                         return escola
             except Exception as e:
                 print(f"localizar escola {escola.get('db_nome')}: {e}")
@@ -772,6 +823,65 @@ def localizar_escola_do_email(email):
         finally:
             limpar_banco_escola(token)
     return None
+
+
+def garantir_login_colaborador(email, escola):
+    """Cria o acesso ao painel se a pessoa já está na folha e ainda não tem login."""
+    email = normalizar_email(email)
+    if not escola or (escola.get("email_admin") or "").lower() == email:
+        return False
+    schema = _schema_seguro(escola.get("db_nome"))
+    if not schema:
+        return False
+    token = definir_banco_escola(schema)
+    try:
+        conexao = obter_conexao()
+        if not conexao:
+            return False
+        try:
+            with conexao.cursor() as cursor:
+                pessoa = _pessoa_no_schema(cursor, schema, email)
+                if not pessoa or pessoa.get("origem") == "usuario":
+                    return False
+                papel = pessoa.get("papel") or "funcionario"
+                nome = pessoa.get("nome") or email
+                cursor.execute(
+                    f'''
+                    INSERT INTO "{schema}".usuarios (nome, email, senha, papel)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (email) DO NOTHING
+                    RETURNING id
+                    ''',
+                    (nome, email, secrets.token_urlsafe(9), papel),
+                )
+                criado = cursor.fetchone()
+            conexao.commit()
+            if criado and pessoa.get("funcionario_id"):
+                try:
+                    with conexao.cursor() as cursor:
+                        cursor.execute(
+                            f'UPDATE "{schema}".funcionarios SET usuario_id = %s WHERE id = %s AND usuario_id IS NULL',
+                            (criado["id"], pessoa["funcionario_id"]),
+                        )
+                    conexao.commit()
+                except Exception as e:
+                    print(f"vincular funcionario ao login: {e}")
+                    try:
+                        conexao.rollback()
+                    except Exception:
+                        pass
+            return bool(criado)
+        except Exception as e:
+            print(f"garantir login colaborador: {e}")
+            try:
+                conexao.rollback()
+            except Exception:
+                pass
+            return False
+        finally:
+            conexao.close()
+    finally:
+        limpar_banco_escola(token)
 
 
 def usuario_da_escola(email, senha, escola=None):

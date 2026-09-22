@@ -25,7 +25,6 @@
             {% endif %}
         {% endwith %}
         <form action="{{ url_for('login') }}" method="POST">
-            <input type="hidden" name="acao" value="continuar">
             <div class="form-group">
                 <label>E-mail</label>
                 <input type="email" name="email" placeholder="seu@email.com" value="{{ email or '' }}" required>
@@ -33,7 +32,7 @@
             <button type="submit" name="acao" value="continuar" class="btn">Continuar</button>
             <button type="submit" name="acao" value="codigo" class="btn" style="margin-top:8px;background:#fff;color:#1f2937;border:1px solid #d1d5db;">Receber código no e-mail</button>
         </form>
-        <p class="hint">Informe o e-mail cadastrado. O código chega só no e-mail, nunca nesta tela. Se o e-mail não chegar, o administrador da plataforma redefine a senha.</p>
+        <p class="hint">Professor e funcionário entram com o e-mail cadastrado na equipe, inclusive @icloud.com. Clique em Receber código no e-mail. No iCloud, abra Lixo eletrônico e a aba Ocultos. Não cadastre o professor como uma escola nova.</p>
     </div>
 </body>
 </html>
