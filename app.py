@@ -2409,28 +2409,42 @@ def gerenciar_usuarios():
                     senha_informada = (request.form.get("senha") or "").strip()
                     senha = senha_informada
                     papel = normalizar_papel(limpar_campo("papel") or "funcionario")
-                    perm_salvas = _permissoes_do_form(papel)
-                    perm_json = json.dumps(perm_salvas or permissoes_padrao(papel), ensure_ascii=False)
                     uid = request.form.get("usuario_id", type=int)
                     fid = request.form.get("funcionario_id", type=int)
                     criar_login = request.form.get("criar_login") == "1"
                     if not nome or not email:
                         raise ValueError("Informe nome e e-mail para receber contra-cheque e avisos.")
 
+                    papel_mudou = False
                     if criar_login:
                         novo_login = not uid
                         if novo_login and not senha:
                             senha = secrets.token_urlsafe(9)
                         if uid:
-                            if senha:
+                            cursor.execute("SELECT papel FROM usuarios WHERE id = %s", (uid,))
+                            atual = cursor.fetchone() or {}
+                            papel_mudou = normalizar_papel(atual.get("papel") or "") != papel
+                        perm_json = json.dumps(permissoes_padrao(papel), ensure_ascii=False)
+                        if uid:
+                            if senha and papel_mudou:
                                 cursor.execute(
                                     "UPDATE usuarios SET nome = %s, email = %s, senha = %s, papel = %s, permissoes = %s WHERE id = %s",
                                     (nome, email, senha, papel, perm_json, uid),
                                 )
-                            else:
+                            elif senha:
+                                cursor.execute(
+                                    "UPDATE usuarios SET nome = %s, email = %s, senha = %s, papel = %s WHERE id = %s",
+                                    (nome, email, senha, papel, uid),
+                                )
+                            elif papel_mudou:
                                 cursor.execute(
                                     "UPDATE usuarios SET nome = %s, email = %s, papel = %s, permissoes = %s WHERE id = %s",
                                     (nome, email, papel, perm_json, uid),
+                                )
+                            else:
+                                cursor.execute(
+                                    "UPDATE usuarios SET nome = %s, email = %s, papel = %s WHERE id = %s",
+                                    (nome, email, papel, uid),
                                 )
                         else:
                             cursor.execute(
@@ -2442,6 +2456,7 @@ def gerenciar_usuarios():
                                 (nome, email, senha, papel, perm_json),
                             )
                             uid = cursor.fetchone()["id"]
+                            papel_mudou = True
                     else:
                         novo_login = False
                         if uid:
@@ -2547,10 +2562,11 @@ def gerenciar_usuarios():
                     conexao.commit()
                     if uid and uid == session.get("usuario_id"):
                         session["usuario_papel"] = papel
-                        session["permissoes"] = perm_salvas or permissoes_padrao(papel)
+                        if papel_mudou:
+                            session["permissoes"] = permissoes_padrao(papel)
                     flash("Cadastro da equipe salvo. Contra-cheque e avisos vão para o e-mail informado.", "success")
-                    if criar_login and uid and uid != session.get("usuario_id"):
-                        flash("O que esta pessoa pode ver e alterar vale no próximo acesso dela.", "success")
+                    if criar_login and papel_mudou and uid and uid != session.get("usuario_id"):
+                        flash("O acesso voltou ao padrão da função. Ajuste em Configurações, se precisar. Vale no próximo acesso dela.", "success")
                     if criar_login and (novo_login or senha_informada):
                         try:
                             ok, erro = _enviar_codigo_colaborador(email, nome)
@@ -2741,8 +2757,6 @@ def gerenciar_usuarios():
         nome_do_papel=rotulo_papel,
         preview_folha=preview_folha,
         regime_folha=regime_folha,
-        areas_acesso=AREAS_ACESSO,
-        padroes_acesso=padroes_por_papel(),
     )
 
 
@@ -6185,6 +6199,31 @@ def pagina_configuracoes():
     if request.method == "POST":
         acao = request.form.get("acao")
         
+        if acao == "salvar_acesso":
+            uid = request.form.get("usuario_id", type=int)
+            if conexao and uid:
+                try:
+                    with conexao.cursor() as cursor:
+                        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes TEXT")
+                        cursor.execute("SELECT papel FROM usuarios WHERE id = %s", (uid,))
+                        row = cursor.fetchone() or {}
+                        papel = normalizar_papel(row.get("papel") or "funcionario")
+                        perm_salvas = _permissoes_do_form(papel) or permissoes_padrao(papel)
+                        cursor.execute(
+                            "UPDATE usuarios SET permissoes = %s WHERE id = %s",
+                            (json.dumps(perm_salvas, ensure_ascii=False), uid),
+                        )
+                        conexao.commit()
+                        if uid == session.get("usuario_id"):
+                            session["permissoes"] = perm_salvas
+                        flash("Acesso desta pessoa salvo. Vale no próximo login dela.", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"Não foi possível salvar o acesso: {e}", "danger")
+                finally:
+                    conexao.close()
+            return redirect(url_for("pagina_configuracoes", uid=uid))
+
         if acao == "salvar_parametros":
             nome_escola = request.form.get("nome_escola")
             ano_letivo = request.form.get("ano_letivo")
@@ -6220,6 +6259,9 @@ def pagina_configuracoes():
         return redirect(url_for("pagina_configuracoes"))
 
     config = {}
+    equipe_acesso = []
+    acesso = None
+    uid_acesso = request.args.get("uid", type=int)
     if conexao:
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -6228,10 +6270,51 @@ def pagina_configuracoes():
                     config = cursor.fetchone() or {}
                 except Exception:
                     conexao.rollback()
+                try:
+                    cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes TEXT")
+                    cursor.execute(
+                        """
+                        SELECT u.id, u.nome, u.email, u.papel, u.permissoes, f.cargo
+                        FROM usuarios u
+                        LEFT JOIN LATERAL (
+                            SELECT cargo FROM funcionarios
+                            WHERE usuario_id = u.id OR LOWER(COALESCE(email, '')) = LOWER(u.email)
+                            ORDER BY CASE WHEN usuario_id = u.id THEN 0 ELSE 1 END
+                            LIMIT 1
+                        ) f ON TRUE
+                        ORDER BY u.nome
+                        """
+                    )
+                    equipe_acesso = cursor.fetchall() or []
+                    conexao.commit()
+                except Exception:
+                    conexao.rollback()
+                    equipe_acesso = []
+            if equipe_acesso and not any(pessoa.get("id") == uid_acesso for pessoa in equipe_acesso):
+                uid_acesso = equipe_acesso[0]["id"]
+            escolhido = next((pessoa for pessoa in equipe_acesso if pessoa.get("id") == uid_acesso), None)
+            if escolhido:
+                papel_pessoa = normalizar_papel(escolhido.get("papel") or "funcionario")
+                acesso = {
+                    "id": escolhido.get("id"),
+                    "nome": escolhido.get("nome") or escolhido.get("email") or "",
+                    "email": escolhido.get("email") or "",
+                    "cargo": escolhido.get("cargo") or "",
+                    "papel": papel_pessoa,
+                    "permissoes": permissoes_efetivas(papel_pessoa, escolhido.get("permissoes")),
+                }
         finally:
             conexao.close()
 
-    return render_template("configuracoes.html", config=config)
+    return render_template(
+        "configuracoes.html",
+        config=config,
+        equipe_acesso=equipe_acesso,
+        acesso=acesso,
+        areas_acesso=AREAS_ACESSO,
+        padroes_acesso=padroes_por_papel(),
+        nome_do_papel=rotulo_papel,
+    )
 
 @app.route("/excluir_usuario_sistema/<int:id>", methods=["POST"])
 def excluir_usuario_sistema(id):

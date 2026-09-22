@@ -79,14 +79,105 @@
         </div>
 
         <div class="card-box">
+            <h3 class="card-title">Acesso da equipe</h3>
+            <p style="color:#64748b; font-size:0.9rem; line-height:1.45;">
+                O cadastro da pessoa continua em Gerenciar Usuários. Aqui você define o que cada uma pode acessar, ver e alterar.
+                O padrão já vem pela função. Administrador acessa e altera tudo.
+            </p>
+            {% if not equipe_acesso %}
+            <p style="color:#64748b;">Nenhuma pessoa com acesso ao painel. Cadastre em Gerenciar Usuários e marque que ela entra no sistema.</p>
+            <a class="btn btn-primary" href="{{ url_for('gerenciar_usuarios') }}">Abrir Gerenciar Usuários</a>
+            {% else %}
+            <form method="GET" action="{{ url_for('pagina_configuracoes') }}" style="margin-bottom:16px;">
+                <div class="form-group" style="max-width:420px;">
+                    <label>Pessoa</label>
+                    <select name="uid" onchange="this.form.submit()">
+                        {% for pessoa in equipe_acesso %}
+                        <option value="{{ pessoa.id }}" {% if acesso and acesso.id == pessoa.id %}selected{% endif %}>
+                            {{ pessoa.nome or pessoa.email }}{% if pessoa.cargo %} · {{ pessoa.cargo }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </form>
+            {% if acesso %}
+            <p style="font-size:.9rem;color:#334155;margin-top:0;">
+                {{ acesso.nome }} · {{ nome_do_papel(acesso.papel) }}{% if acesso.cargo %} · {{ acesso.cargo }}{% endif %}
+            </p>
+            <form method="POST">
+                <input type="hidden" name="acao" value="salvar_acesso">
+                <input type="hidden" name="usuario_id" value="{{ acesso.id }}">
+                <p style="margin:0 0 10px;"><button type="button" class="btn btn-primary" id="usarPadraoFuncao">Usar o padrão da função</button></p>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Área</th>
+                                <th style="text-align:center;">Acessar</th>
+                                <th style="text-align:center;">Ver</th>
+                                <th style="text-align:center;">Alterar</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for area, rotulo in areas_acesso %}
+                            {% set bloco = acesso.permissoes.get(area, {}) %}
+                            <tr>
+                                <td>{{ rotulo }}</td>
+                                {% for acao in ['acessar', 'ver', 'alterar'] %}
+                                <td style="text-align:center;">
+                                    <input type="checkbox" name="perm_{{ area }}_{{ acao }}" value="1" data-perm="{{ area }}" data-acao="{{ acao }}" {% if bloco.get(acao) %}checked{% endif %}>
+                                </td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p style="margin-top:14px;"><button class="btn btn-primary" type="submit">Salvar acesso</button></p>
+            </form>
+            <script type="application/json" id="padroesAcesso">{{ padroes_acesso|tojson }}</script>
+            <script type="application/json" id="papelAcesso">{{ acesso.papel|tojson }}</script>
+            {% endif %}
+            {% endif %}
+        </div>
+
+        <div class="card-box">
             <h3 class="card-title">Usuários e equipe</h3>
             <p style="color:#64748b; font-size:0.9rem;">
                 Cadastro de acesso, dados pessoais, contrato e pagamento ficam em um único lugar.
-                Ao marcar que a pessoa entra no painel, o sistema já marca o que ela pode acessar, ver e alterar conforme o cargo. Dá para mudar item a item.
             </p>
             <a class="btn btn-primary" href="{{ url_for('gerenciar_usuarios') }}">Abrir Gerenciar Usuários</a>
         </div>
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    (function () {
+        var bruto = document.getElementById("padroesAcesso");
+        var papelEl = document.getElementById("papelAcesso");
+        if (!bruto) return;
+        var padroes = {};
+        var papel = "funcionario";
+        try { padroes = JSON.parse(bruto.textContent || "{}"); } catch (e) { padroes = {}; }
+        try { papel = JSON.parse(papelEl.textContent || '"funcionario"'); } catch (e) { papel = "funcionario"; }
+        function aplicar() {
+            var mapa = padroes[papel] || padroes.funcionario || {};
+            document.querySelectorAll("[data-perm]").forEach(function (el) {
+                var area = mapa[el.getAttribute("data-perm")] || {};
+                el.checked = !!area[el.getAttribute("data-acao")];
+            });
+        }
+        document.querySelectorAll("[data-acao='alterar']").forEach(function (el) {
+            el.addEventListener("change", function () {
+                if (!el.checked) return;
+                var area = el.getAttribute("data-perm");
+                document.querySelectorAll("[data-perm='" + area + "']").forEach(function (item) {
+                    item.checked = true;
+                });
+            });
+        });
+        var botao = document.getElementById("usarPadraoFuncao");
+        if (botao) botao.addEventListener("click", aplicar);
+    })();
+    </script>
 </body>
 </html>
