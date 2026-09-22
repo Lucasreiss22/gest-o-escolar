@@ -43,6 +43,7 @@ ENDPOINTS = {
     "gerenciar_usuarios": "usuarios",
     "contracheque": "contracheque",
     "pdf_contracheque_rota": "contracheque",
+    "enviar_contracheques_mes": "financeiro",
 }
 
 

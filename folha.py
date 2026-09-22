@@ -1,7 +1,7 @@
 """Cálculos de folha: CLT mensalista, horista, PJ e RPA."""
 
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime
 
 # Portaria Interministerial MPS/MF — tabela 2025/2026 (progressiva)
 TETO_INSS = 8157.41
@@ -111,10 +111,64 @@ def encargos_clt(base, regime):
     }
 
 
+def contrato_vigente(func, ano=None, mes=None):
+    if not ano or not mes:
+        return True
+    inicio = func.get("data_inicio_contrato") or func.get("data_contratacao")
+    fim = func.get("data_fim_contrato")
+    try:
+        primeiro = date(int(ano), int(mes), 1)
+        ultimo = date(int(ano), int(mes), monthrange(int(ano), int(mes))[1])
+    except (TypeError, ValueError):
+        return True
+    if isinstance(inicio, datetime):
+        inicio = inicio.date()
+    if isinstance(fim, datetime):
+        fim = fim.date()
+    if isinstance(inicio, str) and inicio:
+        try:
+            inicio = date.fromisoformat(inicio[:10])
+        except ValueError:
+            inicio = None
+    if isinstance(fim, str) and fim:
+        try:
+            fim = date.fromisoformat(fim[:10])
+        except ValueError:
+            fim = None
+    if inicio and inicio > ultimo:
+        return False
+    if fim and fim < primeiro:
+        return False
+    return True
+
+
+def dia_pagamento_valido(valor, padrao=5):
+    try:
+        dia = int(valor or padrao)
+    except (TypeError, ValueError):
+        dia = padrao
+    return max(1, min(28, dia))
+
+
+def adicional_horas_extras(func):
+    horas = _num(func.get("horas_extras"))
+    if horas <= 0:
+        return 0.0, 0.0, 0.0
+    valor = _num(func.get("valor_hora_extra"))
+    if valor <= 0:
+        if _num(func.get("valor_hora")) > 0:
+            valor = round(_num(func.get("valor_hora")) * 1.5, 2)
+        elif _num(func.get("salario")) > 0:
+            valor = round((_num(func.get("salario")) / 220.0) * 1.5, 2)
+    adicional = round(horas * valor, 2)
+    return horas, valor, adicional
+
+
 def calcular_folha_pessoa(func, regime, ano=None, mes=None):
     tipo = (func.get("tipo_contrato") or "clt_mensalista").strip().lower()
     nome = func.get("nome_completo") or "-"
     cargo = func.get("cargo") or "-"
+    horas_ex, valor_he, adicional_he = adicional_horas_extras(func)
     resultado = {
         "id": func.get("id"),
         "nome_completo": nome,
@@ -144,10 +198,14 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         "observacao": "",
         "valor_hora": _num(func.get("valor_hora")),
         "horas_mes": _num(func.get("horas_mes")),
+        "horas_extras": horas_ex,
+        "valor_hora_extra": valor_he,
+        "adicional_he": adicional_he,
+        "dia_pagamento": dia_pagamento_valido(func.get("dia_pagamento")),
     }
 
     if tipo in ("pj", "pessoa_juridica"):
-        bruto = _num(func.get("salario") or func.get("valor_servico"))
+        bruto = _num(func.get("salario") or func.get("valor_servico")) + adicional_he
         reter_fed = str(func.get("reter_federal") or "").lower() in ("t", "true", "1", "sim")
         reter_iss = str(func.get("reter_iss") or "").lower() in ("t", "true", "1", "sim")
         aliq_iss = _num(func.get("aliquota_iss") or 0)
@@ -159,7 +217,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         descontos = irrf + pis + cofins + csll + iss
         resultado.update(
             {
-                "salario": bruto,
+                "salario": _num(func.get("salario") or func.get("valor_servico")),
                 "bruto": bruto,
                 "irrf": irrf,
                 "pis": pis,
@@ -170,13 +228,14 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
                 "liquido": round(bruto - descontos, 2),
                 "custo_escola": bruto,
                 "total": bruto,
-                "observacao": "PJ / NFS-e: sem FGTS, férias, 13º ou INSS de folha. Pagamento contra nota. Retenções só se parametrizadas.",
+                "observacao": "PJ / NFS-e: sem FGTS, férias, 13º ou INSS de folha. Pagamento contra nota. Retenções só se parametrizadas."
+                + (f" Inclui {horas_ex:g} h extras (R$ {adicional_he:.2f})." if adicional_he else ""),
             }
         )
         return resultado
 
     if tipo in ("rpa", "autonomo", "extra_pf"):
-        bruto = _num(func.get("salario") or func.get("valor_servico"))
+        bruto = _num(func.get("salario") or func.get("valor_servico")) + adicional_he
         inss_f = inss_autonomo(bruto)
         irrf = irrf_progressivo(bruto - inss_f)
         descontos = inss_f + irrf
@@ -185,7 +244,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         encargos = inss_p + rat
         resultado.update(
             {
-                "salario": bruto,
+                "salario": _num(func.get("salario") or func.get("valor_servico")),
                 "bruto": bruto,
                 "inss_funcionario": inss_f,
                 "irrf": irrf,
@@ -196,7 +255,8 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
                 "encargos": round(encargos, 2),
                 "custo_escola": round(bruto + encargos, 2),
                 "total": round(bruto + encargos, 2),
-                "observacao": "RPA: INSS do autônomo + IRRF. Escola recolhe INSS patronal 20% e RAT.",
+                "observacao": "RPA: INSS do autônomo + IRRF. Escola recolhe INSS patronal 20% e RAT."
+                + (f" Inclui {horas_ex:g} h extras (R$ {adicional_he:.2f})." if adicional_he else ""),
             }
         )
         return resultado
@@ -206,12 +266,14 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         horas = _num(func.get("horas_mes"))
         valor_horas = round(valor_hora * horas, 2)
         dsr = dsr_horista(valor_horas, ano, mes)
-        bruto = round(valor_horas + dsr, 2)
+        bruto = round(valor_horas + dsr + adicional_he, 2)
         resultado["observacao"] = f"Horista: {horas:g} h × R$ {valor_hora:.2f} + DSR de R$ {dsr:.2f}."
     else:
-        bruto = _num(func.get("salario"))
+        bruto = _num(func.get("salario")) + adicional_he
         dsr = 0.0
         resultado["observacao"] = "CLT mensalista: salário fixo. INSS progressivo e IRRF sobre o bruto."
+    if adicional_he:
+        resultado["observacao"] += f" Horas extras: {horas_ex:g} h × R$ {valor_he:.2f} = R$ {adicional_he:.2f}."
 
     inss_f = inss_empregado(bruto)
     irrf = irrf_progressivo(bruto - inss_f)
@@ -225,7 +287,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
     resultado.update(patronal)
     resultado.update(
         {
-            "salario": bruto - dsr if tipo in ("clt_horista", "horista") else bruto,
+            "salario": (bruto - dsr - adicional_he) if tipo in ("clt_horista", "horista") else _num(func.get("salario")),
             "dsr": dsr,
             "bruto": bruto,
             "inss_funcionario": inss_f,

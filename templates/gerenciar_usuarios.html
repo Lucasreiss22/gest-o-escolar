@@ -224,7 +224,34 @@
 
                     <div class="form-group" data-contratos="clt_mensalista clt_horista pj rpa">
                         <label>Data de contratação / início</label>
-                        <input type="date" name="data_contratacao" value="{{ cadastro.data_contratacao or '' }}">
+                        <input type="date" name="data_contratacao" value="{{ cadastro.data_contratacao or cadastro.data_inicio_contrato or '' }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista pj rpa">
+                        <label>Início do contrato</label>
+                        <input type="date" name="data_inicio_contrato" value="{{ cadastro.data_inicio_contrato or cadastro.data_contratacao or '' }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista pj rpa">
+                        <label>Fim do contrato (em branco = indeterminado)</label>
+                        <input type="date" name="data_fim_contrato" value="{{ cadastro.data_fim_contrato or '' }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista pj rpa">
+                        <label>Dia do mês do contra-cheque (1 a 28)</label>
+                        <input type="number" name="dia_pagamento" min="1" max="28" value="{{ cadastro.dia_pagamento or 5 }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Horas extras do mês</label>
+                        <input name="horas_extras" value="{{ '%.2f'|format(cadastro.horas_extras|float if cadastro.horas_extras else 0) }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Valor da hora extra (R$). Em branco usa 50% sobre a hora/salário</label>
+                        <input name="valor_hora_extra" value="{{ '%.2f'|format(cadastro.valor_hora_extra|float if cadastro.valor_hora_extra else 0) }}">
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
+                        <label>Enviar contra-cheque no dia</label>
+                        <select name="enviar_contracheque">
+                            <option value="1" {% if cadastro.enviar_contracheque %}selected{% endif %}>Sim, por e-mail</option>
+                            <option value="0" {% if not cadastro.enviar_contracheque %}selected{% endif %}>Não enviar automático</option>
+                        </select>
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Banco</label>
@@ -255,6 +282,9 @@
                     {% if preview_folha.tipo_contrato in ['clt_horista','horista'] %}
                     <div class="fin-linha-mini"><span>Horas × valor</span><strong>R$ {{ "%.2f"|format(preview_folha.salario) }}</strong></div>
                     <div class="fin-linha-mini"><span>DSR</span><strong>R$ {{ "%.2f"|format(preview_folha.dsr) }}</strong></div>
+                    {% endif %}
+                    {% if preview_folha.adicional_he %}
+                    <div class="fin-linha-mini"><span>Horas extras</span><strong>R$ {{ "%.2f"|format(preview_folha.adicional_he) }}</strong></div>
                     {% endif %}
                     <div class="fin-linha-mini"><span>Bruto</span><strong>R$ {{ "%.2f"|format(preview_folha.bruto) }}</strong></div>
                     {% if preview_folha.tipo_contrato not in ['pj'] %}

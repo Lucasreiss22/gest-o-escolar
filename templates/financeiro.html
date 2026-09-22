@@ -292,7 +292,18 @@
                 <div class="fin-linha"><span>Líquido a pagar</span><strong>R$ {{ "%.2f"|format(totais_folha.liquido) }}</strong></div>
                 <div class="fin-linha"><span>Encargos da escola</span><strong>R$ {{ "%.2f"|format(totais_folha.encargos) }}</strong></div>
                 <div class="fin-linha"><span>Custo total</span><strong>R$ {{ "%.2f"|format(totais_folha.custo_escola) }}</strong></div>
-                <a class="btn btn-success" href="{{ url_for('relatorio_pdf_folha', mes=mes_atual) }}" style="margin: 10px 0;">Baixar PDF da folha</a>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;">
+                    <a class="btn btn-success" href="{{ url_for('relatorio_pdf_folha', mes=mes_atual) }}">Baixar PDF da folha</a>
+                    <form action="{{ url_for('relatorio_pdf_folha') }}" method="POST">
+                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                        <input type="hidden" name="enviar" value="1">
+                        <button class="btn btn-primary" type="submit">Enviar folha por e-mail</button>
+                    </form>
+                    <form action="{{ url_for('enviar_contracheques_mes') }}" method="POST">
+                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                        <button class="btn btn-primary" type="submit">Enviar todos os contra-cheques</button>
+                    </form>
+                </div>
                 <p style="font-size:0.85rem; color:#64748b;">Cadastro novo de colaborador:
                     <a href="{{ url_for('gerenciar_usuarios') }}">Gerenciar Usuários</a>
                 </p>
@@ -335,6 +346,9 @@
                     {% if prof.tipo_contrato in ['clt_horista','horista'] %}
                     <div class="fin-linha"><span>Horas × valor da aula</span><strong>R$ {{ "%.2f"|format(prof.salario) }}</strong></div>
                     <div class="fin-linha"><span>DSR (1/6 ou equivalente do mês)</span><strong>R$ {{ "%.2f"|format(prof.dsr) }}</strong></div>
+                    {% endif %}
+                    {% if prof.adicional_he %}
+                    <div class="fin-linha"><span>Horas extras ({{ prof.horas_extras }} h)</span><strong>R$ {{ "%.2f"|format(prof.adicional_he) }}</strong></div>
                     {% endif %}
                     <div class="fin-linha"><span>Bruto</span><strong>R$ {{ "%.2f"|format(prof.bruto) }}</strong></div>
                     {% if prof.tipo_contrato in ['pj'] %}
@@ -391,6 +405,26 @@
                         <div class="form-group" data-contratos="clt_horista">
                             <label>Horas no mês</label>
                             <input name="horas_mes" data-obrigatorio value="{{ '%.2f'|format(prof.horas_mes or 0) }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Início do contrato</label>
+                            <input type="date" name="data_inicio_contrato" value="{{ prof.data_inicio_contrato or '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Fim do contrato</label>
+                            <input type="date" name="data_fim_contrato" value="{{ prof.data_fim_contrato or '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Dia do contra-cheque</label>
+                            <input type="number" name="dia_pagamento" min="1" max="28" value="{{ prof.dia_pagamento or 5 }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Horas extras do mês</label>
+                            <input name="horas_extras" value="{{ '%.2f'|format(prof.horas_extras or 0) }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Valor da hora extra</label>
+                            <input name="valor_hora_extra" value="{{ '%.2f'|format(prof.valor_hora_extra or 0) }}">
                         </div>
                         <div class="form-group" data-contratos="pj">
                             <label>Retenção federal PJ</label>
@@ -662,6 +696,10 @@
                                 <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
                             </form>
                             <a class="btn btn-info" href="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}">PDF</a>
+                            <form action="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}" method="POST" style="display:inline;">
+                                <input type="hidden" name="enviar" value="1">
+                                <button class="btn btn-primary" type="submit">E-mail</button>
+                            </form>
                             <form action="{{ url_for('cobranca_email', cobranca_id=item.id) }}" method="POST">
                                 <button type="submit" class="btn btn-primary" onclick="return confirm('Enviar o PDF desta mensalidade por e-mail ao responsável?');">E-mail</button>
                             </form>

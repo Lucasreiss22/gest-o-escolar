@@ -229,10 +229,19 @@ def pdf_contracheque(escola, mes_label, item):
     pdf.linha("Colaborador", (item or {}).get("nome_completo") or "-")
     pdf.linha("Cargo", (item or {}).get("cargo") or "-")
     pdf.linha("Contrato", (item or {}).get("rotulo_contrato") or "-")
+    if (item or {}).get("dia_pagamento"):
+        pdf.linha("Dia de pagamento", str(item.get("dia_pagamento")))
+    if (item or {}).get("adicional_he"):
+        pdf.linha(
+            "Horas extras",
+            f"{item.get('horas_extras') or 0:g} h × {_brl(item.get('valor_hora_extra'))} = {_brl(item.get('adicional_he'))}",
+        )
     pdf.linha("Bruto", _brl((item or {}).get("bruto")), negrito=True)
     pdf.linha("INSS", _brl((item or {}).get("inss_funcionario")))
     pdf.linha("IRRF", _brl((item or {}).get("irrf")))
     pdf.linha("Líquido", _brl((item or {}).get("liquido")), negrito=True)
+    if (item or {}).get("observacao"):
+        pdf.paragrafo(item.get("observacao"))
     return _saida(pdf)
 
 

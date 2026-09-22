@@ -32,7 +32,7 @@
     <!-- Conteúdo Principal -->
     <div class="content">
         <div class="header-flex">
-            <h2>👨‍🏫 Gestão de Professores</h2>
+            <h2>Equipe e professores</h2>
         </div>
 
         <!-- Mensagens Flash do Flask -->
@@ -46,15 +46,16 @@
 
         <!-- Formulário para Cadastrar Novo Professor (Atualizado com Telefone e Salário) -->
         <div class="card-box">
-            <h3 class="card-title">Corpo docente</h3>
+            <h3 class="card-title">Equipe da escola</h3>
             <p style="color:#64748b; font-size:0.9rem; margin-bottom:14px;">
-                O cadastro completo (acesso, dados pessoais e folha) fica em
-                <a href="{{ url_for('gerenciar_usuarios') }}">Gerenciar Usuários</a>.
+                Todo funcionário criado em
+                <a href="{{ url_for('gerenciar_usuarios') }}">Gerenciar Usuários</a>
+                aparece aqui, com cargo de professor, secretaria, auxiliar ou outro.
             </p>
             <form method="GET" class="form-grid">
                 <div class="form-group" style="grid-column: span 2;">
-                    <label>Pesquisar professor</label>
-                    <input type="search" name="q" value="{{ busca_prof or '' }}" placeholder="Nome, e-mail ou disciplina">
+                    <label>Pesquisar na equipe</label>
+                    <input type="search" name="q" value="{{ busca_prof or '' }}" placeholder="Nome, e-mail, cargo ou disciplina">
                 </div>
                 <div class="form-group" style="justify-content:end;">
                     <button class="btn btn-primary" type="submit">Pesquisar</button>
@@ -64,12 +65,13 @@
 
         <!-- Tabela de Professores Cadastrados (Atualizada com novas colunas e botão de Detalhes) -->
         <div class="card-box">
-            <h3 class="card-title">Corpo Docente Cadastrado</h3>
+            <h3 class="card-title">Pessoas cadastradas</h3>
             <div class="table-responsive hide-mobile">
                 <table>
                     <thead>
                         <tr>
                             <th>Nome</th>
+                            <th>Cargo</th>
                             <th>Disciplina</th>
                             <th>E-mail</th>
                             <th>Telefone</th>
@@ -82,6 +84,7 @@
                             {% for prof in professores %}
                             <tr>
                                 <td>{{ prof.nome_completo }}</td>
+                                <td>{{ prof.cargo or 'Equipe' }}</td>
                                 <td>{{ prof.disciplina if prof.disciplina else prof.especialidade }}</td>
                                 <td>{{ prof.email }}</td>
                                 <td>{{ prof.telefone if prof.telefone else '-' }}</td>
@@ -97,7 +100,7 @@
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="6" style="text-align: center; color: #777;">Nenhum professor cadastrado no momento.</td>
+                                <td colspan="7" style="text-align: center; color: #777;">Nenhum colaborador cadastrado. Crie em Gerenciar Usuários.</td>
                             </tr>
                         {% endif %}
                     </tbody>
@@ -109,7 +112,8 @@
                     <article class="list-card">
                         <h3>{{ prof.nome_completo }}</h3>
                         <div class="meta">
-                            {{ prof.disciplina if prof.disciplina else prof.especialidade or 'Sem disciplina' }}<br>
+                            {{ prof.cargo or 'Equipe' }}
+                            {% if prof.disciplina or prof.especialidade %} · {{ prof.disciplina if prof.disciplina else prof.especialidade }}{% endif %}<br>
                             {{ prof.email or 'Sem e-mail' }}
                             {% if prof.telefone %}<br>{{ prof.telefone }}{% endif %}
                         </div>
@@ -120,7 +124,7 @@
                     </article>
                     {% endfor %}
                 {% else %}
-                    <p style="color:#777;">Nenhum professor cadastrado no momento.</p>
+                    <p style="color:#777;">Nenhum colaborador cadastrado. Crie em Gerenciar Usuários.</p>
                 {% endif %}
             </div>
         </div>
