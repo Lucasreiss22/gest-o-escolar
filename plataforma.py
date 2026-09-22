@@ -536,6 +536,8 @@ def bootstrap_banco_escola(nome_escola, email_admin):
                     email VARCHAR(150),
                     cargo VARCHAR(80),
                     telefone VARCHAR(30),
+                    cpf VARCHAR(14),
+                    data_nascimento DATE,
                     usuario_id INT
                 )
                 """

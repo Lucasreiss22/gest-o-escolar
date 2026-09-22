@@ -581,6 +581,8 @@ def garantir_tabelas_pedagogicas():
                 ("funcionarios", "formacao", "VARCHAR(150)"),
                 ("funcionarios", "ativo", "BOOLEAN DEFAULT TRUE"),
                 ("funcionarios", "data_contratacao", "DATE"),
+                ("funcionarios", "data_nascimento", "DATE"),
+                ("funcionarios", "telefone", "VARCHAR(20)"),
                 ("funcionarios", "salario", "NUMERIC(12,2) DEFAULT 0"),
                 ("disciplinas", "tipo_frequencia", "VARCHAR(20) DEFAULT 'semanal'"),
                 ("disciplinas", "aulas_semana", "INT DEFAULT 2"),
@@ -719,6 +721,9 @@ def garantir_tabelas_folha():
             )
             mapa = _mapa_colunas(cursor)
             for tabela, coluna, spec in (
+                ("funcionarios", "data_nascimento", "DATE"),
+                ("funcionarios", "telefone", "VARCHAR(20)"),
+                ("funcionarios", "email", "VARCHAR(150)"),
                 ("funcionarios", "salario", "NUMERIC(12,2) DEFAULT 0"),
                 ("funcionarios", "tipo_contrato", "VARCHAR(30) DEFAULT 'clt_mensalista'"),
                 ("funcionarios", "valor_hora", "NUMERIC(12,2) DEFAULT 0"),
