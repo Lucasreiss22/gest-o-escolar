@@ -30,6 +30,10 @@
         .btn-vermelho { background:#b91c1c; color:#fff; }
         a.btn-sm { text-decoration:none; display:inline-block; line-height:1.25; }
         .check { display:flex; gap:8px; align-items:flex-start; margin-top:12px; font-size:.85rem; }
+        .pacote { border:1px solid #e2e8f0; border-radius:10px; padding:14px; margin-top:14px; }
+        .telas { display:flex; flex-wrap:wrap; gap:8px 14px; margin:10px 0; }
+        .telas label { display:flex; gap:6px; align-items:center; font-size:.88rem; }
+        .valor { max-width:180px; padding:8px 10px; border:1px solid #ccc; border-radius:6px; }
     </style>
 </head>
 <body>
@@ -67,6 +71,36 @@
         </div>
 
         <div class="card-box">
+            <h3>Pacotes de telas</h3>
+            <p class="hint">
+                Cada pacote define quais telas a escola pode usar e o valor mensal, para montar os planos.
+                Painel, usuários e configurações continuam em todo pacote, para a escola entrar e organizar a equipe.
+                Escola sem pacote continua com todas as telas.
+            </p>
+            {% for p in pacotes %}
+            <form method="POST" class="pacote">
+                <input type="hidden" name="acao" value="salvar_pacote">
+                <input type="hidden" name="codigo" value="{{ p.codigo }}">
+                <strong>{{ p.nome }}</strong>
+                <p class="hint" style="margin:4px 0 0;">{{ p.descricao }}</p>
+                <div class="form-group" style="margin-top:10px; max-width:220px;">
+                    <label>Valor mensal (R$)</label>
+                    <input class="valor" name="valor" inputmode="decimal" placeholder="A definir" value="{{ p.valor|moeda_campo }}">
+                </div>
+                <div class="telas">
+                    {% for codigo, rotulo in telas_plano %}
+                    <label>
+                        <input type="checkbox" name="telas" value="{{ codigo }}" {% if codigo in p.telas %}checked{% endif %}>
+                        {{ rotulo }}
+                    </label>
+                    {% endfor %}
+                </div>
+                <button class="btn-sm btn-azul" type="submit">Salvar pacote</button>
+            </form>
+            {% endfor %}
+        </div>
+
+        <div class="card-box">
             <h3>Nova escola</h3>
             <p class="hint">Ao cadastrar, o código vai para o e-mail da escola. O cliente informa o código e cria a senha.</p>
             <form method="POST">
@@ -101,8 +135,30 @@
                     Status:
                     {% if not e.ativo %}Pausada
                     {% elif e.senha_definida %}Ativa
-                    {% else %}Aguardando senha (código no e-mail){% endif %}
+                    {% else %}Aguardando senha (código no e-mail){% endif %}<br>
+                    {% set ns = namespace(plano=None) %}
+                    {% for p in pacotes %}{% if p.codigo == e.pacote %}{% set ns.plano = p %}{% endif %}{% endfor %}
+                    Pacote:
+                    {% if ns.plano %}
+                        {{ ns.plano.nome }}{% if ns.plano.valor %} · R$ {{ ns.plano.valor|moeda }}{% endif %}
+                        · {{ ns.plano.telas|length }} tela(s)
+                    {% else %}
+                        Todas as telas
+                    {% endif %}
                 </div>
+                <form method="POST" class="acoes">
+                    <input type="hidden" name="acao" value="definir_pacote">
+                    <input type="hidden" name="escola_id" value="{{ e.id }}">
+                    <select name="pacote" style="padding:8px;border:1px solid #ccc;border-radius:6px;">
+                        <option value="" {% if not e.pacote %}selected{% endif %}>Todas as telas</option>
+                        {% for p in pacotes %}
+                        <option value="{{ p.codigo }}" {% if e.pacote == p.codigo %}selected{% endif %}>
+                            {{ p.nome }}{% if p.valor %} — R$ {{ p.valor|moeda }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn-sm btn-verde" type="submit">Aplicar pacote</button>
+                </form>
                 <div class="acoes">
                     <form method="POST">
                         <input type="hidden" name="acao" value="acessar_escola">

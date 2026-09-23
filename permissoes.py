@@ -43,6 +43,17 @@ ENDPOINTS = {
     "excluir_usuario_sistema": "usuarios",
     "gerenciar_usuarios": "usuarios",
     "adicionar_autorizado": "alunos",
+    "adicionar_nota": "pedagogico",
+    "boletim_pdf": "pedagogico",
+    "anexar_boletim": "pedagogico",
+    "modelo_alunos_csv": "alunos",
+    "cobranca_pdf": "financeiro",
+    "cobranca_email": "financeiro",
+    "memoria_simples_pdf": "financeiro",
+    "enviar_memoria_simples": "financeiro",
+    "modelo_custos_csv": "financeiro",
+    "modelo_simples_csv": "financeiro",
+    "ajustar_contracheque": "contracheque",
     "contracheque": "contracheque",
     "pdf_contracheque_rota": "contracheque",
     "enviar_contracheques_mes": "financeiro",
@@ -85,6 +96,63 @@ AREAS_ACESSO = [
 ]
 
 ACOES_ACESSO = ("acessar", "ver", "alterar", "excluir")
+
+TELAS_PLANO = [
+    ("alunos", "Alunos"),
+    ("pedagogico", "Pedagógico"),
+    ("professores", "Equipe"),
+    ("financeiro", "Financeiro"),
+    ("calendario", "Calendário"),
+    ("contracheque", "Contra-cheque"),
+]
+
+MODULO_PARA_TELA = {
+    "dashboard": None,
+    "configuracoes": None,
+    "usuarios": None,
+    "alunos": "alunos",
+    "pedagogico": "pedagogico",
+    "pedagogico_cadastro": "pedagogico",
+    "professores": "professores",
+    "financeiro": "financeiro",
+    "calendario": "calendario",
+    "contracheque": "contracheque",
+}
+
+PACOTES_INICIAIS = [
+    (
+        "financeiro",
+        "Financeiro",
+        "Mensalidades, custos, tributos e contra-cheque.",
+        ["financeiro", "contracheque"],
+    ),
+    (
+        "pedagogico",
+        "Pedagógico",
+        "Alunos, turmas, chamada, equipe e calendário.",
+        ["alunos", "pedagogico", "professores", "calendario"],
+    ),
+    (
+        "completo",
+        "Completo",
+        "Todas as telas do sistema.",
+        [codigo for codigo, _rotulo in TELAS_PLANO],
+    ),
+]
+
+_TELA_EXTRA = {
+    "cobranca_pdf": "financeiro",
+    "cobranca_email": "financeiro",
+    "memoria_simples_pdf": "financeiro",
+    "enviar_memoria_simples": "financeiro",
+    "modelo_custos_csv": "financeiro",
+    "modelo_simples_csv": "financeiro",
+    "modelo_alunos_csv": "alunos",
+    "adicionar_nota": "pedagogico",
+    "boletim_pdf": "pedagogico",
+    "anexar_boletim": "pedagogico",
+    "ajustar_contracheque": "contracheque",
+}
 
 _POST_SO_LEITURA = {"pdf_contracheque_rota", "relatorio_pdf_consulta", "relatorio_tributario", "relatorio_pdf_custos"}
 
@@ -219,6 +287,28 @@ def classificar_requisicao(endpoint, metodo, acao_form=None):
             return "alterar", _FORM_CADASTRO[chave]
         return "alterar", ENDPOINTS.get(endpoint)
     return "acessar", ENDPOINTS.get(endpoint)
+
+
+def modulo_no_plano(modulo, telas):
+    if not isinstance(telas, (list, tuple, set)):
+        return True
+    tela = MODULO_PARA_TELA.get(modulo)
+    if tela is None:
+        return True
+    return tela in telas
+
+
+def endpoint_no_plano(endpoint, telas, acao_form=None):
+    if not isinstance(telas, (list, tuple, set)):
+        return True
+    if endpoint == "detalhes_aluno":
+        return "alunos" in telas or "pedagogico" in telas
+    if endpoint in _TELA_EXTRA:
+        return _TELA_EXTRA[endpoint] in telas
+    _tipo, modulo = classificar_requisicao(endpoint, "GET", acao_form)
+    if not modulo:
+        return True
+    return modulo_no_plano(modulo, telas)
 
 
 def pode_requisicao(papel, endpoint, metodo, salvo=None, acao_form=None):

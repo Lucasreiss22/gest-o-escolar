@@ -75,7 +75,10 @@ from folha import (
 )
 from permissoes import (
     AREAS_ACESSO,
+    TELAS_PLANO,
     classificar_requisicao,
+    endpoint_no_plano,
+    modulo_no_plano,
     pode_acao,
     pode_endpoint,
     pode_modulo,
@@ -99,6 +102,10 @@ from plataforma import (
     excluir_escola,
     regenerar_convite_escola,
     buscar_escola_por_id,
+    definir_pacote_escola,
+    listar_pacotes,
+    salvar_pacote,
+    telas_contratadas,
     eh_super_admin,
     email_super_admin,
     enviar_codigo,
@@ -848,12 +855,15 @@ def inject_acl():
         smtp_ok = bool(_CFG.get("BREVO_API_KEY")) or (
             (not ambiente_producao()) and bool(_CFG.get("SMTP_PASSWORD") and _CFG.get("SMTP_USER"))
         )
+    def _no_plano(modulo):
+        return modulo_no_plano(modulo, session.get("escola_telas"))
+
     return {
         "papel_atual": papel,
         "rotulo_papel": rotulo_papel(papel),
-        "pode": lambda modulo: pode_acao(papel, modulo, "acessar", session.get("permissoes")),
-        "pode_alterar": lambda modulo: pode_acao(papel, modulo, "alterar", session.get("permissoes")),
-        "pode_excluir": lambda modulo: pode_acao(papel, modulo, "excluir", session.get("permissoes")),
+        "pode": lambda modulo: _no_plano(modulo) and pode_acao(papel, modulo, "acessar", session.get("permissoes")),
+        "pode_alterar": lambda modulo: _no_plano(modulo) and pode_acao(papel, modulo, "alterar", session.get("permissoes")),
+        "pode_excluir": lambda modulo: _no_plano(modulo) and pode_acao(papel, modulo, "excluir", session.get("permissoes")),
         "smtp_ok": smtp_ok,
         "google_login": google_login,
         "super_admin": bool(session.get("super_admin")),
@@ -907,6 +917,9 @@ def proteger_rotas():
         return redirect(url_for("dashboard"))
     papel = session.get("usuario_papel")
     acao_form = request.form.get("acao") if request.method == "POST" else ""
+    if isinstance(session.get("escola_telas"), list) and not endpoint_no_plano(endpoint, session.get("escola_telas"), acao_form):
+        flash("Esta tela não está no pacote contratado por esta escola.", "danger")
+        return redirect(url_for("dashboard"))
     if not pode_requisicao(papel, endpoint, request.method, session.get("permissoes"), acao_form):
         tipo, _modulo = classificar_requisicao(endpoint, request.method, acao_form)
         if tipo == "excluir":
@@ -1665,6 +1678,11 @@ def _entrar_escola(usuario, email, escola, origem_plataforma=False, plataforma_e
     if origem_plataforma:
         session["origem_plataforma"] = True
         session["plataforma_email"] = plataforma_email or email_super_admin()
+    telas = telas_contratadas(escola)
+    if telas is None:
+        session.pop("escola_telas", None)
+    else:
+        session["escola_telas"] = telas
     _iniciar_sessao(usuario, email)
 
 
@@ -2265,6 +2283,29 @@ def plataforma_escolas():
                 )
             except Exception as e:
                 flash(f"Não foi possível redefinir a senha: {e}", "danger")
+        elif acao == "salvar_pacote":
+            try:
+                bruto = (request.form.get("valor") or "").strip()
+                valor = None if not bruto else _parse_moeda(bruto, 0.0)
+                salvar_pacote(request.form.get("codigo"), valor, request.form.getlist("telas"))
+                flash("Pacote atualizado. Escolas que já usam esse pacote passam a ver as telas marcadas no próximo login.", "success")
+            except Exception as e:
+                flash(f"Não foi possível salvar o pacote: {e}", "danger")
+        elif acao == "definir_pacote":
+            try:
+                escola = definir_pacote_escola(request.form.get("escola_id"), request.form.get("pacote"))
+                if escola.get("pacote"):
+                    flash(
+                        f"Pacote da escola {escola['nome']} atualizado. Quem já está logado precisa entrar de novo.",
+                        "success",
+                    )
+                else:
+                    flash(
+                        f"A escola {escola['nome']} ficou com todas as telas, sem pacote. Quem já está logado precisa entrar de novo.",
+                        "success",
+                    )
+            except Exception as e:
+                flash(f"Não foi possível aplicar o pacote: {e}", "danger")
         elif acao == "acessar_escola":
             try:
                 escola = buscar_escola_por_id(request.form.get("escola_id"))
@@ -2320,9 +2361,16 @@ def plataforma_escolas():
             "resend": False,
             "brevo": False,
         }
+    pacotes = []
+    try:
+        pacotes = listar_pacotes()
+    except Exception as e:
+        flash(f"Não foi possível carregar os pacotes: {e}", "danger")
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
+        pacotes=pacotes,
+        telas_plano=TELAS_PLANO,
         smtp=smtp,
         diagnostico=diagnostico,
         google_login=_google_habilitado(),
@@ -6317,7 +6365,10 @@ def pagina_configuracoes():
         config=config,
         equipe_acesso=equipe_acesso,
         acesso=acesso,
-        areas_acesso=AREAS_ACESSO,
+        areas_acesso=[
+            area for area in AREAS_ACESSO
+            if modulo_no_plano(area[0], session.get("escola_telas"))
+        ],
         padroes_acesso=padroes_por_papel(),
         nome_do_papel=rotulo_papel,
     )

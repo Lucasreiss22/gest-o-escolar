@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 
 import psycopg2
 
+import json
+
 from config import carregar_config
 from database import (
     _schema_seguro,
@@ -13,6 +15,7 @@ from database import (
     obter_conexao_nova,
 )
 from email_envio import enviar_email, exigencia_email, normalizar_email, smtp_configurado
+from permissoes import PACOTES_INICIAIS, TELAS_PLANO
 
 
 def email_super_admin():
@@ -82,10 +85,23 @@ def garantir_plataforma():
             cursor.execute(
                 "INSERT INTO plataforma_smtp (id) VALUES (1) ON CONFLICT (id) DO NOTHING"
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS plataforma_pacotes (
+                    codigo VARCHAR(40) PRIMARY KEY,
+                    nome VARCHAR(80) NOT NULL,
+                    descricao TEXT,
+                    valor NUMERIC(12,2),
+                    telas TEXT NOT NULL,
+                    atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
             for tabela, coluna, spec in (
                 ("plataforma_smtp", "google_client_id", "VARCHAR(200)"),
                 ("plataforma_smtp", "google_client_secret", "VARCHAR(200)"),
                 ("plataforma_smtp", "google_refresh_token", "TEXT"),
+                ("plataforma_escolas", "pacote", "VARCHAR(40)"),
             ):
                 cursor.execute(
                     """
@@ -96,6 +112,15 @@ def garantir_plataforma():
                 )
                 if not cursor.fetchone():
                     cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {spec}")
+            for codigo, nome, descricao, telas in PACOTES_INICIAIS:
+                cursor.execute(
+                    """
+                    INSERT INTO plataforma_pacotes (codigo, nome, descricao, telas)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (codigo) DO NOTHING
+                    """,
+                    (codigo, nome, descricao, json.dumps(telas)),
+                )
         conexao.commit()
     except Exception as e:
         try:
@@ -172,6 +197,98 @@ def listar_escolas():
             return cursor.fetchall() or []
     finally:
         conexao.close()
+
+
+def _telas_validas(bruto):
+    codigos = {codigo for codigo, _rotulo in TELAS_PLANO}
+    if isinstance(bruto, str):
+        try:
+            bruto = json.loads(bruto)
+        except Exception:
+            bruto = []
+    if not isinstance(bruto, list):
+        return []
+    return [codigo for codigo in bruto if codigo in codigos]
+
+
+def listar_pacotes():
+    garantir_plataforma()
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        return []
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "SELECT codigo, nome, descricao, valor, telas FROM plataforma_pacotes ORDER BY nome"
+            )
+            linhas = []
+            for row in cursor.fetchall() or []:
+                item = dict(row)
+                item["telas"] = _telas_validas(item.get("telas"))
+                linhas.append(item)
+            return linhas
+    finally:
+        conexao.close()
+
+
+def salvar_pacote(codigo, valor, telas):
+    codigo = (codigo or "").strip().lower()
+    conhecidos = {item[0] for item in PACOTES_INICIAIS}
+    if codigo not in conhecidos:
+        raise ValueError("Pacote não encontrado.")
+    telas_ok = _telas_validas(telas)
+    if not telas_ok:
+        raise ValueError("Marque ao menos uma tela no pacote.")
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE plataforma_pacotes
+                SET valor = %s, telas = %s, atualizado_em = CURRENT_TIMESTAMP
+                WHERE codigo = %s
+                """,
+                (valor, json.dumps(telas_ok), codigo),
+            )
+        conexao.commit()
+    finally:
+        conexao.close()
+    return next(p for p in listar_pacotes() if p["codigo"] == codigo)
+
+
+def definir_pacote_escola(escola_id, codigo):
+    garantir_plataforma()
+    escola = buscar_escola_por_id(escola_id)
+    if not escola:
+        raise ValueError("Escola não encontrada.")
+    codigo = (codigo or "").strip().lower()
+    if codigo:
+        if codigo not in {p["codigo"] for p in listar_pacotes()}:
+            raise ValueError("Escolha um pacote cadastrado.")
+    else:
+        codigo = None
+    conexao = obter_conexao(master=True)
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "UPDATE plataforma_escolas SET pacote = %s WHERE id = %s",
+                (codigo, escola_id),
+            )
+        conexao.commit()
+    finally:
+        conexao.close()
+    return buscar_escola_por_id(escola_id)
+
+
+def telas_contratadas(escola):
+    if not escola or not escola.get("pacote"):
+        return None
+    for pacote in listar_pacotes():
+        if pacote["codigo"] == escola.get("pacote"):
+            return pacote["telas"]
+    return None
 
 
 def buscar_escola_por_id(escola_id):
