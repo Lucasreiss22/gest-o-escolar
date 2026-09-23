@@ -2097,8 +2097,8 @@ def plataforma_autorizar_gmail():
     secret = (cred.get("client_secret") or "").strip()
     if "@" in cid or "googleusercontent.com" not in cid or not secret:
         flash(
-            "Hotmail, iCloud e Yahoo não recebem o e-mail enquanto o remetente for @gmail.com pela Brevo. "
-            "No Render, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET e clique em Conectar Gmail de novo.",
+            "Ainda falta o aplicativo do Google. Cole o Client ID e o Client secret no quadro Envio automático e salve. "
+            "O Client ID termina com .apps.googleusercontent.com.",
             "danger",
         )
         return redirect(url_for("plataforma_escolas"))
@@ -2183,7 +2183,21 @@ def plataforma_escolas():
                     request.form.get("google_client_id"),
                     request.form.get("google_client_secret"),
                 )
-                flash("Credenciais Google salvas. Agora clique em Conectar Gmail da plataforma (uma vez).", "success")
+                cred = credenciais_google()
+                cid = (cred.get("client_id") or "").strip()
+                secret = (cred.get("client_secret") or "").strip()
+                if "@" in cid or "googleusercontent.com" not in cid or not secret:
+                    flash(
+                        "O Client ID precisa terminar com .apps.googleusercontent.com e o Client secret não pode ficar vazio.",
+                        "danger",
+                    )
+                else:
+                    if conexao:
+                        try:
+                            conexao.close()
+                        except Exception:
+                            pass
+                    return redirect(url_for("plataforma_autorizar_gmail"))
             except Exception as e:
                 flash(f"Não foi possível salvar o Google: {e}", "danger")
         elif acao == "criar_escola":
@@ -2366,6 +2380,12 @@ def plataforma_escolas():
         pacotes = listar_pacotes()
     except Exception as e:
         flash(f"Não foi possível carregar os pacotes: {e}", "danger")
+    cred_google = {}
+    try:
+        cred_google = credenciais_google()
+    except Exception:
+        cred_google = {}
+    cid_google = (cred_google.get("client_id") or "").strip()
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
@@ -2373,6 +2393,8 @@ def plataforma_escolas():
         telas_plano=TELAS_PLANO,
         smtp=smtp,
         diagnostico=diagnostico,
+        google_client_id=cid_google,
+        google_app=bool(cred_google.get("client_secret") and "googleusercontent.com" in cid_google and "@" not in cid_google),
         google_login=_google_habilitado(),
         google_autorizado=bool((smtp or {}).get("google_refresh_token") if isinstance(smtp, dict) else getattr(smtp, "google_refresh_token", None)),
         google_redirect=url_for("login_google_callback", _external=True),

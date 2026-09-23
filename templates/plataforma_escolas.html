@@ -62,11 +62,28 @@
                 O plano Free do Render bloqueia SMTP. Com BREVO_API_KEY o servidor envia sozinho (e-mail do admin da plataforma).
                 A escola aparece no envio pelo e-mail principal cadastrado em Configurações. Se um professor ou funcionário disparar a mensagem, o destinatário vê o nome dessa pessoa. O To é quem recebe o código, boleto ou contra-cheque.
             </p>
-            {% if diagnostico and not diagnostico.gmail_api %}
-            <p class="alert alert-warning">Hotmail, Outlook, iCloud e Yahoo recusam mensagem enviada pela Brevo com remetente @gmail.com. O Gmail ainda recebe. Conecte o Gmail da plataforma para o envio sair pelo Google.</p>
-            <p><a class="btn" href="{{ url_for('plataforma_autorizar_gmail') }}">Conectar Gmail</a></p>
-            {% elif diagnostico and diagnostico.gmail_api %}
+            {% if diagnostico and diagnostico.gmail_api %}
             <p class="hint">Gmail conectado. Hotmail, iCloud e Yahoo recebem pelo mesmo envio.</p>
+            {% elif google_app %}
+            <p class="hint">Aplicativo do Google salvo. O próximo passo abre a conta Gmail da plataforma e autoriza o envio.</p>
+            <p><a class="btn-sm btn-azul" href="{{ url_for('plataforma_autorizar_gmail') }}">Conectar Gmail</a></p>
+            {% else %}
+            <p class="hint">Cole o Client ID e o Client secret do Google Cloud. A URI de redirecionamento tem que ser exatamente esta:</p>
+            <p class="hint"><code>{{ google_redirect }}</code></p>
+            <form method="POST">
+                <input type="hidden" name="acao" value="salvar_google">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Client ID</label>
+                        <input name="google_client_id" required placeholder="....apps.googleusercontent.com" value="{{ google_client_id or '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Client secret</label>
+                        <input type="password" name="google_client_secret" required placeholder="GOCSPX-..." autocomplete="off">
+                    </div>
+                </div>
+                <p style="margin-top:14px;"><button class="btn" type="submit">Salvar e conectar Gmail</button></p>
+            </form>
             {% endif %}
         </div>
 
