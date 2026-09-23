@@ -81,8 +81,8 @@
         <div class="card-box">
             <h3 class="card-title">Acesso da equipe</h3>
             <p style="color:#64748b; font-size:0.9rem; line-height:1.45;">
-                O cadastro da pessoa continua em Gerenciar Usuários. Aqui você define o que cada uma pode acessar, ver e alterar.
-                O padrão já vem pela função. Administrador acessa e altera tudo.
+                O cadastro da pessoa continua em Gerenciar Usuários. Aqui você define o que cada uma pode acessar, ver, alterar no cadastro e excluir.
+                O padrão já vem pela função. Secretaria altera cadastro de aluno e turma, mas não exclui até você marcar. Direção, financeiro e supervisor excluem por padrão. Administrador faz tudo.
             </p>
             {% if not equipe_acesso %}
             <p style="color:#64748b;">Nenhuma pessoa com acesso ao painel. Cadastre em Gerenciar Usuários e marque que ela entra no sistema.</p>
@@ -115,7 +115,8 @@
                                 <th>Área</th>
                                 <th style="text-align:center;">Acessar</th>
                                 <th style="text-align:center;">Ver</th>
-                                <th style="text-align:center;">Alterar</th>
+                                <th style="text-align:center;">Alterar cadastro</th>
+                                <th style="text-align:center;">Excluir</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -123,7 +124,7 @@
                             {% set bloco = acesso.permissoes.get(area, {}) %}
                             <tr>
                                 <td>{{ rotulo }}</td>
-                                {% for acao in ['acessar', 'ver', 'alterar'] %}
+                                {% for acao in ['acessar', 'ver', 'alterar', 'excluir'] %}
                                 <td style="text-align:center;">
                                     <input type="checkbox" name="perm_{{ area }}_{{ acao }}" value="1" data-perm="{{ area }}" data-acao="{{ acao }}" {% if bloco.get(acao) %}checked{% endif %}>
                                 </td>
@@ -133,6 +134,13 @@
                         </tbody>
                     </table>
                 </div>
+                <p style="font-size:.85rem;color:#64748b;margin:12px 0 0;line-height:1.45;">
+                    <strong>Alterar cadastro</strong> libera editar aluno, turma, matrícula, matéria e cobrança.
+                    <strong>Excluir</strong> é separado: em Alunos apaga o aluno, o responsável ou o autorizado;
+                    em Turmas e matrículas apaga a turma, a matéria ou tira o aluno da turma;
+                    em Equipe apaga o colaborador; em Financeiro apaga a cobrança; em Usuários remove o acesso ao painel.
+                    Quem não tem a permissão não vê o botão. A pessoa precisa entrar de novo para a mudança valer.
+                </p>
                 <p style="margin-top:14px;"><button class="btn btn-primary" type="submit">Salvar acesso</button></p>
             </form>
             <script type="application/json" id="padroesAcesso">{{ padroes_acesso|tojson }}</script>
@@ -166,12 +174,13 @@
                 el.checked = !!area[el.getAttribute("data-acao")];
             });
         }
-        document.querySelectorAll("[data-acao='alterar']").forEach(function (el) {
+        document.querySelectorAll("[data-acao='alterar'], [data-acao='excluir']").forEach(function (el) {
             el.addEventListener("change", function () {
                 if (!el.checked) return;
                 var area = el.getAttribute("data-perm");
                 document.querySelectorAll("[data-perm='" + area + "']").forEach(function (item) {
-                    item.checked = true;
+                    var acao = item.getAttribute("data-acao");
+                    if (acao === "acessar" || acao === "ver") item.checked = true;
                 });
             });
         });

@@ -171,6 +171,7 @@
         {% if aba == 'materias' %}
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-body">
+                {% if pode_alterar('pedagogico_cadastro') %}
                 <h3 class="fs-5 fw-bold mb-2">Cadastrar matéria</h3>
                 <p class="small text-muted">Informe quantas aulas de cada duração em cada dia. O total soma as horas: 3 dias com 1 h = 3 h/semana.</p>
                 <form method="POST" class="row g-2">
@@ -205,6 +206,9 @@
                         <button class="btn btn-primary" type="submit">Cadastrar matéria</button>
                     </div>
                 </form>
+                {% else %}
+                <h3 class="fs-5 fw-bold mb-2">Matérias</h3>
+                {% endif %}
                 <ul class="mt-3 mb-0 list-unstyled">
                     {% for d in disciplinas %}
                     <li class="d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 border-bottom">
@@ -212,12 +216,14 @@
                             <strong>{{ d.nome }}</strong>
                             <small class="text-muted d-block">{{ d.resumo }}</small>
                         </span>
+                        {% if pode_excluir('pedagogico_cadastro') %}
                         <form method="POST" class="m-0" onsubmit="return confirm('Excluir a matéria {{ d.nome }}? Ela sai também das turmas.');">
                             <input type="hidden" name="acao" value="excluir_disciplina">
                             <input type="hidden" name="aba" value="materias">
                             <input type="hidden" name="disciplina_id" value="{{ d.id }}">
                             <button class="btn btn-sm btn-outline-danger" type="submit">Excluir</button>
                         </form>
+                        {% endif %}
                     </li>
                     {% else %}
                     <li class="text-muted">Nenhuma matéria cadastrada.</li>
@@ -331,9 +337,11 @@
                     <div class="d-flex flex-wrap gap-1">
                         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('pagina_pedagogico', aba='turmas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Voltar às turmas</a>
                         <a class="btn btn-sm btn-outline-success" href="{{ url_for('calendario_escolar', turma_id=turma.id) }}">Calendário / chamada</a>
+                        {% if pode_excluir('pedagogico_cadastro') %}
                         <form action="{{ url_for('excluir_turma', turma_id=turma.id) }}" method="POST" style="display:inline;">
                             <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Deseja realmente excluir esta turma?');">Excluir turma</button>
                         </form>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -373,6 +381,7 @@
                                 <td>{{ q.hora_semana }}</td>
                                 <td>{{ q.hora_mes }}</td>
                                 <td class="text-end">
+                                    {% if pode_excluir('pedagogico_cadastro') %}
                                     <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="d-inline" onsubmit="return confirm('Remover {{ q.nome }} desta turma? A matéria continua cadastrada na escola.');">
                                         <input type="hidden" name="acao" value="excluir_disciplina_turma">
                                         <input type="hidden" name="turma_id" value="{{ turma.id }}">
@@ -380,6 +389,7 @@
                                         {{ ctx_turma('horas') }}
                                         <button type="submit" class="btn btn-sm btn-outline-danger">Excluir</button>
                                     </form>
+                                    {% endif %}
                                 </td>
                             </tr>
                             {% endfor %}
@@ -390,6 +400,7 @@
                 <p class="text-muted small">Nenhuma matéria nesta turma ainda.</p>
                 {% endif %}
 
+                {% if pode_alterar('pedagogico_cadastro') %}
                 <details class="mb-3 p-3 border rounded">
                     <summary class="fw-bold small" style="cursor:pointer;">Incluir matéria nesta turma</summary>
                 <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mt-2">
@@ -439,8 +450,10 @@
                 {% endif %}
                 </details>
                 {% endif %}
+                {% endif %}
 
                 {% if painel == 'provas' %}
+                {% if pode_alterar('pedagogico_cadastro') %}
                 <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mb-3 p-3 bg-light rounded">
                     <input type="hidden" name="acao" value="criar_prova_turma">
                     <input type="hidden" name="turma_id" value="{{ turma.id }}">
@@ -484,6 +497,7 @@
                         <input class="form-control form-control-sm" name="descricao_prova" placeholder="Descrição (conteúdo, sala, observações)">
                     </div>
                 </form>
+                {% endif %}
                 {% if provas_por_turma.get(turma.id) %}
                 <ul class="list-group">
                     {% for pv in provas_por_turma.get(turma.id) %}
@@ -646,7 +660,7 @@
                                     </td>
                                     <td class="text-end">
                                         <a class="btn btn-sm btn-outline-primary" href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}">Cadastro</a>
-                                        {% if pode_alterar('pedagogico_cadastro') %}
+                                        {% if pode_excluir('pedagogico_cadastro') %}
                                         <form method="POST" style="display:inline;">
                                             <input type="hidden" name="acao" value="desvincular_aluno">
                                             <input type="hidden" name="turma_id" value="{{ turma.id }}">

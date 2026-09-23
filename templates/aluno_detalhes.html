@@ -21,9 +21,11 @@
                 <a class="btn btn-outline-success btn-sm" href="{{ url_for('calendario_escolar', aluno_id=aluno.id or aluno[0]) }}">Calendário de presença</a>
                 <a class="btn btn-outline-primary btn-sm" href="#notas">Notas / boletim</a>
                 <a class="btn btn-outline-danger btn-sm" href="#faltas">Faltas</a>
+                {% if pode_alterar('alunos') %}
                 <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalEditarAluno">
                     <i class="bi bi-pencil-square"></i> Editar Aluno
                 </button>
+                {% endif %}
                 {% set st = (aluno.status or aluno.situacao or 'inativo') | lower %}
                 <span class="badge {% if st == 'ativo' %}bg-success{% else %}bg-secondary{% endif %} fs-6 text-uppercase">
                     {{ st }}
@@ -110,9 +112,11 @@
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
                         <span><i class="bi bi-people-fill text-primary"></i> Responsáveis Legais</span>
+                        {% if pode_alterar('alunos') %}
                         <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalAddResponsavel">
                             <i class="bi bi-plus-lg"></i> Adicionar
                         </button>
+                        {% endif %}
                     </div>
                     <div class="card-body">
                         {% if responsaveis %}
@@ -132,9 +136,11 @@
                                             </div>
                                         </div>
                                         <div>
-                                            <button class="btn btn-sm btn-light border me-1" data-bs-toggle="modal" data-bs-target="#modalEditResp{{ resp_id }}" title="Editar Contato">
-                                                <i class="bi bi-pencil"></i>
+                                            {% if pode_alterar('alunos') or pode_excluir('alunos') %}
+                                            <button class="btn btn-sm btn-light border me-1" data-bs-toggle="modal" data-bs-target="#modalEditResp{{ resp_id }}" title="{% if pode_alterar('alunos') %}Editar Contato{% else %}Excluir responsável{% endif %}">
+                                                <i class="bi {% if pode_alterar('alunos') %}bi-pencil{% else %}bi-trash{% endif %}"></i>
                                             </button>
+                                            {% endif %}
                                         </div>
                                     </li>
 
@@ -191,10 +197,14 @@
                                                         </div>
                                                     </div>
                                                     <div class="modal-footer justify-content-between">
+                                                        {% if pode_excluir('alunos') %}
                                                         <button type="submit" name="acao" value="deletar_responsavel" class="btn btn-outline-danger btn-sm" onclick="return confirm('Deseja realmente remover este responsável?')">Excluir</button>
+                                                        {% else %}<span></span>{% endif %}
                                                         <div>
                                                             <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                                                            {% if pode_alterar('alunos') %}
                                                             <button type="submit" class="btn btn-primary btn-sm">Salvar Alterações</button>
+                                                            {% endif %}
                                                         </div>
                                                     </div>
                                                 </form>
@@ -232,7 +242,7 @@
                                             <div class="text-end">
                                                 <span class="badge bg-info text-dark d-block mb-1">{{ t.ano_letivo or t[1] }} - {{ t.turno or t[2] }}</span>
                                                 <a class="small d-block" href="{{ url_for('calendario_escolar', aluno_id=aluno.id, turma_id=t.turma_id) }}">Presença</a>
-                                                {% if pode('pedagogico_cadastro') %}
+                                                {% if pode_excluir('pedagogico_cadastro') %}
                                                 <form action="{{ url_for('aluno_vincular_turma', aluno_id=aluno.id) }}" method="POST" class="mt-1">
                                                     <input type="hidden" name="acao" value="desvincular">
                                                     <input type="hidden" name="turma_id" value="{{ t.turma_id }}">
@@ -247,7 +257,7 @@
                         {% else %}
                             <p class="text-muted my-2 small">Aluno ainda não foi enturmado.</p>
                         {% endif %}
-                        {% if pode('pedagogico_cadastro') %}
+                        {% if pode_alterar('pedagogico_cadastro') %}
                         {% set ids_t = turmas | map(attribute='turma_id') | list %}
                         <form action="{{ url_for('aluno_vincular_turma', aluno_id=aluno.id) }}" method="POST" class="row g-2 mt-3">
                             <input type="hidden" name="acao" value="vincular">
@@ -275,9 +285,11 @@
         <div class="card border-0 shadow-sm mt-4">
             <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-shield-check text-success"></i> Pessoas Autorizadas a Buscar a Criança</span>
+                {% if pode_alterar('alunos') %}
                 <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#modalAddAutorizado">
                     <i class="bi bi-plus-lg"></i> Adicionar Autorizado
                 </button>
+                {% endif %}
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -308,9 +320,11 @@
                                         <td><span class="badge bg-secondary">{{ aut.vinculo or aut.parentesco or aut[4] or 'Autorizado' }}</span></td>
                                         <td><small class="text-muted">{{ aut.endereco or aut[5] or 'Não informado' }}</small></td>
                                         <td class="text-end">
+                                            {% if pode_alterar('alunos') or pode_excluir('alunos') %}
                                             <button class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#modalEditAutorizado{{ aut_id }}">
-                                                <i class="bi bi-pencil"></i>
+                                                <i class="bi {% if pode_alterar('alunos') %}bi-pencil{% else %}bi-trash{% endif %}"></i>
                                             </button>
+                                            {% endif %}
 
                                             <!-- MODAL EDITAR AUTORIZADO -->
                                             <div class="modal fade text-start" id="modalEditAutorizado{{ aut_id }}" tabindex="-1" aria-hidden="true">
@@ -353,10 +367,14 @@
                                                                 </div>
                                                             </div>
                                                             <div class="modal-footer justify-content-between">
+                                                                {% if pode_excluir('alunos') %}
                                                                 <button type="submit" name="acao" value="deletar_autorizado" class="btn btn-outline-danger btn-sm" onclick="return confirm('Remover esta autorização?')">Excluir</button>
+                                                                {% endif %}
                                                                 <div>
                                                                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                                                                    {% if pode_alterar('alunos') %}
                                                                     <button type="submit" class="btn btn-primary btn-sm">Salvar Alterações</button>
+                                                                    {% endif %}
                                                                 </div>
                                                             </div>
                                                         </form>

@@ -75,6 +75,7 @@ from folha import (
 )
 from permissoes import (
     AREAS_ACESSO,
+    classificar_requisicao,
     pode_acao,
     pode_endpoint,
     pode_modulo,
@@ -425,7 +426,7 @@ def _permissoes_do_form(papel):
     for area, _rotulo in AREAS_ACESSO:
         dados[area] = {
             acao: request.form.get(f"perm_{area}_{acao}") == "1"
-            for acao in ("acessar", "ver", "alterar")
+            for acao in ("acessar", "ver", "alterar", "excluir")
         }
     return permissoes_efetivas(papel, dados)
 
@@ -852,6 +853,7 @@ def inject_acl():
         "rotulo_papel": rotulo_papel(papel),
         "pode": lambda modulo: pode_acao(papel, modulo, "acessar", session.get("permissoes")),
         "pode_alterar": lambda modulo: pode_acao(papel, modulo, "alterar", session.get("permissoes")),
+        "pode_excluir": lambda modulo: pode_acao(papel, modulo, "excluir", session.get("permissoes")),
         "smtp_ok": smtp_ok,
         "google_login": google_login,
         "super_admin": bool(session.get("super_admin")),
@@ -904,13 +906,13 @@ def proteger_rotas():
         flash("Apenas o administrador da plataforma pode cadastrar novas escolas.", "danger")
         return redirect(url_for("dashboard"))
     papel = session.get("usuario_papel")
-    if endpoint == "pagina_pedagogico" and request.method == "POST":
-        acao = request.form.get("acao") or ""
-        if acao in ("criar_turma", "nova_turma", "vincular_aluno", "incluir_aluno", "desvincular_aluno") and not pode_acao(papel, "pedagogico_cadastro", "alterar", session.get("permissoes")):
-            flash("❌ Sem permissão para cadastrar turma ou matricular aluno.", "danger")
-            return redirect(url_for("pagina_pedagogico"))
-    if not pode_requisicao(papel, endpoint, request.method, session.get("permissoes")):
-        flash("❌ Sem permissão para acessar ou alterar esta área.", "danger")
+    acao_form = request.form.get("acao") if request.method == "POST" else ""
+    if not pode_requisicao(papel, endpoint, request.method, session.get("permissoes"), acao_form):
+        tipo, _modulo = classificar_requisicao(endpoint, request.method, acao_form)
+        if tipo == "excluir":
+            flash("❌ Sem permissão para excluir nesta área.", "danger")
+        else:
+            flash("❌ Sem permissão para acessar ou alterar esta área.", "danger")
         return redirect(url_for("dashboard"))
     return None
 
@@ -3982,11 +3984,15 @@ def detalhes_aluno(aluno_id):
 def aluno_vincular_turma(aluno_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
-    if not pode_modulo(session.get("usuario_papel"), "pedagogico_cadastro"):
-        flash("Sem permissão para enturmar aluno.", "danger")
-        return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
     turma_id = request.form.get("turma_id")
     acao = request.form.get("acao") or "vincular"
+    permissao = "excluir" if acao == "desvincular" else "alterar"
+    if not pode_acao(session.get("usuario_papel"), "pedagogico_cadastro", permissao, session.get("permissoes")):
+        flash(
+            "Sem permissão para tirar o aluno da turma." if permissao == "excluir" else "Sem permissão para enturmar aluno.",
+            "danger",
+        )
+        return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
     conexao = obter_conexao()
     if conexao and turma_id:
         try:

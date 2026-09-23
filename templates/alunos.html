@@ -17,12 +17,14 @@
         <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
             <h2 class="fw-bold text-dark">👨‍🎓 Gestão de Alunos</h2>
             <div class="d-flex gap-2 flex-wrap">
+                {% if pode_alterar('alunos') %}
                 <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalImportarAlunos">
                     <i class="bi bi-file-earmark-spreadsheet"></i> Importar planilha
                 </button>
                 <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoAluno">
                     <i class="bi bi-plus-lg"></i> Cadastrar Novo Aluno
                 </button>
+                {% endif %}
             </div>
         </div>
 
@@ -60,9 +62,11 @@
             <div class="card-body p-4">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                     <h3 class="fs-5 text-secondary fw-bold mb-0">Alunos Matriculados</h3>
+                    {% if pode_excluir('alunos') %}
                     <button type="button" class="btn btn-outline-danger btn-sm" id="btnExcluirSel" data-bs-toggle="modal" data-bs-target="#modalExcluirAlunos" disabled>
                         Excluir selecionados
                     </button>
+                    {% endif %}
                 </div>
                 <form id="formExcluirAlunos" action="{{ url_for('pagina_alunos') }}" method="POST">
                     <input type="hidden" name="acao" value="excluir_alunos">
@@ -71,7 +75,7 @@
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th style="width:42px;"><input type="checkbox" class="form-check-input js-todos-excluir" title="Selecionar todos" aria-label="Selecionar todos"></th>
+                                {% if pode_excluir('alunos') %}<th style="width:42px;"><input type="checkbox" class="form-check-input js-todos-excluir" title="Selecionar todos" aria-label="Selecionar todos"></th>{% endif %}
                                 <th>Matrícula</th>
                                 <th>Nome do Aluno</th>
                                 <th>Telefone</th>
@@ -85,7 +89,7 @@
                             {% if alunos %}
                                 {% for aluno in alunos %}
                                 <tr>
-                                    <td><input class="form-check-input js-excluir-aluno" type="checkbox" name="aluno_id" value="{{ aluno.id }}" form="formExcluirAlunos" aria-label="Selecionar {{ aluno.nome_completo or aluno.nome }}"></td>
+                                    {% if pode_excluir('alunos') %}<td><input class="form-check-input js-excluir-aluno" type="checkbox" name="aluno_id" value="{{ aluno.id }}" form="formExcluirAlunos" aria-label="Selecionar {{ aluno.nome_completo or aluno.nome }}"></td>{% endif %}
                                     <td>{{ aluno.matricula }}</td>
                                     <td>
                                         <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="text-primary text-decoration-none fw-bold d-flex align-items-center gap-2">
@@ -111,17 +115,19 @@
                                         <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" class="btn btn-sm btn-outline-primary me-1" title="Ver Detalhes">
                                             <i class="bi bi-eye"></i>
                                         </a>
+                                        {% if pode_excluir('alunos') %}
                                         <form action="{{ url_for('excluir_aluno_rota', id=aluno.id) }}" method="POST" style="display:inline;">
                                             <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Deseja realmente excluir este aluno?');" title="Excluir">
                                                 <i class="bi bi-trash"></i>
                                             </button>
                                         </form>
+                                        {% endif %}
                                     </td>
                                 </tr>
                                 {% endfor %}
                             {% else %}
                                 <tr>
-                                    <td colspan="8" class="text-center py-4 text-muted">Nenhum aluno cadastrado no momento.</td>
+                                    <td colspan="{% if pode_excluir('alunos') %}8{% else %}7{% endif %}" class="text-center py-4 text-muted">Nenhum aluno cadastrado no momento.</td>
                                 </tr>
                             {% endif %}
                         </tbody>
@@ -132,10 +138,12 @@
                         {% for aluno in alunos %}
                         {% set st = (aluno.status or aluno.situacao or 'ativo') | lower %}
                         <article class="list-card">
+                            {% if pode_excluir('alunos') %}
                             <label class="d-flex align-items-center gap-2 mb-2">
                                 <input class="form-check-input js-excluir-aluno" type="checkbox" name="aluno_id" value="{{ aluno.id }}" form="formExcluirAlunos" aria-label="Selecionar {{ aluno.nome_completo or aluno.nome }}">
                                 <span>Selecionar</span>
                             </label>
+                            {% endif %}
                             <h3 class="d-flex align-items-center gap-2">
                                 {% with foto_atual=aluno.foto_url, foto_nome=aluno.nome_completo or aluno.nome %}{% include '_foto_mini.html' %}{% endwith %}
                                 {{ aluno.nome_completo or aluno.nome }}

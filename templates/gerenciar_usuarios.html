@@ -378,7 +378,7 @@
                     {% endif %}
                 </div>
             </form>
-            {% if cadastro.usuario_id %}
+            {% if cadastro.usuario_id and pode_excluir('usuarios') %}
             <form method="POST" style="margin-top:16px;" onsubmit="return confirm('Remover o acesso ao painel? O cadastro na folha e o e-mail de contra-cheque permanecem.');">
                 <input type="hidden" name="acao" value="excluir">
                 <input type="hidden" name="usuario_id" value="{{ cadastro.usuario_id }}">

@@ -1064,9 +1064,11 @@
                                 <button type="submit" class="btn btn-warning" style="padding: 6px 10px; font-size: 0.8rem;">Tirar baixa</button>
                             </form>
                             {% endif %}
+                            {% if pode_excluir('financeiro') %}
                             <form action="{{ url_for('excluir_financeiro', id=item.id) }}" method="POST">
                                 <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
                             </form>
+                            {% endif %}
                             <a class="btn btn-info" href="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}">PDF</a>
                             <form action="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}" method="POST" style="display:inline;">
                                 <input type="hidden" name="enviar" value="1">
@@ -1164,9 +1166,11 @@
                                             <button type="submit" class="btn btn-warning" style="padding: 5px 10px; font-size: 0.75rem;">Tirar baixa</button>
                                         </form>
                                         {% endif %}
+                                        {% if pode_excluir('financeiro') %}
                                         <form action="{{ url_for('excluir_financeiro', id=item.id) }}" method="POST" style="display:inline;">
                                             <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
                                         </form>
+                                        {% endif %}
                                         <a class="btn btn-info" href="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}" style="padding:5px 10px; font-size:0.75rem;">PDF</a>
                                         <form action="{{ url_for('cobranca_email', cobranca_id=item.id) }}" method="POST" style="display:inline;">
                                             <button type="submit" class="btn btn-primary" style="padding:5px 10px; font-size:0.75rem;" onclick="return confirm('Enviar o PDF desta mensalidade por e-mail ao responsável?');">E-mail</button>

@@ -42,6 +42,7 @@ ENDPOINTS = {
     "pagina_configuracoes": "configuracoes",
     "excluir_usuario_sistema": "usuarios",
     "gerenciar_usuarios": "usuarios",
+    "adicionar_autorizado": "alunos",
     "contracheque": "contracheque",
     "pdf_contracheque_rota": "contracheque",
     "enviar_contracheques_mes": "financeiro",
@@ -72,9 +73,9 @@ def normalizar_papel(papel):
 
 AREAS_ACESSO = [
     ("dashboard", "Painel"),
-    ("alunos", "Alunos"),
+    ("alunos", "Alunos (cadastro e exclusão)"),
     ("pedagogico", "Pedagógico (turmas, chamada e notas)"),
-    ("pedagogico_cadastro", "Cadastrar turma e matrícula"),
+    ("pedagogico_cadastro", "Turmas e matrículas"),
     ("professores", "Equipe"),
     ("financeiro", "Financeiro"),
     ("calendario", "Calendário"),
@@ -83,9 +84,45 @@ AREAS_ACESSO = [
     ("usuarios", "Usuários e permissões"),
 ]
 
-ACOES_ACESSO = ("acessar", "ver", "alterar")
+ACOES_ACESSO = ("acessar", "ver", "alterar", "excluir")
 
 _POST_SO_LEITURA = {"pdf_contracheque_rota", "relatorio_pdf_consulta", "relatorio_tributario", "relatorio_pdf_custos"}
+
+_ENDPOINTS_EXCLUIR = {
+    "excluir_aluno_rota": "alunos",
+    "excluir_professor": "professores",
+    "excluir_turma": "pedagogico_cadastro",
+    "excluir_financeiro": "financeiro",
+    "excluir_usuario_sistema": "usuarios",
+}
+
+_FORM_EXCLUIR = {
+    ("pagina_alunos", "excluir_alunos"): "alunos",
+    ("pagina_alunos", "deletar_autorizado"): "alunos",
+    ("salvar_responsavel", "deletar_responsavel"): "alunos",
+    ("pagina_pedagogico", "excluir_disciplina"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "excluir_disciplina_turma"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "desvincular_aluno"): "pedagogico_cadastro",
+    ("aluno_vincular_turma", "desvincular"): "pedagogico_cadastro",
+    ("gerenciar_usuarios", "excluir"): "usuarios",
+}
+
+_FORM_CADASTRO = {
+    ("pagina_alunos", "editar_aluno"): "alunos",
+    ("pagina_alunos", "editar_autorizado"): "alunos",
+    ("pagina_alunos", "cadastrar_aluno"): "alunos",
+    ("pagina_alunos", "importar_alunos"): "alunos",
+    ("salvar_responsavel", "editar_responsavel"): "alunos",
+    ("pagina_pedagogico", "criar_turma"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "nova_turma"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "vincular_aluno"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "incluir_aluno"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "criar_disciplina"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "criar_disciplina_turma"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "vincular_disciplina"): "pedagogico_cadastro",
+    ("pagina_pedagogico", "criar_prova_turma"): "pedagogico_cadastro",
+    ("aluno_vincular_turma", "vincular"): "pedagogico_cadastro",
+}
 
 
 def pode_modulo(papel, modulo):
@@ -102,7 +139,13 @@ def permissoes_padrao(papel):
         altera = entra
         if area == "contracheque" and papel_n in {"professor", "funcionario", "secretaria"}:
             altera = False
-        mapa[area] = {"acessar": entra, "ver": entra, "alterar": altera}
+        gestao = papel_n in {"admin", "supervisor", "financeiro", "direcao"}
+        mapa[area] = {
+            "acessar": entra,
+            "ver": entra,
+            "alterar": altera,
+            "excluir": altera and gestao,
+        }
     return mapa
 
 
@@ -129,7 +172,7 @@ def permissoes_efetivas(papel, salvo=None):
         for acao in ACOES_ACESSO:
             if acao in item:
                 base[area][acao] = bool(item[acao])
-        if base[area]["alterar"]:
+        if base[area].get("excluir") or base[area]["alterar"]:
             base[area]["ver"] = True
             base[area]["acessar"] = True
         elif base[area]["ver"]:
@@ -147,6 +190,8 @@ def pode_acao(papel, modulo, acao="acessar", salvo=None):
     if normalizar_papel(papel) == "admin":
         return True
     bloco = permissoes_efetivas(papel, salvo).get(modulo) or {}
+    if acao == "excluir":
+        return bool(bloco.get("excluir"))
     if acao == "alterar":
         return bool(bloco.get("alterar"))
     if acao == "ver":
@@ -163,15 +208,25 @@ def pode_endpoint(papel, endpoint):
     return pode_modulo(papel, modulo)
 
 
-def pode_requisicao(papel, endpoint, metodo, salvo=None):
+def classificar_requisicao(endpoint, metodo, acao_form=None):
+    if (metodo or "GET").upper() == "POST" and endpoint not in _POST_SO_LEITURA:
+        if endpoint in _ENDPOINTS_EXCLUIR:
+            return "excluir", _ENDPOINTS_EXCLUIR[endpoint]
+        chave = (endpoint, acao_form or "")
+        if chave in _FORM_EXCLUIR:
+            return "excluir", _FORM_EXCLUIR[chave]
+        if chave in _FORM_CADASTRO:
+            return "alterar", _FORM_CADASTRO[chave]
+        return "alterar", ENDPOINTS.get(endpoint)
+    return "acessar", ENDPOINTS.get(endpoint)
+
+
+def pode_requisicao(papel, endpoint, metodo, salvo=None, acao_form=None):
     if not endpoint:
         return True
-    modulo = ENDPOINTS.get(endpoint)
+    acao, modulo = classificar_requisicao(endpoint, metodo, acao_form)
     if not modulo:
         return True
-    acao = "acessar"
-    if (metodo or "GET").upper() == "POST" and endpoint not in _POST_SO_LEITURA:
-        acao = "alterar"
     return pode_acao(papel, modulo, acao, salvo)
 
 
