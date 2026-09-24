@@ -2413,7 +2413,8 @@ def plataforma_escolas():
                     request.form.get("cobranca_modo"),
                     request.form.get("cobranca_fixo"),
                     request.form.get("cobranca_percentual"),
-                    request.form.get("cobranca_base"),
+                    request.form.get("regime"),
+                    request.form.get("faturamento_manual"),
                     mes,
                 )
                 flash(

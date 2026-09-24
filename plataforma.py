@@ -107,6 +107,7 @@ def garantir_plataforma():
                 ("plataforma_escolas", "cobranca_fixo", "NUMERIC(12,2)"),
                 ("plataforma_escolas", "cobranca_percentual", "NUMERIC(8,2) DEFAULT 0"),
                 ("plataforma_escolas", "cobranca_base", "VARCHAR(20) DEFAULT 'recebido'"),
+                ("plataforma_escolas", "regime", "VARCHAR(20) DEFAULT 'outro'"),
             ):
                 cursor.execute(
                     """
@@ -130,6 +131,13 @@ def garantir_plataforma():
                     data_pagamento DATE,
                     forma_pagamento VARCHAR(40),
                     status VARCHAR(30) DEFAULT 'Pendente',
+                    UNIQUE (escola_id, competencia)
+                );
+                CREATE TABLE IF NOT EXISTS plataforma_faturamento_manual (
+                    id SERIAL PRIMARY KEY,
+                    escola_id INT NOT NULL,
+                    competencia VARCHAR(7) NOT NULL,
+                    valor NUMERIC(12,2) NOT NULL DEFAULT 0,
                     UNIQUE (escola_id, competencia)
                 );
                 CREATE TABLE IF NOT EXISTS plataforma_custos (
@@ -409,6 +417,62 @@ def _regra_cobranca(escola, pacote):
     }
 
 
+def faturamento_manual_escola(escola_id, competencia):
+    if not escola_id:
+        return 0.0
+    conexao = None
+    try:
+        conexao = obter_conexao_nova()
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT valor FROM plataforma_faturamento_manual
+                WHERE escola_id = %s AND competencia = %s
+                """,
+                (escola_id, competencia),
+            )
+            row = cursor.fetchone()
+        return _numero(row.get("valor")) if row else 0.0
+    except Exception:
+        return 0.0
+    finally:
+        if conexao:
+            try:
+                conexao.close()
+            except Exception:
+                pass
+
+
+def salvar_faturamento_manual(escola_id, competencia, valor):
+    competencia = _competencia_valida(competencia)
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            if valor is None:
+                cursor.execute(
+                    "DELETE FROM plataforma_faturamento_manual WHERE escola_id = %s AND competencia = %s",
+                    (escola_id, competencia),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO plataforma_faturamento_manual (escola_id, competencia, valor)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (escola_id, competencia)
+                    DO UPDATE SET valor = EXCLUDED.valor
+                    """,
+                    (escola_id, competencia, valor),
+                )
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+
+
 def receita_mensal_escola(db_nome, competencia):
     vazio = {"recebido": 0.0, "lancado": 0.0, "alunos": 0, "ok": False}
     if not _schema_seguro(db_nome):
@@ -485,20 +549,29 @@ def receita_mensal_escola(db_nome, competencia):
 
 def calcular_cobranca_escola(escola, pacote, competencia):
     regra = _regra_cobranca(escola, pacote)
-    receita = receita_mensal_escola(escola.get("db_nome"), competencia)
-    base_valor = receita["recebido"] if regra["base"] == "recebido" else receita["lancado"]
-    alunos = receita["alunos"]
+    regime = (escola.get("regime") or "outro").strip().lower()
+    if regime != "simples":
+        regime = "outro"
+    modo = regra["modo"]
+    if modo in {"percentual", "misto"} and regime != "simples":
+        modo = "fixo"
+    alunos = 0
+    ok = True
+    if modo == "por_aluno":
+        receita = receita_mensal_escola(escola.get("db_nome"), competencia)
+        alunos = receita["alunos"]
+        ok = receita["ok"]
+    faturamento = faturamento_manual_escola(escola.get("id"), competencia) if regime == "simples" else 0.0
     fixo = regra["fixo"]
     percentual = regra["percentual"]
-    modo = regra["modo"]
     if modo == "percentual":
-        valor = round(base_valor * percentual / 100.0, 2)
-        resumo = f"{_percentual_campo(percentual) or '0'}% sobre R$ {_moeda_curta(base_valor)}"
+        valor = round(faturamento * percentual / 100.0, 2)
+        resumo = f"{_percentual_campo(percentual) or '0'}% sobre faturamento manual de R$ {_moeda_curta(faturamento)}"
     elif modo == "misto":
-        valor = round(fixo + base_valor * percentual / 100.0, 2)
+        valor = round(fixo + faturamento * percentual / 100.0, 2)
         resumo = (
             f"R$ {_moeda_curta(fixo)} + {_percentual_campo(percentual) or '0'}% "
-            f"de R$ {_moeda_curta(base_valor)}"
+            f"do faturamento manual de R$ {_moeda_curta(faturamento)}"
         )
     elif modo == "por_aluno":
         valor = round(fixo * alunos, 2)
@@ -506,19 +579,19 @@ def calcular_cobranca_escola(escola, pacote, competencia):
     else:
         valor = round(fixo, 2)
         resumo = "Valor fixo informado" if regra["fixo_proprio"] else "Valor fixo do pacote"
-    if regra["base"] == "lancado" and modo in {"percentual", "misto"}:
-        resumo += " (mensalidades lançadas)"
-    elif modo in {"percentual", "misto"}:
-        resumo += " (mensalidades recebidas)"
     return {
         **regra,
-        "recebido": receita["recebido"],
-        "lancado": receita["lancado"],
-        "base_valor": base_valor,
+        "modo": modo,
+        "regime": regime,
+        "simples": regime == "simples",
+        "faturamento": faturamento,
+        "recebido": 0.0,
+        "lancado": 0.0,
+        "base_valor": faturamento,
         "alunos": alunos,
         "valor": valor,
         "resumo": resumo,
-        "ok": receita["ok"],
+        "ok": ok,
         "percentual_campo": _percentual_campo(percentual),
     }
 
@@ -535,7 +608,7 @@ def preparar_cobranca_escolas(escolas, pacotes, competencia):
     return saida
 
 
-def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, base, competencia):
+def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, regime, faturamento_bruto, competencia):
     garantir_plataforma()
     escola = buscar_escola_por_id(escola_id)
     if not escola:
@@ -543,15 +616,23 @@ def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, 
     modo = (modo or "fixo").strip().lower()
     if modo not in _MODOS_COBRANCA:
         raise ValueError("Escolha como calcular: valor fixo, porcentagem, os dois ou por aluno.")
-    base = (base or "recebido").strip().lower()
-    if base not in _BASES_COBRANCA:
-        base = "recebido"
+    regime = "simples" if (regime or "").strip().lower() == "simples" else "outro"
+    if modo in {"percentual", "misto"} and regime != "simples":
+        raise ValueError(
+            "Porcentagem usa o faturamento manual e só vale para empresa do Simples Nacional. "
+            "Nos outros casos use valor fixo ou valor por aluno."
+        )
     percentual = min(100.0, max(0.0, _numero(percentual_bruto)))
     fixo = None
     if str(fixo_bruto or "").strip():
         fixo = _numero(fixo_bruto)
         if fixo < 0:
             raise ValueError("O valor fixo não pode ser negativo.")
+    faturamento = None
+    if regime == "simples" and str(faturamento_bruto or "").strip():
+        faturamento = _numero(faturamento_bruto)
+        if faturamento < 0:
+            raise ValueError("O faturamento manual não pode ser negativo.")
     conexao = obter_conexao(master=True)
     if not conexao:
         raise RuntimeError("Sem conexão com o banco da plataforma.")
@@ -563,10 +644,10 @@ def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, 
                 SET cobranca_modo = %s,
                     cobranca_fixo = %s,
                     cobranca_percentual = %s,
-                    cobranca_base = %s
+                    regime = %s
                 WHERE id = %s
                 """,
-                (modo, fixo, percentual, base, escola["id"]),
+                (modo, fixo, percentual, regime, escola["id"]),
             )
         conexao.commit()
     except Exception:
@@ -574,6 +655,8 @@ def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, 
         raise
     finally:
         conexao.close()
+    if regime == "simples":
+        salvar_faturamento_manual(escola["id"], competencia, faturamento)
     escola = buscar_escola_por_id(escola_id)
     pacote = None
     if escola.get("pacote"):
@@ -1023,7 +1106,7 @@ def painel_financeiro_plataforma(competencia, status="", busca=""):
             cursor.execute(
                 """
                 SELECT e.id, e.nome, e.email_admin, e.db_nome, e.pacote,
-                       e.cobranca_modo, e.cobranca_fixo, e.cobranca_percentual, e.cobranca_base,
+                       e.cobranca_modo, e.cobranca_fixo, e.cobranca_percentual, e.regime,
                        p.nome AS pacote_nome, p.valor AS pacote_valor
                 FROM plataforma_escolas e
                 LEFT JOIN plataforma_pacotes p ON p.codigo = e.pacote
@@ -1125,6 +1208,7 @@ def excluir_escola(escola_id):
     conexao = obter_conexao(master=True)
     try:
         with conexao.cursor() as cursor:
+            cursor.execute("DELETE FROM plataforma_faturamento_manual WHERE escola_id = %s", (escola_id,))
             cursor.execute("DELETE FROM plataforma_cobrancas WHERE escola_id = %s", (escola_id,))
             cursor.execute("DELETE FROM plataforma_escolas WHERE id = %s", (escola_id,))
         conexao.commit()

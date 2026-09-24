@@ -219,8 +219,6 @@
                 {% set c = e.calculo if e.calculo is defined else none %}
                 <div class="plano-box js-plano"
                      data-pacote="{{ (c.pacote_valor if c else 0)|float }}"
-                     data-recebido="{{ (c.recebido if c else 0)|float }}"
-                     data-lancado="{{ (c.lancado if c else 0)|float }}"
                      data-alunos="{{ c.alunos if c else 0 }}">
                     <h5>Pacote selecionado</h5>
                     {% if plano %}
@@ -257,11 +255,18 @@
                         <input type="hidden" name="escola_id" value="{{ e.id }}">
                         <div class="form-grid">
                             <div class="form-group">
+                                <label>Regime da empresa</label>
+                                <select name="regime" class="campo">
+                                    <option value="outro" {% if not c or not c.simples %}selected{% endif %}>Outro</option>
+                                    <option value="simples" {% if c and c.simples %}selected{% endif %}>Simples Nacional</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
                                 <label>Como calcular</label>
                                 <select name="cobranca_modo" class="campo">
-                                    <option value="fixo" {% if c and c.modo == 'fixo' %}selected{% endif %}>Valor fixo</option>
-                                    <option value="percentual" {% if c and c.modo == 'percentual' %}selected{% endif %}>Porcentagem</option>
-                                    <option value="misto" {% if c and c.modo == 'misto' %}selected{% endif %}>Fixo + porcentagem</option>
+                                    <option value="fixo" {% if not c or c.modo == 'fixo' %}selected{% endif %}>Valor fixo</option>
+                                    <option value="percentual" class="opcao-simples" {% if c and c.modo == 'percentual' %}selected{% endif %}>Porcentagem do faturamento</option>
+                                    <option value="misto" class="opcao-simples" {% if c and c.modo == 'misto' %}selected{% endif %}>Fixo + porcentagem</option>
                                     <option value="por_aluno" {% if c and c.modo == 'por_aluno' %}selected{% endif %}>Valor por aluno</option>
                                 </select>
                             </div>
@@ -273,22 +278,20 @@
                                 <label>Porcentagem (%)</label>
                                 <input name="cobranca_percentual" inputmode="decimal" placeholder="0" value="{{ c.percentual_campo if c else '' }}">
                             </div>
-                            <div class="form-group campo-base">
-                                <label>Base da porcentagem</label>
-                                <select name="cobranca_base" class="campo">
-                                    <option value="recebido" {% if not c or c.base == 'recebido' %}selected{% endif %}>Mensalidades recebidas</option>
-                                    <option value="lancado" {% if c and c.base == 'lancado' %}selected{% endif %}>Mensalidades lançadas</option>
-                                </select>
+                            <div class="form-group campo-faturamento">
+                                <label>Faturamento manual de {{ mes_label }} (R$)</label>
+                                <input name="faturamento_manual" inputmode="decimal" placeholder="0,00" value="{% if c and c.faturamento %}{{ c.faturamento|moeda_campo }}{% endif %}">
                             </div>
                         </div>
+                        <p class="hint campo-faturamento">Esse valor é o faturamento que você informa. A porcentagem não lê a mensalidade dos alunos.</p>
                         <p class="plano-resultado">
                             Estimativa de {{ mes_label }}: <strong data-valor>R$ {{ (c.valor if c else 0)|moeda }}</strong>
                             <span class="hint" data-texto style="display:block;">{{ c.resumo if c else '' }}</span>
                         </p>
-                        {% if c and not c.ok %}
-                        <p class="hint">Não foi possível ler as mensalidades desta escola. A porcentagem e o valor por aluno ficam zerados até o financeiro dela responder.</p>
-                        {% elif c %}
-                        <p class="hint">Neste mês a escola tem R$ {{ c.recebido|moeda }} recebidos, R$ {{ c.lancado|moeda }} lançados e {{ c.alunos }} aluno(s) ativo(s).</p>
+                        {% if c and c.modo == 'por_aluno' and not c.ok %}
+                        <p class="hint">Não foi possível contar os alunos desta escola. O valor por aluno fica zerado até o cadastro responder.</p>
+                        {% elif c and c.modo == 'por_aluno' %}
+                        <p class="hint">{{ c.alunos }} aluno(s) ativo(s) neste momento.</p>
                         {% endif %}
                         <p style="margin-top:10px;"><button class="btn-sm btn-azul" type="submit">Salvar cálculo</button></p>
                     </form>
@@ -356,9 +359,11 @@
         <div class="card-box">
             <h3>Pacotes de telas</h3>
             <p class="hint">
-                Cada pacote define quais telas a escola pode usar e o valor mensal cobrado na aba Financeiro.
+                Cada pacote define quais telas a escola pode usar e o valor fixo mensal.
+                Porcentagem não usa a mensalidade dos alunos: ela só existe para empresa do Simples Nacional
+                e incide sobre o faturamento que você digita na ficha da escola.
                 Painel, usuários e configurações continuam em todo pacote.
-                Escola sem pacote continua com todas as telas e não entra na geração automática.
+                Escola sem pacote continua com todas as telas.
             </p>
             {% for p in pacotes %}
             <form method="POST" class="pacote">
@@ -988,31 +993,39 @@
             return isNaN(n) ? 0 : n;
         }
         function atualizar() {
-            var modo = box.querySelector("[name=cobranca_modo]").value;
-            var base = box.querySelector("[name=cobranca_base]").value;
+            var regime = box.querySelector("[name=regime]").value;
+            var modoEl = box.querySelector("[name=cobranca_modo]");
+            var simples = regime === "simples";
+            box.querySelectorAll(".opcao-simples").forEach(function (op) {
+                op.hidden = !simples;
+                op.disabled = !simples;
+            });
+            if (!simples && (modoEl.value === "percentual" || modoEl.value === "misto")) modoEl.value = "fixo";
+            var modo = modoEl.value;
             var fixoBruto = box.querySelector("[name=cobranca_fixo]").value.trim();
             var fixo = fixoBruto ? numero(fixoBruto) : numero(box.dataset.pacote);
             var pct = numero(box.querySelector("[name=cobranca_percentual]").value);
-            var baseValor = base === "lancado" ? numero(box.dataset.lancado) : numero(box.dataset.recebido);
+            var faturamento = numero(box.querySelector("[name=faturamento_manual]").value);
             var alunos = parseInt(box.dataset.alunos || "0", 10) || 0;
             var valor = 0;
             var texto = "";
+            var usaPct = simples && (modo === "percentual" || modo === "misto");
             box.querySelector(".campo-fixo").hidden = modo === "percentual";
-            box.querySelector(".campo-pct").hidden = modo === "fixo" || modo === "por_aluno";
-            box.querySelector(".campo-base").hidden = modo === "fixo" || modo === "por_aluno";
+            box.querySelector(".campo-pct").hidden = !usaPct;
+            box.querySelectorAll(".campo-faturamento").forEach(function (el) { el.hidden = !usaPct; });
             box.querySelector(".label-fixo").textContent = modo === "por_aluno" ? "Valor por aluno (R$)" : "Valor fixo (R$)";
-            if (modo === "fixo") {
-                valor = fixo;
-                texto = fixoBruto ? "Valor fixo informado" : "Valor fixo do pacote";
-            } else if (modo === "percentual") {
-                valor = baseValor * pct / 100;
-                texto = pct + "% sobre R$ " + dinheiro(baseValor) + (base === "lancado" ? " (mensalidades lançadas)" : " (mensalidades recebidas)");
-            } else if (modo === "misto") {
-                valor = fixo + baseValor * pct / 100;
-                texto = "R$ " + dinheiro(fixo) + " + " + pct + "% de R$ " + dinheiro(baseValor);
-            } else {
+            if (modo === "percentual" && simples) {
+                valor = faturamento * pct / 100;
+                texto = pct + "% sobre faturamento manual de R$ " + dinheiro(faturamento);
+            } else if (modo === "misto" && simples) {
+                valor = fixo + faturamento * pct / 100;
+                texto = "R$ " + dinheiro(fixo) + " + " + pct + "% do faturamento manual de R$ " + dinheiro(faturamento);
+            } else if (modo === "por_aluno") {
                 valor = fixo * alunos;
                 texto = "R$ " + dinheiro(fixo) + " × " + alunos + " aluno(s)";
+            } else {
+                valor = fixo;
+                texto = fixoBruto ? "Valor fixo informado" : "Valor fixo do pacote";
             }
             box.querySelector("[data-valor]").textContent = "R$ " + dinheiro(valor);
             box.querySelector("[data-texto]").textContent = texto;
