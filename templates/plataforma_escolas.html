@@ -37,6 +37,13 @@
         .escola { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 12px; background: #fff; }
         .escola-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
         .escola h4 { margin: 0; }
+        .plano-box { margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; }
+        .plano-box h5 { margin: 0 0 4px; color: #1e3a5f; font-size: 1rem; }
+        .plano-telas { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+        .plano-telas span { background: #e2e8f0; color: #1e293b; border-radius: 999px; padding: 3px 8px; font-size: 0.75rem; font-weight: 700; }
+        .plano-resultado { margin: 10px 0 0; color: #1e3a5f; }
+        .plano-resultado strong { font-size: 1.15rem; }
+        .plano-box [hidden] { display: none !important; }
         .meta { font-size: 0.88rem; color: #334155; line-height: 1.55; margin-top: 8px; }
         .acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
         .btn, .btn-sm { border: 0; cursor: pointer; border-radius: 8px; font-weight: 700; text-decoration: none; display: inline-block; }
@@ -206,31 +213,86 @@
                     {% else %}<span class="badge badge-senha">Aguardando senha</span>{% endif %}
                 </div>
                 <div class="meta">
-                    {{ e.email_admin }} · banco <code>{{ e.db_nome }}</code><br>
-                    {% set plano = namespace(item=None) %}
-                    {% for p in pacotes %}{% if p.codigo == e.pacote %}{% set plano.item = p %}{% endif %}{% endfor %}
-                    Pacote:
-                    {% if plano.item %}
-                        {{ plano.item.nome }}{% if plano.item.valor %} · R$ {{ plano.item.valor|moeda }}{% else %} · valor a definir{% endif %}
-                        · {{ plano.item.telas|length }} tela(s)
-                    {% else %}
-                        Todas as telas
-                    {% endif %}
+                    {{ e.email_admin }} · banco <code>{{ e.db_nome }}</code>
                 </div>
-                <form method="POST" class="acoes">
-                    <input type="hidden" name="acao" value="definir_pacote">
-                    <input type="hidden" name="aba" value="escolas">
-                    <input type="hidden" name="escola_id" value="{{ e.id }}">
-                    <select name="pacote" class="campo">
-                        <option value="" {% if not e.pacote %}selected{% endif %}>Todas as telas</option>
-                        {% for p in pacotes %}
-                        <option value="{{ p.codigo }}" {% if e.pacote == p.codigo %}selected{% endif %}>
-                            {{ p.nome }}{% if p.valor %} — R$ {{ p.valor|moeda }}{% endif %}
-                        </option>
+                {% set plano = e.pacote_info if e.pacote_info is defined else none %}
+                {% set c = e.calculo if e.calculo is defined else none %}
+                <div class="plano-box js-plano"
+                     data-pacote="{{ (c.pacote_valor if c else 0)|float }}"
+                     data-recebido="{{ (c.recebido if c else 0)|float }}"
+                     data-lancado="{{ (c.lancado if c else 0)|float }}"
+                     data-alunos="{{ c.alunos if c else 0 }}">
+                    <h5>Pacote selecionado</h5>
+                    {% if plano %}
+                    <strong>{{ plano.nome }}</strong>
+                    <p class="hint" style="margin-top:2px;">{{ plano.descricao }}</p>
+                    <p class="hint">Valor de tabela: {% if plano.valor %}R$ {{ plano.valor|moeda }}{% else %}a definir{% endif %}</p>
+                    <div class="plano-telas">
+                        {% for codigo, rotulo in telas_plano %}
+                        {% if codigo in plano.telas %}<span>{{ rotulo }}</span>{% endif %}
                         {% endfor %}
-                    </select>
-                    <button class="btn-sm btn-verde" type="submit">Aplicar pacote</button>
-                </form>
+                    </div>
+                    {% else %}
+                    <strong>Todas as telas</strong>
+                    <p class="hint">Sem pacote. A escola usa o sistema inteiro. Defina um valor fixo abaixo se quiser cobrar mesmo assim.</p>
+                    {% endif %}
+                    <form method="POST" class="acoes">
+                        <input type="hidden" name="acao" value="definir_pacote">
+                        <input type="hidden" name="aba" value="escolas">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <select name="pacote" class="campo">
+                            <option value="" {% if not e.pacote %}selected{% endif %}>Todas as telas</option>
+                            {% for p in pacotes %}
+                            <option value="{{ p.codigo }}" {% if e.pacote == p.codigo %}selected{% endif %}>
+                                {{ p.nome }}{% if p.valor %} — R$ {{ p.valor|moeda }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <button class="btn-sm btn-verde" type="submit">Aplicar pacote</button>
+                    </form>
+                    <form method="POST" class="js-calculo" style="margin-top:12px;">
+                        <input type="hidden" name="acao" value="salvar_cobranca_escola">
+                        <input type="hidden" name="aba" value="escolas">
+                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Como calcular</label>
+                                <select name="cobranca_modo" class="campo">
+                                    <option value="fixo" {% if c and c.modo == 'fixo' %}selected{% endif %}>Valor fixo</option>
+                                    <option value="percentual" {% if c and c.modo == 'percentual' %}selected{% endif %}>Porcentagem</option>
+                                    <option value="misto" {% if c and c.modo == 'misto' %}selected{% endif %}>Fixo + porcentagem</option>
+                                    <option value="por_aluno" {% if c and c.modo == 'por_aluno' %}selected{% endif %}>Valor por aluno</option>
+                                </select>
+                            </div>
+                            <div class="form-group campo-fixo">
+                                <label class="label-fixo">Valor fixo (R$)</label>
+                                <input name="cobranca_fixo" inputmode="decimal" placeholder="{% if c and c.pacote_valor %}{{ c.pacote_valor|moeda }}{% else %}0,00{% endif %}" value="{% if c and c.fixo_proprio %}{{ c.fixo|moeda_campo }}{% endif %}">
+                            </div>
+                            <div class="form-group campo-pct">
+                                <label>Porcentagem (%)</label>
+                                <input name="cobranca_percentual" inputmode="decimal" placeholder="0" value="{{ c.percentual_campo if c else '' }}">
+                            </div>
+                            <div class="form-group campo-base">
+                                <label>Base da porcentagem</label>
+                                <select name="cobranca_base" class="campo">
+                                    <option value="recebido" {% if not c or c.base == 'recebido' %}selected{% endif %}>Mensalidades recebidas</option>
+                                    <option value="lancado" {% if c and c.base == 'lancado' %}selected{% endif %}>Mensalidades lançadas</option>
+                                </select>
+                            </div>
+                        </div>
+                        <p class="plano-resultado">
+                            Estimativa de {{ mes_label }}: <strong data-valor>R$ {{ (c.valor if c else 0)|moeda }}</strong>
+                            <span class="hint" data-texto style="display:block;">{{ c.resumo if c else '' }}</span>
+                        </p>
+                        {% if c and not c.ok %}
+                        <p class="hint">Não foi possível ler as mensalidades desta escola. A porcentagem e o valor por aluno ficam zerados até o financeiro dela responder.</p>
+                        {% elif c %}
+                        <p class="hint">Neste mês a escola tem R$ {{ c.recebido|moeda }} recebidos, R$ {{ c.lancado|moeda }} lançados e {{ c.alunos }} aluno(s) ativo(s).</p>
+                        {% endif %}
+                        <p style="margin-top:10px;"><button class="btn-sm btn-azul" type="submit">Salvar cálculo</button></p>
+                    </form>
+                </div>
                 <div class="acoes">
                     <form method="POST">
                         <input type="hidden" name="acao" value="acessar_escola">
@@ -453,7 +515,7 @@
                 <div class="custo-linha">
                     <div>
                         <span class="nome">{{ e.nome }}</span>
-                        <span class="meta">{{ e.pacote_nome or e.pacote }} · {{ e.email_admin }}</span>
+                        <span class="meta">{{ e.pacote_nome or e.pacote or 'Todas as telas' }} · {{ e.email_admin }}{% if e.calculo %} · {{ e.calculo.resumo }}{% endif %}</span>
                     </div>
                     <span>R$ {{ e.pacote_valor|moeda }}</span>
                 </div>
@@ -910,6 +972,57 @@
     {% endif %}
     {% if aba == 'escolas' %}
     <script>
+    document.querySelectorAll(".js-plano").forEach(function (box) {
+        function dinheiro(n) {
+            var neg = n < 0;
+            n = Math.abs(Number(n) || 0);
+            var partes = n.toFixed(2).split(".");
+            var inteiro = partes[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+            return (neg ? "-" : "") + inteiro + "," + partes[1];
+        }
+        function numero(s) {
+            s = String(s || "").replace(/\s/g, "").replace("R$", "");
+            if (!s) return 0;
+            if (s.indexOf(",") >= 0) s = s.replace(/\./g, "").replace(",", ".");
+            var n = parseFloat(s);
+            return isNaN(n) ? 0 : n;
+        }
+        function atualizar() {
+            var modo = box.querySelector("[name=cobranca_modo]").value;
+            var base = box.querySelector("[name=cobranca_base]").value;
+            var fixoBruto = box.querySelector("[name=cobranca_fixo]").value.trim();
+            var fixo = fixoBruto ? numero(fixoBruto) : numero(box.dataset.pacote);
+            var pct = numero(box.querySelector("[name=cobranca_percentual]").value);
+            var baseValor = base === "lancado" ? numero(box.dataset.lancado) : numero(box.dataset.recebido);
+            var alunos = parseInt(box.dataset.alunos || "0", 10) || 0;
+            var valor = 0;
+            var texto = "";
+            box.querySelector(".campo-fixo").hidden = modo === "percentual";
+            box.querySelector(".campo-pct").hidden = modo === "fixo" || modo === "por_aluno";
+            box.querySelector(".campo-base").hidden = modo === "fixo" || modo === "por_aluno";
+            box.querySelector(".label-fixo").textContent = modo === "por_aluno" ? "Valor por aluno (R$)" : "Valor fixo (R$)";
+            if (modo === "fixo") {
+                valor = fixo;
+                texto = fixoBruto ? "Valor fixo informado" : "Valor fixo do pacote";
+            } else if (modo === "percentual") {
+                valor = baseValor * pct / 100;
+                texto = pct + "% sobre R$ " + dinheiro(baseValor) + (base === "lancado" ? " (mensalidades lançadas)" : " (mensalidades recebidas)");
+            } else if (modo === "misto") {
+                valor = fixo + baseValor * pct / 100;
+                texto = "R$ " + dinheiro(fixo) + " + " + pct + "% de R$ " + dinheiro(baseValor);
+            } else {
+                valor = fixo * alunos;
+                texto = "R$ " + dinheiro(fixo) + " × " + alunos + " aluno(s)";
+            }
+            box.querySelector("[data-valor]").textContent = "R$ " + dinheiro(valor);
+            box.querySelector("[data-texto]").textContent = texto;
+        }
+        box.querySelectorAll("input, select").forEach(function (el) {
+            el.addEventListener("input", atualizar);
+            el.addEventListener("change", atualizar);
+        });
+        atualizar();
+    });
     document.getElementById("filtroEscola").addEventListener("input", function () {
         var q = this.value.trim().toLowerCase();
         var visiveis = 0;

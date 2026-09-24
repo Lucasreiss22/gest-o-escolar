@@ -103,6 +103,10 @@ def garantir_plataforma():
                 ("plataforma_smtp", "google_client_secret", "VARCHAR(200)"),
                 ("plataforma_smtp", "google_refresh_token", "TEXT"),
                 ("plataforma_escolas", "pacote", "VARCHAR(40)"),
+                ("plataforma_escolas", "cobranca_modo", "VARCHAR(20) DEFAULT 'fixo'"),
+                ("plataforma_escolas", "cobranca_fixo", "NUMERIC(12,2)"),
+                ("plataforma_escolas", "cobranca_percentual", "NUMERIC(8,2) DEFAULT 0"),
+                ("plataforma_escolas", "cobranca_base", "VARCHAR(20) DEFAULT 'recebido'"),
             ):
                 cursor.execute(
                     """
@@ -353,28 +357,260 @@ def atualizar_status_cobrancas_plataforma():
         conexao.close()
 
 
+_MODOS_COBRANCA = ("fixo", "percentual", "misto", "por_aluno")
+_BASES_COBRANCA = ("recebido", "lancado")
+
+
+def _moeda_curta(valor):
+    n = _numero(valor)
+    sinal = "-" if n < 0 else ""
+    inteiro, frac = f"{abs(n):.2f}".split(".")
+    grupos = []
+    while inteiro:
+        grupos.append(inteiro[-3:])
+        inteiro = inteiro[:-3]
+    return sinal + ".".join(reversed(grupos)) + "," + frac
+
+
+def _percentual_campo(valor):
+    n = _numero(valor)
+    if n <= 0:
+        return ""
+    texto = f"{n:.2f}".replace(".", ",")
+    if texto.endswith(",00"):
+        return texto[:-3]
+    return texto.rstrip("0").rstrip(",")
+
+
+def _regra_cobranca(escola, pacote):
+    modo = (escola.get("cobranca_modo") or "fixo").strip().lower()
+    if modo not in _MODOS_COBRANCA:
+        modo = "fixo"
+    base = (escola.get("cobranca_base") or "recebido").strip().lower()
+    if base not in _BASES_COBRANCA:
+        base = "recebido"
+    pacote_valor = _numero(pacote.get("valor")) if pacote else 0.0
+    bruto_fixo = escola.get("cobranca_fixo")
+    if bruto_fixo is None or str(bruto_fixo).strip() == "":
+        fixo = pacote_valor
+        fixo_proprio = False
+    else:
+        fixo = _numero(bruto_fixo)
+        fixo_proprio = True
+    return {
+        "modo": modo,
+        "base": base,
+        "fixo": fixo,
+        "fixo_proprio": fixo_proprio,
+        "percentual": _numero(escola.get("cobranca_percentual")),
+        "pacote_valor": pacote_valor,
+        "pacote_nome": (pacote or {}).get("nome") or "",
+        "telas": list((pacote or {}).get("telas") or []),
+    }
+
+
+def receita_mensal_escola(db_nome, competencia):
+    vazio = {"recebido": 0.0, "lancado": 0.0, "alunos": 0, "ok": False}
+    if not _schema_seguro(db_nome):
+        return vazio
+    conexao = None
+    try:
+        conexao = obter_conexao_nova()
+        with conexao.cursor() as cursor:
+            cursor.execute(f'SET search_path TO "{db_nome}", public')
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = %s AND table_name = 'financeiro_mensalidades'
+                """,
+                (db_nome,),
+            )
+            if not cursor.fetchone():
+                return vazio
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(valor), 0) AS lancado,
+                       COALESCE(SUM(CASE WHEN status = 'Pago' THEN valor ELSE 0 END), 0) AS recebido
+                FROM financeiro_mensalidades
+                WHERE to_char(data_vencimento, 'YYYY-MM') = %s
+                """,
+                (competencia,),
+            )
+            totais = cursor.fetchone() or {}
+            alunos = 0
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = %s AND table_name = 'alunos'
+                """,
+                (db_nome,),
+            )
+            if cursor.fetchone():
+                try:
+                    cursor.execute(
+                        """
+                        SELECT COUNT(*) AS n FROM alunos
+                        WHERE COALESCE(NULLIF(status::text, ''), situacao::text, 'ativo') ILIKE 'ativo'
+                        """
+                    )
+                    alunos = int((cursor.fetchone() or {}).get("n") or 0)
+                except Exception:
+                    conexao.rollback()
+                    cursor.execute(f'SET search_path TO "{db_nome}", public')
+                    cursor.execute(
+                        """
+                        SELECT COUNT(DISTINCT aluno_id) AS n
+                        FROM financeiro_mensalidades
+                        WHERE to_char(data_vencimento, 'YYYY-MM') = %s
+                        """,
+                        (competencia,),
+                    )
+                    alunos = int((cursor.fetchone() or {}).get("n") or 0)
+        return {
+            "recebido": _numero(totais.get("recebido")),
+            "lancado": _numero(totais.get("lancado")),
+            "alunos": alunos,
+            "ok": True,
+        }
+    except Exception as e:
+        print(f"receita_mensal_escola {db_nome}: {e}")
+        return vazio
+    finally:
+        if conexao:
+            try:
+                conexao.close()
+            except Exception:
+                pass
+
+
+def calcular_cobranca_escola(escola, pacote, competencia):
+    regra = _regra_cobranca(escola, pacote)
+    receita = receita_mensal_escola(escola.get("db_nome"), competencia)
+    base_valor = receita["recebido"] if regra["base"] == "recebido" else receita["lancado"]
+    alunos = receita["alunos"]
+    fixo = regra["fixo"]
+    percentual = regra["percentual"]
+    modo = regra["modo"]
+    if modo == "percentual":
+        valor = round(base_valor * percentual / 100.0, 2)
+        resumo = f"{_percentual_campo(percentual) or '0'}% sobre R$ {_moeda_curta(base_valor)}"
+    elif modo == "misto":
+        valor = round(fixo + base_valor * percentual / 100.0, 2)
+        resumo = (
+            f"R$ {_moeda_curta(fixo)} + {_percentual_campo(percentual) or '0'}% "
+            f"de R$ {_moeda_curta(base_valor)}"
+        )
+    elif modo == "por_aluno":
+        valor = round(fixo * alunos, 2)
+        resumo = f"R$ {_moeda_curta(fixo)} × {alunos} aluno(s)"
+    else:
+        valor = round(fixo, 2)
+        resumo = "Valor fixo informado" if regra["fixo_proprio"] else "Valor fixo do pacote"
+    if regra["base"] == "lancado" and modo in {"percentual", "misto"}:
+        resumo += " (mensalidades lançadas)"
+    elif modo in {"percentual", "misto"}:
+        resumo += " (mensalidades recebidas)"
+    return {
+        **regra,
+        "recebido": receita["recebido"],
+        "lancado": receita["lancado"],
+        "base_valor": base_valor,
+        "alunos": alunos,
+        "valor": valor,
+        "resumo": resumo,
+        "ok": receita["ok"],
+        "percentual_campo": _percentual_campo(percentual),
+    }
+
+
+def preparar_cobranca_escolas(escolas, pacotes, competencia):
+    mapa = {p["codigo"]: p for p in pacotes or []}
+    saida = []
+    for escola in escolas or []:
+        item = dict(escola)
+        pacote = mapa.get(item.get("pacote") or "")
+        item["pacote_info"] = pacote
+        item["calculo"] = calcular_cobranca_escola(item, pacote, competencia)
+        saida.append(item)
+    return saida
+
+
+def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, base, competencia):
+    garantir_plataforma()
+    escola = buscar_escola_por_id(escola_id)
+    if not escola:
+        raise ValueError("Escola não encontrada.")
+    modo = (modo or "fixo").strip().lower()
+    if modo not in _MODOS_COBRANCA:
+        raise ValueError("Escolha como calcular: valor fixo, porcentagem, os dois ou por aluno.")
+    base = (base or "recebido").strip().lower()
+    if base not in _BASES_COBRANCA:
+        base = "recebido"
+    percentual = min(100.0, max(0.0, _numero(percentual_bruto)))
+    fixo = None
+    if str(fixo_bruto or "").strip():
+        fixo = _numero(fixo_bruto)
+        if fixo < 0:
+            raise ValueError("O valor fixo não pode ser negativo.")
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE plataforma_escolas
+                SET cobranca_modo = %s,
+                    cobranca_fixo = %s,
+                    cobranca_percentual = %s,
+                    cobranca_base = %s
+                WHERE id = %s
+                """,
+                (modo, fixo, percentual, base, escola["id"]),
+            )
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    escola = buscar_escola_por_id(escola_id)
+    pacote = None
+    if escola.get("pacote"):
+        pacote = next((p for p in listar_pacotes() if p["codigo"] == escola.get("pacote")), None)
+    return escola, calcular_cobranca_escola(escola, pacote, competencia)
+
+
+def _descricao_assinatura(calculo, rotulo):
+    nome = calculo.get("pacote_nome") or "Todas as telas"
+    return f"Assinatura {nome} {rotulo} · {calculo.get('resumo') or 'valor fixo'}"[:180]
+
+
 def gerar_cobrancas_plataforma(competencia, dia_vencimento=10):
     garantir_plataforma()
     competencia = _competencia_valida(competencia)
     vencimento = _vencimento_da_competencia(competencia, dia_vencimento)
     rotulo = vencimento.strftime("%m/%Y")
     pacotes = {p["codigo"]: p for p in listar_pacotes()}
+    previstas = []
+    sem_valor = []
+    for escola in listar_escolas():
+        if escola.get("ativo") is False:
+            continue
+        pacote = pacotes.get(escola.get("pacote") or "")
+        calculo = calcular_cobranca_escola(escola, pacote, competencia)
+        if calculo["valor"] <= 0:
+            sem_valor.append(escola.get("nome") or escola.get("email_admin"))
+            continue
+        previstas.append((escola, pacote, calculo))
     conexao = obter_conexao(master=True)
     if not conexao:
         raise RuntimeError("Sem conexão com o banco da plataforma.")
     criadas = 0
     ja_existiam = 0
-    sem_valor = []
     try:
         with conexao.cursor() as cursor:
-            for escola in listar_escolas():
-                if escola.get("ativo") is False:
-                    continue
-                pacote = pacotes.get(escola.get("pacote") or "")
-                valor = _numero(pacote.get("valor")) if pacote else 0
-                if valor <= 0:
-                    sem_valor.append(escola.get("nome") or escola.get("email_admin"))
-                    continue
+            for escola, pacote, calculo in previstas:
                 cursor.execute(
                     """
                     INSERT INTO plataforma_cobrancas
@@ -386,9 +622,9 @@ def gerar_cobrancas_plataforma(competencia, dia_vencimento=10):
                     (
                         escola["id"],
                         competencia,
-                        pacote["codigo"],
-                        f"Assinatura {pacote['nome']} {rotulo}",
-                        valor,
+                        (pacote or {}).get("codigo"),
+                        _descricao_assinatura(calculo, rotulo),
+                        calculo["valor"],
                         vencimento,
                     ),
                 )
@@ -409,6 +645,8 @@ def gerar_cobrancas_plataforma(competencia, dia_vencimento=10):
 def atualizar_cobrancas_abertas_plataforma(competencia):
     garantir_plataforma()
     competencia = _competencia_valida(competencia)
+    pacotes = {p["codigo"]: p for p in listar_pacotes()}
+    escolas = {e["id"]: e for e in listar_escolas()}
     conexao = obter_conexao(master=True)
     if not conexao:
         raise RuntimeError("Sem conexão com o banco da plataforma.")
@@ -416,21 +654,38 @@ def atualizar_cobrancas_abertas_plataforma(competencia):
         with conexao.cursor() as cursor:
             cursor.execute(
                 """
-                UPDATE plataforma_cobrancas AS c
-                SET valor = p.valor,
-                    pacote = e.pacote,
-                    descricao = 'Assinatura ' || p.nome || ' ' || to_char(c.data_vencimento, 'MM/YYYY')
-                FROM plataforma_escolas AS e
-                JOIN plataforma_pacotes AS p ON p.codigo = e.pacote
-                WHERE c.escola_id = e.id
-                  AND c.competencia = %s
-                  AND COALESCE(c.status, '') <> 'Pago'
-                  AND p.valor IS NOT NULL
-                  AND p.valor > 0
+                SELECT id, escola_id, data_vencimento
+                FROM plataforma_cobrancas
+                WHERE competencia = %s AND COALESCE(status, '') <> 'Pago'
                 """,
                 (competencia,),
             )
-            atualizadas = cursor.rowcount
+            abertas = [dict(row) for row in cursor.fetchall() or []]
+            atualizadas = 0
+            for cobranca in abertas:
+                escola = escolas.get(cobranca["escola_id"])
+                if not escola:
+                    continue
+                pacote = pacotes.get(escola.get("pacote") or "")
+                calculo = calcular_cobranca_escola(escola, pacote, competencia)
+                if calculo["valor"] <= 0:
+                    continue
+                venc = cobranca.get("data_vencimento")
+                rotulo = venc.strftime("%m/%Y") if hasattr(venc, "strftime") else competencia[5:7] + "/" + competencia[:4]
+                cursor.execute(
+                    """
+                    UPDATE plataforma_cobrancas
+                    SET valor = %s, pacote = %s, descricao = %s
+                    WHERE id = %s AND COALESCE(status, '') <> 'Pago'
+                    """,
+                    (
+                        calculo["valor"],
+                        (pacote or {}).get("codigo"),
+                        _descricao_assinatura(calculo, rotulo),
+                        cobranca["id"],
+                    ),
+                )
+                atualizadas += cursor.rowcount
         conexao.commit()
     except Exception:
         conexao.rollback()
@@ -767,7 +1022,9 @@ def painel_financeiro_plataforma(competencia, status="", busca=""):
                 custos.append(item)
             cursor.execute(
                 """
-                SELECT e.id, e.nome, e.email_admin, e.pacote, p.nome AS pacote_nome, p.valor AS pacote_valor
+                SELECT e.id, e.nome, e.email_admin, e.db_nome, e.pacote,
+                       e.cobranca_modo, e.cobranca_fixo, e.cobranca_percentual, e.cobranca_base,
+                       p.nome AS pacote_nome, p.valor AS pacote_valor
                 FROM plataforma_escolas e
                 LEFT JOIN plataforma_pacotes p ON p.codigo = e.pacote
                 LEFT JOIN plataforma_cobrancas c
@@ -781,8 +1038,18 @@ def painel_financeiro_plataforma(competencia, status="", busca=""):
             sem_lancamento = []
             for row in cursor.fetchall() or []:
                 item = dict(row)
-                item["pacote_valor"] = _numero(item.get("pacote_valor"))
-                if item["pacote_valor"] > 0:
+                pacote = None
+                if item.get("pacote"):
+                    pacote = {
+                        "codigo": item.get("pacote"),
+                        "nome": item.get("pacote_nome"),
+                        "valor": item.get("pacote_valor"),
+                        "telas": [],
+                    }
+                calculo = calcular_cobranca_escola(item, pacote, competencia)
+                item["pacote_valor"] = calculo["valor"]
+                item["calculo"] = calculo
+                if calculo["valor"] > 0:
                     sem_lancamento.append(item)
                 else:
                     sem_valor.append(item)

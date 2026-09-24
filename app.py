@@ -103,6 +103,8 @@ from plataforma import (
     regenerar_convite_escola,
     buscar_escola_por_id,
     definir_pacote_escola,
+    preparar_cobranca_escolas,
+    salvar_regra_cobranca_escola,
     listar_pacotes,
     salvar_pacote,
     painel_financeiro_plataforma,
@@ -2403,6 +2405,23 @@ def plataforma_escolas():
                     )
             except Exception as e:
                 flash(f"Não foi possível aplicar o pacote: {e}", "danger")
+        elif acao == "salvar_cobranca_escola":
+            try:
+                mes = (request.form.get("mes") or datetime.now().strftime("%Y-%m"))[:7]
+                escola, calculo = salvar_regra_cobranca_escola(
+                    request.form.get("escola_id"),
+                    request.form.get("cobranca_modo"),
+                    request.form.get("cobranca_fixo"),
+                    request.form.get("cobranca_percentual"),
+                    request.form.get("cobranca_base"),
+                    mes,
+                )
+                flash(
+                    f"Cobrança de {escola['nome']} salva. Estimativa deste mês: R$ {_moeda_br(calculo['valor'])}. {calculo['resumo']}.",
+                    "success",
+                )
+            except Exception as e:
+                flash(f"Não foi possível salvar o cálculo: {e}", "danger")
         elif acao == "acessar_escola":
             try:
                 escola = buscar_escola_por_id(request.form.get("escola_id"))
@@ -2596,6 +2615,11 @@ def plataforma_escolas():
             "qtd": 0,
         },
     }
+    if aba == "escolas":
+        try:
+            escolas = preparar_cobranca_escolas(escolas, pacotes, mes_atual)
+        except Exception as e:
+            flash(f"Não foi possível calcular a cobrança das escolas: {e}", "danger")
     if aba == "financeiro":
         try:
             painel = painel_financeiro_plataforma(mes_atual, status_fin, busca_fin)
