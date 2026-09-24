@@ -818,7 +818,7 @@ def _gerar_mensalidades_lote(cursor, alunos_ok):
     return len(linhas)
 
 
-def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos, descricao_base="Mensalidade"):
+def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos, descricao_base="Mensalidade", forcar=False):
     if not aluno_id or not valor or valor <= 0:
         return 0
     meses = max(int(meses or 1), 1)
@@ -827,16 +827,17 @@ def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos,
     for i in range(meses):
         venc = _add_months(inicio, i)
         competencia = venc.strftime("%Y-%m")
-        cursor.execute(
-            """
-            SELECT 1 FROM financeiro_mensalidades
-            WHERE aluno_id = %s AND TO_CHAR(data_vencimento, 'YYYY-MM') = %s
-            LIMIT 1
-            """,
-            (aluno_id, competencia),
-        )
-        if cursor.fetchone():
-            continue
+        if not forcar:
+            cursor.execute(
+                """
+                SELECT 1 FROM financeiro_mensalidades
+                WHERE aluno_id = %s AND TO_CHAR(data_vencimento, 'YYYY-MM') = %s
+                LIMIT 1
+                """,
+                (aluno_id, competencia),
+            )
+            if cursor.fetchone():
+                continue
         rotulo = _rotulo_turno_mensalidade(turnos)
         descricao = f"{descricao_base} {venc.strftime('%m/%Y')} ({i + 1}/{meses}) · {rotulo}"
         cursor.execute(
@@ -5421,6 +5422,7 @@ def pagina_financeiro():
                                         flash(texto + ". Já podem receber mensalidade.", "success")
 
                     elif acao == "criar_cobranca":
+                        aba_redir = "receitas"
                         aluno_id = request.form.get("aluno_id")
                         descricao = limpar_campo("descricao") or "Mensalidade"
                         valor = _parse_moeda(request.form.get("valor"), 0.0)
@@ -5430,11 +5432,20 @@ def pagina_financeiro():
                         except ValueError:
                             duracao = 1
                         turnos = request.form.get("turnos") or "manha"
-                        geradas = _gerar_mensalidades_contrato(
-                            cursor, aluno_id, valor, data_vencimento, duracao, turnos, descricao
-                        )
-                        conexao.commit()
-                        flash(f"Cobrança gerada: {geradas} mensalidade(s) no contrato.", "success")
+                        if not aluno_id:
+                            flash("Selecione o aluno da cobrança.", "danger")
+                        elif valor <= 0:
+                            flash("Informe o valor da mensalidade.", "danger")
+                        else:
+                            geradas = _gerar_mensalidades_contrato(
+                                cursor, aluno_id, valor, data_vencimento, duracao, turnos, descricao, forcar=True
+                            )
+                            conexao.commit()
+                            mes_redir = str(data_vencimento)[:7]
+                            if geradas:
+                                flash(f"Cobrança salva: {geradas} mensalidade(s) a partir de {mes_redir[5:7]}/{mes_redir[:4]}.", "success")
+                            else:
+                                flash("A cobrança não foi gravada.", "danger")
 
                     elif acao == "gerar_lote":
                         descricao_lote = request.form.get("descricao_lote") or "Mensalidade"
