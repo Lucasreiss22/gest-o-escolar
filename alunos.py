@@ -625,6 +625,138 @@ def atualizar_responsavel(resp_id, dados):
         conexao.close()
 
 
+def _turma_simples(cursor, nome, mapa):
+    nome = (nome or "").strip()
+    if not nome:
+        raise ValueError("Informe a turma.")
+    chave = nome.lower()
+    if chave in mapa:
+        return mapa[chave]
+    cursor.execute(
+        """
+        INSERT INTO turmas (nome, ano_letivo, turno)
+        VALUES (%s, %s, 'manha')
+        RETURNING id
+        """,
+        (nome, datetime.datetime.now().year),
+    )
+    row = cursor.fetchone()
+    turma_id = row["id"] if isinstance(row, dict) else row[0]
+    mapa[chave] = turma_id
+    return turma_id
+
+
+def aplicar_aluno_simples(cursor, item, mapa):
+    """Grava aluno, responsável e turma com o mínimo necessário para a mensalidade."""
+    dados = dict(item.get("aluno") or {})
+    nome = (dados.get("nome_completo") or "").strip()
+    if not nome:
+        raise ValueError("Informe o nome do aluno.")
+    dados["nome_completo"] = nome
+    dados["turma_id"] = _turma_simples(cursor, dados.get("turma_nome"), mapa)
+    dados["turma_nome"] = ""
+    dados["telefone_principal"] = dados.get("telefone_principal") or "(00) 0000-0000"
+    nascimento = dados.get("data_nascimento") or None
+    dados["data_nascimento"] = nascimento or "2000-01-01"
+    resp = item.get("resp1")
+    if resp and not (resp.get("nome_completo") or "").strip():
+        resp = None
+    cursor.execute(
+        """
+        SELECT id, matricula FROM alunos
+        WHERE lower(trim(nome_completo)) = lower(trim(%s))
+        ORDER BY id
+        LIMIT 1
+        """,
+        (nome,),
+    )
+    existente = cursor.fetchone()
+    if existente:
+        aluno_id = existente["id"] if isinstance(existente, dict) else existente[0]
+        matricula = existente["matricula"] if isinstance(existente, dict) else existente[1]
+        cursor.execute("DELETE FROM turma_alunos WHERE aluno_id = %s", (aluno_id,))
+        _vincular_turma_id(cursor, dados["turma_id"], aluno_id)
+        if nascimento:
+            cursor.execute(
+                "UPDATE alunos SET data_nascimento = %s WHERE id = %s",
+                (nascimento, aluno_id),
+            )
+        _salvar_responsavel(cursor, aluno_id, 1, resp)
+        return {"matricula": matricula, "atualizado": True, "nome": nome}
+    matricula, _aluno_id = _inserir_aluno(cursor, dados, resp, None)
+    return {"matricula": matricula, "atualizado": False, "nome": nome}
+
+
+def salvar_alunos_simples(cursor, itens):
+    mapa = _mapa_turmas(cursor)
+    novos = 0
+    atualizados = 0
+    erros = []
+    for i, item in enumerate(itens or [], start=2):
+        try:
+            cursor.execute("SAVEPOINT aluno_simples")
+            resultado = aplicar_aluno_simples(cursor, item, mapa)
+            cursor.execute("RELEASE SAVEPOINT aluno_simples")
+            if resultado["atualizado"]:
+                atualizados += 1
+            else:
+                novos += 1
+        except Exception as e:
+            cursor.execute("ROLLBACK TO SAVEPOINT aluno_simples")
+            erros.append(f"Linha {i}: {e}")
+    return novos, atualizados, erros
+
+
+def ler_planilha_alunos_simples(arquivo):
+    linhas = _linhas_arquivo(arquivo)
+    if not linhas:
+        return []
+    inicio = 0
+    for i, row in enumerate(linhas[:8]):
+        cab = [_normalizar_coluna(c) for c in row]
+        if any(nome in cab for nome in ("aluno", "nome", "nome_completo", "nome_do_aluno")):
+            inicio = i
+            break
+    cab = [_normalizar_coluna(c) for c in linhas[inicio]]
+    col = {
+        "nome": _indice_coluna(cab, "nome_completo", "nome_do_aluno", "aluno", "nome"),
+        "nascimento": _indice_coluna(cab, "data_nascimento", "nascimento", "dt_nasc"),
+        "turma": _indice_coluna(cab, "turma", "serie", "série"),
+        "resp": _indice_coluna(cab, "responsavel", "responsável", "resp_nome", "resp1_nome", "mae", "mãe"),
+        "parentesco": _indice_coluna(cab, "parentesco", "grau_parentesco", "resp1_parentesco"),
+        "telefone": _indice_coluna(cab, "telefone_responsavel", "resp_telefone", "resp1_telefone", "telefone", "celular"),
+        "email": _indice_coluna(cab, "email_responsavel", "resp_email", "resp1_email", "email", "e_mail"),
+    }
+    if col["nome"] is None or col["turma"] is None:
+        encontradas = ", ".join(c for c in cab if c) or "nenhuma"
+        raise ValueError(
+            "A planilha precisa das colunas aluno e turma. "
+            f"Colunas encontradas: {encontradas}."
+        )
+    itens = []
+    for row in linhas[inicio + 1:]:
+        if not row or not any(str(c).strip() for c in row if c is not None):
+            continue
+        nome = _celula(row, col["nome"])
+        if not nome:
+            continue
+        resp_nome = _celula(row, col["resp"])
+        itens.append({
+            "aluno": {
+                "nome_completo": nome,
+                "data_nascimento": parse_data_livre(_celula(row, col["nascimento"])),
+                "turma_nome": _celula(row, col["turma"]),
+            },
+            "resp1": {
+                "nome_completo": resp_nome,
+                "grau_parentesco": _celula(row, col["parentesco"]) or "responsável",
+                "telefone": _celula(row, col["telefone"]),
+                "email": _celula(row, col["email"]),
+            } if resp_nome else None,
+        })
+    return itens
+
+
 def deletar_responsavel(resp_id):
     """Remove um responsável legal vinculado ao aluno."""
     conexao = obter_conexao()

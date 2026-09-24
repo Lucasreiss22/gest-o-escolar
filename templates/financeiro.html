@@ -876,6 +876,76 @@
         {% if aba == 'receitas' %}
         <details class="fin-bloco" open>
             <div class="fin-bloco-body">
+        {% if cadastro_simples %}
+        <div class="card-box" style="margin-bottom: 12px;">
+            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 6px;">Alunos deste módulo</h3>
+            <p style="color:#64748b; font-size:0.85rem; margin:0 0 14px;">
+                Sem a tela de alunos, o cadastro aqui pede só o aluno, o responsável e a turma.
+                Quem já está no sistema continua na lista da cobrança.
+            </p>
+            <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="form-nova-cobranca">
+                <input type="hidden" name="acao" value="cadastrar_aluno_simples">
+                <input type="hidden" name="aba" value="receitas">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <div class="form-group">
+                    <label>Aluno</label>
+                    <input type="text" name="aluno_nome" required placeholder="Nome do aluno">
+                </div>
+                <div class="form-group">
+                    <label>Nascimento</label>
+                    <input type="date" name="aluno_nascimento">
+                </div>
+                <div class="form-group">
+                    <label>Turma</label>
+                    <input type="text" name="turma_nome" required placeholder="Ex: 1º ano" list="turmasSimples">
+                    <datalist id="turmasSimples">
+                        {% for turma in turmas_simples %}
+                        <option value="{{ turma.nome }}"></option>
+                        {% endfor %}
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label>Responsável</label>
+                    <input type="text" name="resp_nome" placeholder="Nome do responsável">
+                </div>
+                <div class="form-group">
+                    <label>Parentesco</label>
+                    <select name="resp_parentesco">
+                        <option value="mãe">Mãe</option>
+                        <option value="pai">Pai</option>
+                        <option value="avó">Avó</option>
+                        <option value="avô">Avô</option>
+                        <option value="responsável" selected>Responsável</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Telefone do responsável</label>
+                    <input type="text" name="resp_telefone" placeholder="(00) 00000-0000">
+                </div>
+                <div class="form-group span-2">
+                    <label>E-mail do responsável</label>
+                    <input type="email" name="resp_email" placeholder="responsavel@email.com">
+                </div>
+                <div class="form-group">
+                    <label>&nbsp;</label>
+                    <button type="submit" class="btn btn-primary" style="width:100%;">Incluir aluno</button>
+                </div>
+            </form>
+            <form action="{{ url_for('pagina_financeiro') }}" method="POST" enctype="multipart/form-data" style="margin-top:16px; display:flex; flex-wrap:wrap; gap:10px; align-items:end;">
+                <input type="hidden" name="acao" value="importar_alunos_simples">
+                <input type="hidden" name="aba" value="receitas">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <div class="form-group" style="min-width:240px; flex:1;">
+                    <label>Planilha (CSV ou Excel)</label>
+                    <input type="file" name="planilha" accept=".csv,.xlsx,.xls" required>
+                </div>
+                <button type="submit" class="btn btn-success">Importar planilha</button>
+                <a class="btn" style="background:#e2e8f0; color:#1e293b;" href="{{ url_for('modelo_alunos_financeiro_csv') }}">Baixar modelo</a>
+            </form>
+            <p style="color:#64748b; font-size:0.8rem; margin:8px 0 0;">Colunas: aluno, nascimento, turma, responsavel, parentesco, telefone e email.</p>
+        </div>
+        {% endif %}
+
         <div class="grid-acoes-geracao">
             <!-- Gerar Cobrança Individual -->
             <div class="card-box" style="margin-bottom: 0;">
@@ -889,7 +959,7 @@
                         <select name="aluno_id" required>
                             <option value="">Selecione o aluno...</option>
                             {% for aluno in alunos %}
-                                <option value="{{ aluno.id }}">{{ aluno.nome_completo or aluno.nome }}</option>
+                                <option value="{{ aluno.id }}">{{ aluno.nome_completo or aluno.nome }}{% if aluno.turma_nome %} · {{ aluno.turma_nome }}{% endif %}</option>
                             {% endfor %}
                         </select>
                     </div>

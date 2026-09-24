@@ -29,6 +29,10 @@ from alunos import (
     cadastrar_aluno,
     cadastrar_alunos_lote,
     importar_planilha_alunos,
+    aplicar_aluno_simples,
+    salvar_alunos_simples,
+    ler_planilha_alunos_simples,
+    _mapa_turmas,
     parse_data_livre,
     listar_alunos,
     atualizar_responsavel,
@@ -4115,6 +4119,22 @@ def modelo_alunos_csv():
     )
 
 
+@app.route("/financeiro/alunos/modelo.csv")
+def modelo_alunos_financeiro_csv():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    cab = (
+        "aluno;nascimento;turma;responsavel;parentesco;telefone;email\n"
+        "Maria Silva;15/03/2018;Infantil I;Ana Silva;mãe;(11) 98888-0000;ana@email.com\n"
+        "João Souza;02/08/2017;1º ano;Carlos Souza;pai;(11) 97777-0000;carlos@email.com\n"
+    )
+    return Response(
+        "\ufeff" + cab,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=modelo_alunos_financeiro.csv"},
+    )
+
+
 @app.route("/financeiro/custos/modelo.csv")
 def modelo_custos_csv():
     if "usuario_id" not in session:
@@ -5321,7 +5341,11 @@ def pagina_financeiro():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
 
+    telas_escola = session.get("escola_telas")
+    cadastro_simples = isinstance(telas_escola, (list, tuple, set)) and "alunos" not in telas_escola
     garantir_tabelas_folha()
+    if cadastro_simples:
+        garantir_tabelas_pedagogicas()
     mes_redir = request.form.get("mes") or request.args.get("mes") or datetime.now().strftime("%Y-%m")
     aba_redir = request.form.get("aba") or request.args.get("aba") or "resumo"
 
@@ -5335,7 +5359,65 @@ def pagina_financeiro():
         if conexao:
             try:
                 with conexao.cursor() as cursor:
-                    if acao == "criar_cobranca":
+                    if acao == "cadastrar_aluno_simples":
+                        aba_redir = "receitas"
+                        if not cadastro_simples:
+                            flash("O cadastro completo de alunos continua na tela Alunos.", "danger")
+                        else:
+                            nome = (request.form.get("aluno_nome") or "").strip()
+                            turma = (request.form.get("turma_nome") or "").strip()
+                            resp_nome = (request.form.get("resp_nome") or "").strip()
+                            nascimento = parse_data_livre(request.form.get("aluno_nascimento"))
+                            if request.form.get("aluno_nascimento") and not nascimento:
+                                raise ValueError("Data de nascimento inválida. Use dd/mm/aaaa.")
+                            item = {
+                                "aluno": {
+                                    "nome_completo": nome,
+                                    "data_nascimento": nascimento,
+                                    "turma_nome": turma,
+                                },
+                                "resp1": {
+                                    "nome_completo": resp_nome,
+                                    "grau_parentesco": request.form.get("resp_parentesco") or "responsável",
+                                    "telefone": (request.form.get("resp_telefone") or "").strip(),
+                                    "email": (request.form.get("resp_email") or "").strip(),
+                                } if resp_nome else None,
+                            }
+                            resultado = aplicar_aluno_simples(cursor, item, _mapa_turmas(cursor))
+                            conexao.commit()
+                            if resultado["atualizado"]:
+                                flash(f"{resultado['nome']} já estava cadastrado. Turma e responsável foram atualizados.", "success")
+                            else:
+                                flash(f"{resultado['nome']} incluído. Já pode gerar a mensalidade.", "success")
+
+                    elif acao == "importar_alunos_simples":
+                        aba_redir = "receitas"
+                        if not cadastro_simples:
+                            flash("O cadastro completo de alunos continua na tela Alunos.", "danger")
+                        else:
+                            arquivo = request.files.get("planilha")
+                            if not arquivo or not arquivo.filename:
+                                flash("Selecione a planilha de alunos.", "danger")
+                            else:
+                                itens = ler_planilha_alunos_simples(arquivo)
+                                if not itens:
+                                    flash("A planilha não trouxe nenhum aluno.", "danger")
+                                else:
+                                    novos, atualizados, erros = salvar_alunos_simples(cursor, itens)
+                                    conexao.commit()
+                                    partes = []
+                                    if novos:
+                                        partes.append(f"{novos} aluno(s) incluído(s)")
+                                    if atualizados:
+                                        partes.append(f"{atualizados} atualizado(s)")
+                                    texto = ", ".join(partes) or "Nenhum aluno importado."
+                                    if erros:
+                                        texto += " " + " ".join(erros[:5])
+                                        flash(texto, "danger" if not (novos or atualizados) else "success")
+                                    else:
+                                        flash(texto + ". Já podem receber mensalidade.", "success")
+
+                    elif acao == "criar_cobranca":
                         aluno_id = request.form.get("aluno_id")
                         descricao = limpar_campo("descricao") or "Mensalidade"
                         valor = _parse_moeda(request.form.get("valor"), 0.0)
@@ -5784,6 +5866,7 @@ def pagina_financeiro():
         return redirect(url_for("pagina_financeiro", **params_redir))
 
     lancamentos, alunos, professores_detalhes = [], [], []
+    turmas_simples = []
     emails_escola = []
     custos_mes = []
     totais = {
@@ -5942,8 +6025,27 @@ def pagina_financeiro():
                 cursor.execute(query_lancamentos, params)
                 lancamentos = cursor.fetchall()
 
-                cursor.execute("SELECT id, nome_completo, valor_mensalidade FROM alunos ORDER BY nome_completo ASC;")
-                alunos = cursor.fetchall()
+                if cadastro_simples:
+                    cursor.execute(
+                        """
+                        SELECT a.id, a.nome_completo, a.valor_mensalidade,
+                               (
+                                   SELECT t.nome FROM turma_alunos ta
+                                   JOIN turmas t ON t.id = ta.turma_id
+                                   WHERE ta.aluno_id = a.id
+                                   ORDER BY ta.turma_id DESC
+                                   LIMIT 1
+                               ) AS turma_nome
+                        FROM alunos a
+                        ORDER BY a.nome_completo ASC
+                        """
+                    )
+                    alunos = cursor.fetchall()
+                    cursor.execute("SELECT id, nome FROM turmas ORDER BY nome")
+                    turmas_simples = cursor.fetchall()
+                else:
+                    cursor.execute("SELECT id, nome_completo, valor_mensalidade FROM alunos ORDER BY nome_completo ASC;")
+                    alunos = cursor.fetchall()
                 vistos_email = set()
 
                 def _guardar_email(valor):
@@ -5986,6 +6088,8 @@ def pagina_financeiro():
         "financeiro.html",
         lancamentos=lancamentos,
         alunos=alunos,
+        cadastro_simples=cadastro_simples,
+        turmas_simples=turmas_simples,
         professores_detalhes=professores_detalhes,
         totais_folha=totais_folha,
         custos_mes=custos_mes,
