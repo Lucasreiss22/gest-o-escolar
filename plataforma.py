@@ -108,6 +108,9 @@ def garantir_plataforma():
                 ("plataforma_escolas", "cobranca_percentual", "NUMERIC(8,2) DEFAULT 0"),
                 ("plataforma_escolas", "cobranca_base", "VARCHAR(20) DEFAULT 'recebido'"),
                 ("plataforma_escolas", "regime", "VARCHAR(20) DEFAULT 'outro'"),
+                ("plataforma_escolas", "desconto_modo", "VARCHAR(20) DEFAULT 'nenhum'"),
+                ("plataforma_escolas", "desconto_percentual", "NUMERIC(8,2) DEFAULT 0"),
+                ("plataforma_escolas", "desconto_valor", "NUMERIC(12,2)"),
             ):
                 cursor.execute(
                     """
@@ -366,6 +369,7 @@ def atualizar_status_cobrancas_plataforma():
 
 
 _MODOS_COBRANCA = ("fixo", "percentual", "misto", "por_aluno")
+_MODOS_DESCONTO = ("nenhum", "percentual", "valor_fixo", "bolsa")
 _BASES_COBRANCA = ("recebido", "lancado")
 
 
@@ -553,15 +557,13 @@ def calcular_cobranca_escola(escola, pacote, competencia):
     if regime != "simples":
         regime = "outro"
     modo = regra["modo"]
-    if modo in {"percentual", "misto"} and regime != "simples":
-        modo = "fixo"
     alunos = 0
     ok = True
     if modo == "por_aluno":
         receita = receita_mensal_escola(escola.get("db_nome"), competencia)
         alunos = receita["alunos"]
         ok = receita["ok"]
-    faturamento = faturamento_manual_escola(escola.get("id"), competencia) if regime == "simples" else 0.0
+    faturamento = faturamento_manual_escola(escola.get("id"), competencia) if modo in {"percentual", "misto"} else 0.0
     fixo = regra["fixo"]
     percentual = regra["percentual"]
     if modo == "percentual":
@@ -579,11 +581,31 @@ def calcular_cobranca_escola(escola, pacote, competencia):
     else:
         valor = round(fixo, 2)
         resumo = "Valor fixo informado" if regra["fixo_proprio"] else "Valor fixo do pacote"
+    desconto = (escola.get("desconto_modo") or "nenhum").strip().lower()
+    if desconto not in _MODOS_DESCONTO:
+        desconto = "nenhum"
+    desconto_pct = min(100.0, max(0.0, _numero(escola.get("desconto_percentual"))))
+    desconto_valor = max(0.0, _numero(escola.get("desconto_valor")))
+    bruto = valor
+    if desconto == "percentual":
+        valor = round(bruto * (1 - desconto_pct / 100.0), 2)
+        resumo = f"{resumo} · desconto de {_percentual_campo(desconto_pct) or '0'}%"
+    elif desconto == "valor_fixo":
+        valor = round(max(0.0, bruto - desconto_valor), 2)
+        resumo = f"{resumo} · desconto de R$ {_moeda_curta(desconto_valor)}"
+    elif desconto == "bolsa":
+        valor = 0.0
+        resumo = f"{resumo} · bolsa"
     return {
         **regra,
         "modo": modo,
         "regime": regime,
         "simples": regime == "simples",
+        "desconto_modo": desconto,
+        "desconto_percentual": desconto_pct,
+        "desconto_valor": desconto_valor,
+        "desconto_percentual_campo": _percentual_campo(desconto_pct),
+        "bruto": bruto,
         "faturamento": faturamento,
         "recebido": 0.0,
         "lancado": 0.0,
@@ -608,7 +630,10 @@ def preparar_cobranca_escolas(escolas, pacotes, competencia):
     return saida
 
 
-def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, regime, faturamento_bruto, competencia):
+def salvar_regra_cobranca_escola(
+    escola_id, modo, fixo_bruto, percentual_bruto, faturamento_bruto,
+    desconto_modo, desconto_percentual_bruto, desconto_valor_bruto, competencia,
+):
     garantir_plataforma()
     escola = buscar_escola_por_id(escola_id)
     if not escola:
@@ -616,20 +641,24 @@ def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, 
     modo = (modo or "fixo").strip().lower()
     if modo not in _MODOS_COBRANCA:
         raise ValueError("Escolha como calcular: valor fixo, porcentagem, os dois ou por aluno.")
-    regime = "simples" if (regime or "").strip().lower() == "simples" else "outro"
-    if modo in {"percentual", "misto"} and regime != "simples":
-        raise ValueError(
-            "Porcentagem usa o faturamento manual e só vale para empresa do Simples Nacional. "
-            "Nos outros casos use valor fixo ou valor por aluno."
-        )
+    desconto_modo = (desconto_modo or "nenhum").strip().lower()
+    if desconto_modo not in _MODOS_DESCONTO:
+        raise ValueError("Escolha a modalidade de desconto: nenhuma, percentual, valor fixo ou bolsa.")
+    regime = "simples" if modo in {"percentual", "misto"} else (escola.get("regime") or "outro")
     percentual = min(100.0, max(0.0, _numero(percentual_bruto)))
+    desconto_pct = min(100.0, max(0.0, _numero(desconto_percentual_bruto)))
+    desconto_valor = None
+    if str(desconto_valor_bruto or "").strip():
+        desconto_valor = _numero(desconto_valor_bruto)
+        if desconto_valor < 0:
+            raise ValueError("O desconto em valor fixo não pode ser negativo.")
     fixo = None
     if str(fixo_bruto or "").strip():
         fixo = _numero(fixo_bruto)
         if fixo < 0:
             raise ValueError("O valor fixo não pode ser negativo.")
     faturamento = None
-    if regime == "simples" and str(faturamento_bruto or "").strip():
+    if modo in {"percentual", "misto"} and str(faturamento_bruto or "").strip():
         faturamento = _numero(faturamento_bruto)
         if faturamento < 0:
             raise ValueError("O faturamento manual não pode ser negativo.")
@@ -644,10 +673,13 @@ def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, 
                 SET cobranca_modo = %s,
                     cobranca_fixo = %s,
                     cobranca_percentual = %s,
-                    regime = %s
+                    regime = %s,
+                    desconto_modo = %s,
+                    desconto_percentual = %s,
+                    desconto_valor = %s
                 WHERE id = %s
                 """,
-                (modo, fixo, percentual, regime, escola["id"]),
+                (modo, fixo, percentual, regime, desconto_modo, desconto_pct, desconto_valor, escola["id"]),
             )
         conexao.commit()
     except Exception:
@@ -655,7 +687,7 @@ def salvar_regra_cobranca_escola(escola_id, modo, fixo_bruto, percentual_bruto, 
         raise
     finally:
         conexao.close()
-    if regime == "simples":
+    if modo in {"percentual", "misto"}:
         salvar_faturamento_manual(escola["id"], competencia, faturamento)
     escola = buscar_escola_por_id(escola_id)
     pacote = None
@@ -1107,6 +1139,7 @@ def painel_financeiro_plataforma(competencia, status="", busca=""):
                 """
                 SELECT e.id, e.nome, e.email_admin, e.db_nome, e.pacote,
                        e.cobranca_modo, e.cobranca_fixo, e.cobranca_percentual, e.regime,
+                       e.desconto_modo, e.desconto_percentual, e.desconto_valor,
                        p.nome AS pacote_nome, p.valor AS pacote_valor
                 FROM plataforma_escolas e
                 LEFT JOIN plataforma_pacotes p ON p.codigo = e.pacote
