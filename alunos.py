@@ -681,6 +681,11 @@ def aplicar_aluno_simples(cursor, item, mapa):
                 "UPDATE alunos SET data_nascimento = %s WHERE id = %s",
                 (nascimento, aluno_id),
             )
+        if dados.get("contrato_inicio"):
+            cursor.execute(
+                "UPDATE alunos SET contrato_inicio = %s WHERE id = %s",
+                (dados["contrato_inicio"], aluno_id),
+            )
         _salvar_responsavel(cursor, aluno_id, 1, resp)
         return {"matricula": matricula, "atualizado": True, "nome": nome}
     matricula, _aluno_id = _inserir_aluno(cursor, dados, resp, None)
@@ -722,6 +727,7 @@ def ler_planilha_alunos_simples(arquivo):
         "nome": _indice_coluna(cab, "nome_completo", "nome_do_aluno", "aluno", "nome"),
         "nascimento": _indice_coluna(cab, "data_nascimento", "nascimento", "dt_nasc"),
         "turma": _indice_coluna(cab, "turma", "serie", "série"),
+        "inicio": _indice_coluna(cab, "inicio", "data_inicio", "contrato_inicio", "data_de_inicio"),
         "resp": _indice_coluna(cab, "responsavel", "responsável", "resp_nome", "resp1_nome", "mae", "mãe"),
         "parentesco": _indice_coluna(cab, "parentesco", "grau_parentesco", "resp1_parentesco"),
         "telefone": _indice_coluna(cab, "telefone_responsavel", "resp_telefone", "resp1_telefone", "telefone", "celular"),
@@ -746,6 +752,7 @@ def ler_planilha_alunos_simples(arquivo):
                 "nome_completo": nome,
                 "data_nascimento": parse_data_livre(_celula(row, col["nascimento"])),
                 "turma_nome": _celula(row, col["turma"]),
+                "contrato_inicio": parse_data_livre(_celula(row, col["inicio"])),
             },
             "resp1": {
                 "nome_completo": resp_nome,

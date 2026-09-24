@@ -896,6 +896,10 @@
                     <input type="date" name="aluno_nascimento">
                 </div>
                 <div class="form-group">
+                    <label>Data de início</label>
+                    <input type="date" name="contrato_inicio" required>
+                </div>
+                <div class="form-group">
                     <label>Turma</label>
                     <input type="text" name="turma_nome" required placeholder="Ex: 1º ano" list="turmasSimples">
                     <datalist id="turmasSimples">
@@ -942,7 +946,7 @@
                 <button type="submit" class="btn btn-success">Importar planilha</button>
                 <a class="btn" style="background:#e2e8f0; color:#1e293b;" href="{{ url_for('modelo_alunos_financeiro_csv') }}">Baixar modelo</a>
             </form>
-            <p style="color:#64748b; font-size:0.8rem; margin:8px 0 0;">Colunas: aluno, nascimento, turma, responsavel, parentesco, telefone e email.</p>
+            <p style="color:#64748b; font-size:0.8rem; margin:8px 0 0;">Colunas: aluno, nascimento, turma, inicio, responsavel, parentesco, telefone e email.</p>
         </div>
         {% endif %}
 
@@ -959,7 +963,7 @@
                         <select name="aluno_id" required>
                             <option value="">Selecione o aluno...</option>
                             {% for aluno in alunos %}
-                                <option value="{{ aluno.id }}">{{ aluno.nome_completo or aluno.nome }}{% if aluno.turma_nome %} · {{ aluno.turma_nome }}{% endif %}</option>
+                                <option value="{{ aluno.id }}" data-inicio="{{ aluno.contrato_inicio or '' }}">{{ aluno.nome_completo or aluno.nome }}{% if aluno.turma_nome %} turma: {{ aluno.turma_nome }}{% endif %}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -972,8 +976,8 @@
                         <input type="text" name="valor" placeholder="Digite o valor" required data-moeda>
                     </div>
                     <div class="form-group">
-                        <label>Primeiro vencimento</label>
-                        <input type="date" name="data_vencimento" required>
+                        <label>Data de início</label>
+                        <input type="date" name="data_vencimento" id="inicioCobranca" required>
                     </div>
                     <div class="form-group">
                         <label>Duração do contrato</label>
@@ -1077,7 +1081,7 @@
                         <div class="fin-item-top">
                             <label style="display:flex;align-items:center;gap:8px;">
                                 <input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote">
-                                <strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong>
+                                <strong>{{ item.nome_completo or 'Aluno não vinculado' }}{% if item.turma_nome %} turma: {{ item.turma_nome }}{% endif %}</strong>
                             </label>
                             <strong>R$ {{ (item.valor|float if item.valor else 0)|moeda }}</strong>
                     </div>
@@ -1175,7 +1179,7 @@
                             {% set st = 'pago' if item.status == 'Pago' else ('pendente' if item.status == 'Pendente' else 'atrasado') %}
                             <tr class="st-{{ st }}">
                                 <td><input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote" aria-label="Selecionar {{ item.nome_completo or 'cobrança' }}"></td>
-                                <td><strong>{{ item.nome_completo or 'Aluno não vinculado' }}</strong></td>
+                                <td><strong>{{ item.nome_completo or 'Aluno não vinculado' }}{% if item.turma_nome %} turma: {{ item.turma_nome }}{% endif %}</strong></td>
                                 <td>{{ item.descricao or '-' }}</td>
                                 <td>R$ {{ (item.valor|float if item.valor else 0)|moeda }}</td>
                                 <td>
@@ -1260,6 +1264,15 @@
         </div>
         <script>
         document.addEventListener("DOMContentLoaded", function () {
+            var alunoSel = document.querySelector(".form-nova-cobranca select[name=aluno_id]");
+            var inicioCobranca = document.getElementById("inicioCobranca");
+            if (alunoSel && inicioCobranca) {
+                alunoSel.addEventListener("change", function () {
+                    var opt = alunoSel.options[alunoSel.selectedIndex];
+                    var data = opt ? opt.getAttribute("data-inicio") : "";
+                    if (data) inicioCobranca.value = data;
+                });
+            }
             var form = document.getElementById("formBaixaLote");
             var acao = document.getElementById("acaoBaixaLote");
             var dlg = document.getElementById("dlgBaixaLote");

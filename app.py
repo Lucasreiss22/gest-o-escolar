@@ -4124,9 +4124,9 @@ def modelo_alunos_financeiro_csv():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
     cab = (
-        "aluno;nascimento;turma;responsavel;parentesco;telefone;email\n"
-        "Maria Silva;15/03/2018;Infantil I;Ana Silva;mãe;(11) 98888-0000;ana@email.com\n"
-        "João Souza;02/08/2017;1º ano;Carlos Souza;pai;(11) 97777-0000;carlos@email.com\n"
+        "aluno;nascimento;turma;inicio;responsavel;parentesco;telefone;email\n"
+        "Maria Silva;15/03/2018;Infantil I;01/02/2026;Ana Silva;mãe;(11) 98888-0000;ana@email.com\n"
+        "João Souza;02/08/2017;1º ano;01/02/2026;Carlos Souza;pai;(11) 97777-0000;carlos@email.com\n"
     )
     return Response(
         "\ufeff" + cab,
@@ -5344,8 +5344,7 @@ def pagina_financeiro():
     telas_escola = session.get("escola_telas")
     cadastro_simples = isinstance(telas_escola, (list, tuple, set)) and "alunos" not in telas_escola
     garantir_tabelas_folha()
-    if cadastro_simples:
-        garantir_tabelas_pedagogicas()
+    garantir_tabelas_pedagogicas()
     mes_redir = request.form.get("mes") or request.args.get("mes") or datetime.now().strftime("%Y-%m")
     aba_redir = request.form.get("aba") or request.args.get("aba") or "resumo"
 
@@ -5370,11 +5369,15 @@ def pagina_financeiro():
                             nascimento = parse_data_livre(request.form.get("aluno_nascimento"))
                             if request.form.get("aluno_nascimento") and not nascimento:
                                 raise ValueError("Data de nascimento inválida. Use dd/mm/aaaa.")
+                            inicio = parse_data_livre(request.form.get("contrato_inicio"))
+                            if request.form.get("contrato_inicio") and not inicio:
+                                raise ValueError("Data de início inválida.")
                             item = {
                                 "aluno": {
                                     "nome_completo": nome,
                                     "data_nascimento": nascimento,
                                     "turma_nome": turma,
+                                    "contrato_inicio": inicio,
                                 },
                                 "resp1": {
                                     "nome_completo": resp_nome,
@@ -5995,8 +5998,15 @@ def pagina_financeiro():
 
                 # Restante das consultas de lançamentos...[cite: 5]
                 query_lancamentos = """
-                    SELECT f.id, f.aluno_id, a.nome_completo, f.descricao, f.valor, f.data_vencimento, 
-                           f.data_pagamento, f.status, f.forma_pagamento
+                    SELECT f.id, f.aluno_id, a.nome_completo, f.descricao, f.valor, f.data_vencimento,
+                           f.data_pagamento, f.status, f.forma_pagamento,
+                           (
+                               SELECT t.nome FROM turma_alunos ta
+                               JOIN turmas t ON t.id = ta.turma_id
+                               WHERE ta.aluno_id = a.id
+                               ORDER BY ta.turma_id DESC
+                               LIMIT 1
+                           ) AS turma_nome
                     FROM financeiro_mensalidades f
                     LEFT JOIN alunos a ON f.aluno_id = a.id
                     WHERE TO_CHAR(f.data_vencimento, 'YYYY-MM') = %s
@@ -6025,27 +6035,25 @@ def pagina_financeiro():
                 cursor.execute(query_lancamentos, params)
                 lancamentos = cursor.fetchall()
 
+                cursor.execute(
+                    """
+                    SELECT a.id, a.nome_completo, a.valor_mensalidade,
+                           TO_CHAR(a.contrato_inicio, 'YYYY-MM-DD') AS contrato_inicio,
+                           (
+                               SELECT t.nome FROM turma_alunos ta
+                               JOIN turmas t ON t.id = ta.turma_id
+                               WHERE ta.aluno_id = a.id
+                               ORDER BY ta.turma_id DESC
+                               LIMIT 1
+                           ) AS turma_nome
+                    FROM alunos a
+                    ORDER BY a.nome_completo ASC
+                    """
+                )
+                alunos = cursor.fetchall()
                 if cadastro_simples:
-                    cursor.execute(
-                        """
-                        SELECT a.id, a.nome_completo, a.valor_mensalidade,
-                               (
-                                   SELECT t.nome FROM turma_alunos ta
-                                   JOIN turmas t ON t.id = ta.turma_id
-                                   WHERE ta.aluno_id = a.id
-                                   ORDER BY ta.turma_id DESC
-                                   LIMIT 1
-                               ) AS turma_nome
-                        FROM alunos a
-                        ORDER BY a.nome_completo ASC
-                        """
-                    )
-                    alunos = cursor.fetchall()
                     cursor.execute("SELECT id, nome FROM turmas ORDER BY nome")
                     turmas_simples = cursor.fetchall()
-                else:
-                    cursor.execute("SELECT id, nome_completo, valor_mensalidade FROM alunos ORDER BY nome_completo ASC;")
-                    alunos = cursor.fetchall()
                 vistos_email = set()
 
                 def _guardar_email(valor):
