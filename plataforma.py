@@ -369,7 +369,7 @@ def atualizar_status_cobrancas_plataforma():
 
 
 _MODOS_COBRANCA = ("fixo", "percentual", "misto", "por_aluno")
-_MODOS_DESCONTO = ("nenhum", "percentual", "valor_fixo", "bolsa")
+_MODOS_DESCONTO = ("nenhum", "percentual", "valor_fixo", "misto", "bolsa")
 _BASES_COBRANCA = ("recebido", "lancado")
 
 
@@ -593,6 +593,12 @@ def calcular_cobranca_escola(escola, pacote, competencia):
     elif desconto == "valor_fixo":
         valor = round(max(0.0, bruto - desconto_valor), 2)
         resumo = f"{resumo} · desconto de R$ {_moeda_curta(desconto_valor)}"
+    elif desconto == "misto":
+        valor = round(max(0.0, bruto * (1 - desconto_pct / 100.0) - desconto_valor), 2)
+        resumo = (
+            f"{resumo} · desconto de {_percentual_campo(desconto_pct) or '0'}% "
+            f"e R$ {_moeda_curta(desconto_valor)}"
+        )
     elif desconto == "bolsa":
         valor = 0.0
         resumo = f"{resumo} · bolsa"
@@ -643,7 +649,7 @@ def salvar_regra_cobranca_escola(
         raise ValueError("Escolha como calcular: valor fixo, porcentagem, os dois ou por aluno.")
     desconto_modo = (desconto_modo or "nenhum").strip().lower()
     if desconto_modo not in _MODOS_DESCONTO:
-        raise ValueError("Escolha a modalidade de desconto: nenhuma, percentual, valor fixo ou bolsa.")
+        raise ValueError("Escolha a modalidade de desconto: nenhuma, percentual, valor fixo, os dois ou bolsa.")
     regime = "simples" if modo in {"percentual", "misto"} else (escola.get("regime") or "outro")
     percentual = min(100.0, max(0.0, _numero(percentual_bruto)))
     desconto_pct = min(100.0, max(0.0, _numero(desconto_percentual_bruto)))
