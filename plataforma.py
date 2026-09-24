@@ -556,31 +556,20 @@ def calcular_cobranca_escola(escola, pacote, competencia):
     regime = (escola.get("regime") or "outro").strip().lower()
     if regime != "simples":
         regime = "outro"
-    modo = regra["modo"]
+    modo = "fixo"
     alunos = 0
     ok = True
-    if modo == "por_aluno":
-        receita = receita_mensal_escola(escola.get("db_nome"), competencia)
-        alunos = receita["alunos"]
-        ok = receita["ok"]
-    faturamento = faturamento_manual_escola(escola.get("id"), competencia) if modo in {"percentual", "misto"} else 0.0
-    fixo = regra["fixo"]
-    percentual = regra["percentual"]
-    if modo == "percentual":
-        valor = round(faturamento * percentual / 100.0, 2)
-        resumo = f"{_percentual_campo(percentual) or '0'}% sobre faturamento manual de R$ {_moeda_curta(faturamento)}"
-    elif modo == "misto":
-        valor = round(fixo + faturamento * percentual / 100.0, 2)
-        resumo = (
-            f"R$ {_moeda_curta(fixo)} + {_percentual_campo(percentual) or '0'}% "
-            f"do faturamento manual de R$ {_moeda_curta(faturamento)}"
-        )
-    elif modo == "por_aluno":
-        valor = round(fixo * alunos, 2)
-        resumo = f"R$ {_moeda_curta(fixo)} × {alunos} aluno(s)"
+    faturamento = 0.0
+    percentual = 0.0
+    base = regra["pacote_valor"]
+    if regra["fixo_proprio"] and regra["fixo"] > 0:
+        base = regra["fixo"]
+        resumo = "Valor fixo informado"
+    elif base > 0:
+        resumo = "Valor de tabela do pacote"
     else:
-        valor = round(fixo, 2)
-        resumo = "Valor fixo informado" if regra["fixo_proprio"] else "Valor fixo do pacote"
+        resumo = "Pacote sem valor de tabela"
+    valor = round(base, 2)
     desconto = (escola.get("desconto_modo") or "nenhum").strip().lower()
     if desconto not in _MODOS_DESCONTO:
         desconto = "nenhum"
@@ -790,6 +779,11 @@ def atualizar_cobrancas_abertas_plataforma(competencia):
                 pacote = pacotes.get(escola.get("pacote") or "")
                 calculo = calcular_cobranca_escola(escola, pacote, competencia)
                 if calculo["valor"] <= 0:
+                    cursor.execute(
+                        "DELETE FROM plataforma_cobrancas WHERE id = %s AND COALESCE(status, '') <> 'Pago'",
+                        (cobranca["id"],),
+                    )
+                    atualizadas += cursor.rowcount
                     continue
                 venc = cobranca.get("data_vencimento")
                 rotulo = venc.strftime("%m/%Y") if hasattr(venc, "strftime") else competencia[5:7] + "/" + competencia[:4]
@@ -1055,9 +1049,19 @@ def excluir_custo_plataforma(custo_id):
         raise ValueError("Custo não encontrado.")
 
 
+def sincronizar_valores_escolas(competencia):
+    """Lança e atualiza as assinaturas em aberto com o pacote e o desconto de cada escola."""
+    gerar_cobrancas_plataforma(competencia, 10)
+    atualizar_cobrancas_abertas_plataforma(competencia)
+
+
 def painel_financeiro_plataforma(competencia, status="", busca=""):
     garantir_plataforma()
     competencia = _competencia_valida(competencia)
+    try:
+        sincronizar_valores_escolas(competencia)
+    except Exception as e:
+        print(f"sincronizar_valores_escolas {competencia}: {e}")
     atualizar_status_cobrancas_plataforma()
     status = (status or "").strip()
     if status not in {"Pago", "Pendente", "Atrasado"}:

@@ -495,9 +495,27 @@
                 <div class="fin-linha"><span>(−) Custos da plataforma</span><strong>R$ {{ totais.custos|moeda }}</strong></div>
                 <div class="fin-linha"><span>(=) Caixa restante</span><strong>R$ {{ totais.liquido|moeda }}</strong></div>
                 <div class="fin-linha"><span>Ainda a receber (pendente + atrasado)</span><strong>R$ {{ (totais.pendente + totais.atrasado)|moeda }}</strong></div>
-                <p class="hint">O previsto soma as assinaturas já lançadas. Escolas ativas com pacote e valor, sem lançamento neste mês, aparecem abaixo.</p>
+                <p class="hint">O previsto soma o valor de tabela de cada escola neste mês, já com a modalidade de desconto. O que está pago não é recalculado.</p>
             </div>
         </details>
+        <div class="card-box">
+            <h3>Escolas em {{ mes_label }}</h3>
+            {% if painel.cobrancas %}
+            <div class="custo-lista">
+                {% for item in painel.cobrancas %}
+                <div class="custo-linha">
+                    <div>
+                        <span class="nome">{{ item.escola_nome }}</span>
+                        <span class="meta">{{ item.descricao or 'Assinatura' }} · {{ item.status }}</span>
+                    </div>
+                    <span>R$ {{ item.valor|moeda }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="hint">Nenhuma escola com valor de pacote neste mês.</p>
+            {% endif %}
+        </div>
         <div class="card-box">
             <h3>Escolas ativas sem assinatura em {{ mes_label }}</h3>
             {% if painel.sem_lancamento %}
