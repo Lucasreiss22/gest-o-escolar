@@ -3,52 +3,327 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Plataforma — escolas</title>
+    <title>Gestão da plataforma</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
     <style>
-        .wrap { max-width: 960px; margin: 24px auto; padding: 0 16px; }
-        .card-box { background:#fff; border-radius:12px; padding:22px; box-shadow:0 8px 24px rgba(15,23,42,.08); margin-bottom:20px; }
-        .form-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
-        .form-group { display:flex; flex-direction:column; }
-        .form-group label { font-size:.82rem; font-weight:600; margin-bottom:5px; }
-        .form-group input { padding:9px 12px; border:1px solid #ccc; border-radius:6px; }
-        .alert { padding:12px; border-radius:8px; margin-bottom:16px; }
-        .alert-danger { background:#f8d7da; color:#721c24; }
-        .alert-success { background:#d4edda; color:#155724; }
-        .alert-warning { background:#fff3cd; color:#856404; }
-        .hint { color:#64748b; font-size:.85rem; line-height:1.45; }
-        .top { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
-        .escola { border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-top:14px; }
-        .escola h4 { margin:0 0 8px; }
-        .meta { font-size:.88rem; color:#334155; line-height:1.5; }
-        .acoes { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; align-items:center; }
-        .btn-sm { padding:8px 12px; font-size:.82rem; border-radius:6px; border:0; cursor:pointer; }
-        .btn-azul { background:#2563eb; color:#fff; }
-        .btn-cinza { background:#475569; color:#fff; }
-        .btn-ambar { background:#d97706; color:#fff; }
-        .btn-verde { background:#15803d; color:#fff; }
-        .btn-vermelho { background:#b91c1c; color:#fff; }
-        a.btn-sm { text-decoration:none; display:inline-block; line-height:1.25; }
-        .check { display:flex; gap:8px; align-items:flex-start; margin-top:12px; font-size:.85rem; }
-        .pacote { border:1px solid #e2e8f0; border-radius:10px; padding:14px; margin-top:14px; }
-        .telas { display:flex; flex-wrap:wrap; gap:8px 14px; margin:10px 0; }
-        .telas label { display:flex; gap:6px; align-items:center; font-size:.88rem; }
-        .valor { max-width:180px; padding:8px 10px; border:1px solid #ccc; border-radius:6px; }
+        body { background: #f3f6fb; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 22px 16px 48px; }
+        .plat-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 16px; }
+        .plat-top h1 { margin: 0; font-size: 1.45rem; color: #1e3a5f; }
+        .eyebrow { margin: 0 0 4px; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; }
+        .hint { color: #64748b; font-size: 0.85rem; line-height: 1.45; margin: 6px 0 0; }
+        .plat-tabs, .fin-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+        .plat-tabs a, .fin-tabs a {
+            text-decoration: none; padding: 8px 14px; border-radius: 999px; font-size: 0.85rem; font-weight: 700;
+            background: #e2e8f0; color: #334155;
+        }
+        .plat-tabs a.ativa, .fin-tabs a.ativa { background: #1e3a5f; color: #fff; }
+        .card-box { background: #fff; border-radius: 12px; padding: 22px; box-shadow: 0 8px 24px rgba(15,23,42,.08); margin-bottom: 16px; }
+        .card-box h3 { margin: 0 0 8px; color: #1e3a5f; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 0.82rem; font-weight: 600; margin-bottom: 5px; color: #334155; }
+        .form-group input, .form-group select, .valor, .campo {
+            padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.95rem; background: #fff;
+        }
+        .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 14px; }
+        .alert-danger { background: #f8d7da; color: #721c24; }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-warning { background: #fff3cd; color: #856404; }
+        .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+        .stat { background: #fff; border-radius: 12px; padding: 14px; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
+        .stat span { display: block; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; color: #64748b; letter-spacing: 0.04em; }
+        .stat strong { display: block; margin-top: 4px; font-size: 1.35rem; color: #1e293b; }
+        .escola { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 12px; background: #fff; }
+        .escola-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+        .escola h4 { margin: 0; }
+        .meta { font-size: 0.88rem; color: #334155; line-height: 1.55; margin-top: 8px; }
+        .acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+        .btn, .btn-sm { border: 0; cursor: pointer; border-radius: 8px; font-weight: 700; text-decoration: none; display: inline-block; }
+        .btn { padding: 10px 16px; background: #1e3a5f; color: #fff; }
+        .btn-sm { padding: 8px 12px; font-size: 0.82rem; }
+        .btn-azul { background: #2563eb; color: #fff; }
+        .btn-cinza { background: #475569; color: #fff; }
+        .btn-ambar { background: #d97706; color: #fff; }
+        .btn-verde, .btn-success { background: #15803d; color: #fff; }
+        .btn-vermelho, .btn-danger { background: #b91c1c; color: #fff; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-warning { background: #d97706; color: #fff; }
+        a.btn-sm, a.btn { line-height: 1.25; }
+        .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 0.85rem; }
+        .pacote { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; margin-top: 14px; }
+        .telas { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 10px 0; }
+        .telas label { display: flex; gap: 6px; align-items: center; font-size: 0.88rem; }
+        .badge { padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 800; display: inline-block; }
+        .badge-pago, .badge-ativa { background: #dcfce7; color: #166534; }
+        .badge-pendente, .badge-senha { background: #ffedd5; color: #9a3412; }
+        .badge-atrasado, .badge-pausada { background: #fee2e2; color: #991b1b; }
+        .resumo-grid, .fin-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 14px; }
+        .card-resumo { background: #fff; border-radius: 12px; padding: 14px; box-shadow: 0 4px 10px rgba(0,0,0,.05); border-left: 5px solid #3498db; text-decoration: none; display: block; color: inherit; }
+        .card-resumo.recebido { border-left-color: #2ecc71; }
+        .card-resumo.pendente { border-left-color: #f39c12; }
+        .card-resumo.atrasado { border-left-color: #e74c3c; }
+        .card-resumo.compras { border-left-color: #64748b; }
+        .card-resumo.liquido { border-left-color: #1abc9c; }
+        .card-resumo.previsto { border-left-color: #2563eb; }
+        .card-resumo h4 { font-size: 0.72rem; color: #64748b; text-transform: uppercase; margin: 0 0 6px; }
+        .card-resumo .valor { font-size: 1.15rem; font-weight: 800; color: #1e293b; }
+        .card-resumo .sub { font-size: 0.72rem; color: #64748b; margin-top: 4px; display: block; }
+        .fin-periodo { position: sticky; top: 0; z-index: 20; background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(15,23,42,.08); padding: 12px; margin-bottom: 14px; }
+        .fin-periodo form { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+        .fin-periodo label { font-size: 0.72rem; color: #64748b; font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 4px; }
+        .fin-periodo input, .fin-periodo select { padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; min-height: 42px; }
+        .fin-periodo .campo-mes { flex: 1; min-width: 150px; }
+        .fin-bloco { background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(15,23,42,.08); margin-bottom: 12px; overflow: hidden; }
+        .fin-bloco summary { list-style: none; cursor: pointer; padding: 14px 16px; font-weight: 700; color: #1e3a5f; display: flex; justify-content: space-between; }
+        .fin-bloco summary::-webkit-details-marker { display: none; }
+        .fin-bloco summary:after { content: "▸"; color: #3b82f6; }
+        .fin-bloco[open] summary:after { content: "▾"; }
+        .fin-bloco .fin-bloco-body { padding: 0 16px 16px; }
+        .fin-linha { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eef2f7; font-size: 0.9rem; }
+        .fin-chart { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 8px 24px rgba(15,23,42,.08); height: 260px; }
+        .filtro-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
+        .filtro-cards a { text-decoration: none; border-radius: 12px; padding: 12px 14px; border: 2px solid transparent; display: block; }
+        .filtro-cards a.pago { background: #ecfdf3; color: #14532d; border-color: #86efac; }
+        .filtro-cards a.pendente { background: #fff7ed; color: #7c2d12; border-color: #fdba74; }
+        .filtro-cards a.atrasado { background: #fef2f2; color: #7f1d1d; border-color: #fca5a5; }
+        .filtro-cards a.ativo { box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.25); }
+        .filtro-cards .rotulo { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; }
+        .filtro-cards .valor { font-size: 1.1rem; font-weight: 800; margin-top: 4px; }
+        .filtro-cards .qtd { font-size: 0.75rem; margin-top: 2px; opacity: 0.8; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem; min-width: 760px; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+        th { background: #f8fafc; color: #475569; font-weight: 700; }
+        tr.st-pago td { background: #ecfdf3; }
+        tr.st-pendente td { background: #fff7ed; }
+        tr.st-atrasado td { background: #fef2f2; }
+        .fin-mobile-list { display: none; }
+        .fin-item { background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 10px; box-shadow: 0 4px 12px rgba(15,23,42,.06); }
+        .fin-item.st-pago { background: #ecfdf3; border-left: 4px solid #15803d; }
+        .fin-item.st-pendente { background: #fff7ed; border-left: 4px solid #d97706; }
+        .fin-item.st-atrasado { background: #fef2f2; border-left: 4px solid #dc2626; }
+        .fin-item-top { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+        .fin-item-meta { color: #64748b; font-size: 0.8rem; margin-bottom: 8px; }
+        .fin-item-acoes, .baixa-lote, .simples-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+        .baixa-lote { margin: 0 0 12px; }
+        .baixa-lote label, .simples-acoes label { font-size: 0.75rem; color: #64748b; font-weight: 700; display: block; margin-bottom: 4px; }
+        .custo-lista { border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+        .custo-linha { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #eef2f7; }
+        .custo-linha:last-child { border-bottom: 0; }
+        .custo-linha .nome { font-weight: 700; }
+        .custo-linha .meta { display: block; margin-top: 2px; color: #64748b; font-size: 0.78rem; }
+        .custo-total { background: #f8fafc; }
+        .mini { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.8rem; }
+        dialog.calc-painel { border: none; border-radius: 18px; padding: 0; width: min(520px, calc(100% - 24px)); box-shadow: 0 24px 60px rgba(15,23,42,.28); }
+        dialog.calc-painel::backdrop { background: rgba(15,23,42,.45); }
+        .calc-head, .calc-body { padding: 16px 18px; }
+        .calc-head { display: flex; justify-content: space-between; align-items: center; padding-bottom: 0; }
+        .calc-head h3 { margin: 0; }
+        @media (max-width: 800px) {
+            .stats, .filtro-cards { grid-template-columns: 1fr 1fr; }
+            .fin-desktop-table { display: none; }
+            .fin-mobile-list { display: block; }
+            .fin-periodo { top: 0; }
+        }
+        @media (max-width: 560px) {
+            .stats { grid-template-columns: 1fr 1fr; }
+        }
     </style>
 </head>
 <body>
     <div class="wrap">
-        <div class="top">
+        <div class="plat-top">
             <div>
-                <h2 style="margin:0;">Cadastro de escolas</h2>
-                <p class="hint">Logado como administrador da plataforma: {{ session.get('usuario_nome') or session.get('usuario_email') }}</p>
+                <p class="eyebrow">Administrador da plataforma</p>
+                <h1>Gestão do sistema</h1>
+                <p class="hint">{{ session.get('usuario_nome') or session.get('usuario_email') }}</p>
             </div>
             <a class="btn" href="{{ url_for('logout') }}">Sair</a>
         </div>
+
+        <nav class="plat-tabs">
+            <a class="{% if aba == 'escolas' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='escolas') }}">Escolas</a>
+            <a class="{% if aba == 'pacotes' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='pacotes') }}">Pacotes</a>
+            <a class="{% if aba == 'financeiro' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', mes=mes_atual) }}">Financeiro</a>
+            <a class="{% if aba == 'envio' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='envio') }}">Envio de e-mail</a>
+        </nav>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
 
+        {% if aba == 'escolas' %}
+        {% set ns = namespace(ativas=0, pausadas=0, senha=0) %}
+        {% for e in escolas %}
+            {% if not e.ativo %}{% set ns.pausadas = ns.pausadas + 1 %}
+            {% elif e.senha_definida %}{% set ns.ativas = ns.ativas + 1 %}
+            {% else %}{% set ns.senha = ns.senha + 1 %}{% endif %}
+        {% endfor %}
+        <div class="stats">
+            <div class="stat"><span>Cadastradas</span><strong>{{ escolas|length }}</strong></div>
+            <div class="stat"><span>Ativas</span><strong>{{ ns.ativas }}</strong></div>
+            <div class="stat"><span>Aguardando senha</span><strong>{{ ns.senha }}</strong></div>
+            <div class="stat"><span>Pausadas</span><strong>{{ ns.pausadas }}</strong></div>
+        </div>
+
+        <div class="card-box">
+            <h3>Nova escola</h3>
+            <p class="hint">Ao cadastrar, o código vai para o e-mail da escola. O cliente informa o código e cria a senha.</p>
+            <form method="POST">
+                <input type="hidden" name="acao" value="criar_escola">
+                <input type="hidden" name="aba" value="escolas">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Nome da escola</label>
+                        <input name="nome" required placeholder="Colégio Exemplo">
+                    </div>
+                    <div class="form-group">
+                        <label>E-mail que recebe o código</label>
+                        <input type="email" name="email_admin" required placeholder="escola@gmail.com">
+                    </div>
+                </div>
+                <label class="check">
+                    <input type="checkbox" name="recadastrar" value="1">
+                    <span>Recadastrar: apagar a escola já existente neste e-mail (banco e dados) e criar de novo.</span>
+                </label>
+                <p style="margin-top:14px;"><button class="btn" type="submit">Cadastrar e enviar e-mail</button></p>
+            </form>
+        </div>
+
+        <div class="card-box">
+            <h3>Escolas cadastradas</h3>
+            <p class="hint">Se o e-mail com código não chegar, defina a senha no campo ao lado de Redefinir senha. A escola entra com o e-mail admin e essa senha.</p>
+            <div class="form-group" style="max-width:320px;margin-top:12px;">
+                <label for="filtroEscola">Filtrar</label>
+                <input id="filtroEscola" placeholder="Nome ou e-mail">
+            </div>
+            {% for e in escolas %}
+            <div class="escola" data-busca="{{ (e.nome ~ ' ' ~ e.email_admin)|lower }}">
+                <div class="escola-head">
+                    <h4>{{ e.nome }}</h4>
+                    {% if not e.ativo %}<span class="badge badge-pausada">Pausada</span>
+                    {% elif e.senha_definida %}<span class="badge badge-ativa">Ativa</span>
+                    {% else %}<span class="badge badge-senha">Aguardando senha</span>{% endif %}
+                </div>
+                <div class="meta">
+                    {{ e.email_admin }} · banco <code>{{ e.db_nome }}</code><br>
+                    {% set plano = namespace(item=None) %}
+                    {% for p in pacotes %}{% if p.codigo == e.pacote %}{% set plano.item = p %}{% endif %}{% endfor %}
+                    Pacote:
+                    {% if plano.item %}
+                        {{ plano.item.nome }}{% if plano.item.valor %} · R$ {{ plano.item.valor|moeda }}{% else %} · valor a definir{% endif %}
+                        · {{ plano.item.telas|length }} tela(s)
+                    {% else %}
+                        Todas as telas
+                    {% endif %}
+                </div>
+                <form method="POST" class="acoes">
+                    <input type="hidden" name="acao" value="definir_pacote">
+                    <input type="hidden" name="aba" value="escolas">
+                    <input type="hidden" name="escola_id" value="{{ e.id }}">
+                    <select name="pacote" class="campo">
+                        <option value="" {% if not e.pacote %}selected{% endif %}>Todas as telas</option>
+                        {% for p in pacotes %}
+                        <option value="{{ p.codigo }}" {% if e.pacote == p.codigo %}selected{% endif %}>
+                            {{ p.nome }}{% if p.valor %} — R$ {{ p.valor|moeda }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn-sm btn-verde" type="submit">Aplicar pacote</button>
+                </form>
+                <div class="acoes">
+                    <form method="POST">
+                        <input type="hidden" name="acao" value="acessar_escola">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-azul" type="submit">Acessar dados</button>
+                    </form>
+                    <form method="POST">
+                        <input type="hidden" name="acao" value="reenviar_convite">
+                        <input type="hidden" name="aba" value="escolas">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        {% if e.convite_token %}<input type="hidden" name="token" value="{{ e.convite_token }}">{% endif %}
+                        <button class="btn-sm btn-cinza" type="submit">{% if e.senha_definida %}Reenviar código de senha{% else %}Reenviar e-mail{% endif %}</button>
+                    </form>
+                    {% if e.ativo %}
+                    <form method="POST" onsubmit="return confirm('Pausar {{ e.nome }}? Ninguém dessa escola entra até retomar.');">
+                        <input type="hidden" name="acao" value="pausar_escola">
+                        <input type="hidden" name="aba" value="escolas">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-cinza" type="submit">Pausar</button>
+                    </form>
+                    {% else %}
+                    <form method="POST">
+                        <input type="hidden" name="acao" value="retomar_escola">
+                        <input type="hidden" name="aba" value="escolas">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-verde" type="submit">Retomar</button>
+                    </form>
+                    {% endif %}
+                    <form method="POST" onsubmit="return confirm('Excluir {{ e.nome }}? O banco e todos os dados dessa escola serão apagados.');">
+                        <input type="hidden" name="acao" value="excluir_escola">
+                        <input type="hidden" name="aba" value="escolas">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <button class="btn-sm btn-vermelho" type="submit">Excluir</button>
+                    </form>
+                </div>
+                <form method="POST" class="acoes">
+                    <input type="hidden" name="acao" value="redefinir_senha">
+                    <input type="hidden" name="aba" value="escolas">
+                    <input type="hidden" name="escola_id" value="{{ e.id }}">
+                    <input type="password" name="nova_senha" minlength="6" placeholder="Nova senha (mín. 6)" required class="campo" autocomplete="new-password">
+                    <button class="btn-sm btn-ambar" type="submit">Redefinir senha</button>
+                </form>
+                {% if not e.senha_definida and e.convite_token and e.ativo %}
+                <form method="POST" class="acoes">
+                    <input type="hidden" name="acao" value="alterar_email">
+                    <input type="hidden" name="aba" value="escolas">
+                    <input type="hidden" name="token" value="{{ e.convite_token }}">
+                    <input type="email" name="email_admin" required value="{{ e.email_admin }}" class="campo">
+                    <button class="btn-sm btn-cinza" type="submit">Trocar e-mail e enviar</button>
+                </form>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="hint">Nenhuma escola ainda.</p>
+            {% endfor %}
+            <p id="nenhumaFiltrada" class="hint" hidden>Nenhuma escola com esse filtro.</p>
+        </div>
+        {% endif %}
+
+        {% if aba == 'pacotes' %}
+        <div class="card-box">
+            <h3>Pacotes de telas</h3>
+            <p class="hint">
+                Cada pacote define quais telas a escola pode usar e o valor mensal cobrado na aba Financeiro.
+                Painel, usuários e configurações continuam em todo pacote.
+                Escola sem pacote continua com todas as telas e não entra na geração automática.
+            </p>
+            {% for p in pacotes %}
+            <form method="POST" class="pacote">
+                <input type="hidden" name="acao" value="salvar_pacote">
+                <input type="hidden" name="aba" value="pacotes">
+                <input type="hidden" name="codigo" value="{{ p.codigo }}">
+                <strong>{{ p.nome }}</strong>
+                <p class="hint">{{ p.descricao }}</p>
+                <div class="form-group" style="margin-top:10px; max-width:220px;">
+                    <label>Valor mensal (R$)</label>
+                    <input class="valor" name="valor" inputmode="decimal" placeholder="A definir" value="{{ p.valor|moeda_campo }}">
+                </div>
+                <div class="telas">
+                    {% for codigo, rotulo in telas_plano %}
+                    <label>
+                        <input type="checkbox" name="telas" value="{{ codigo }}" {% if codigo in p.telas %}checked{% endif %}>
+                        {{ rotulo }}
+                    </label>
+                    {% endfor %}
+                </div>
+                <button class="btn-sm btn-azul" type="submit">Salvar pacote</button>
+            </form>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if aba == 'envio' %}
         <div class="card-box">
             <h3>Envio automático de e-mail</h3>
             {% if diagnostico and diagnostico.status == 'pronto' %}
@@ -72,6 +347,7 @@
             <p class="hint"><code>{{ google_redirect }}</code></p>
             <form method="POST">
                 <input type="hidden" name="acao" value="salvar_google">
+                <input type="hidden" name="aba" value="envio">
                 <div class="form-grid">
                     <div class="form-group">
                         <label>Client ID</label>
@@ -86,146 +362,566 @@
             </form>
             {% endif %}
         </div>
+        {% endif %}
 
-        <div class="card-box">
-            <h3>Pacotes de telas</h3>
-            <p class="hint">
-                Cada pacote define quais telas a escola pode usar e o valor mensal, para montar os planos.
-                Painel, usuários e configurações continuam em todo pacote, para a escola entrar e organizar a equipe.
-                Escola sem pacote continua com todas as telas.
-            </p>
-            {% for p in pacotes %}
-            <form method="POST" class="pacote">
-                <input type="hidden" name="acao" value="salvar_pacote">
-                <input type="hidden" name="codigo" value="{{ p.codigo }}">
-                <strong>{{ p.nome }}</strong>
-                <p class="hint" style="margin:4px 0 0;">{{ p.descricao }}</p>
-                <div class="form-group" style="margin-top:10px; max-width:220px;">
-                    <label>Valor mensal (R$)</label>
-                    <input class="valor" name="valor" inputmode="decimal" placeholder="A definir" value="{{ p.valor|moeda_campo }}">
+        {% if aba == 'financeiro' %}
+        {% set totais = painel.totais %}
+        <div class="fin-periodo">
+            <form method="GET" action="{{ url_for('plataforma_escolas') }}">
+                <input type="hidden" name="aba" value="financeiro">
+                <input type="hidden" name="fin" value="{{ fin }}">
+                <div class="campo-mes">
+                    <label for="mes">Mês de apuração</label>
+                    <input id="mes" type="month" name="mes" value="{{ mes_atual }}" onchange="this.form.submit()">
                 </div>
-                <div class="telas">
-                    {% for codigo, rotulo in telas_plano %}
-                    <label>
-                        <input type="checkbox" name="telas" value="{{ codigo }}" {% if codigo in p.telas %}checked{% endif %}>
-                        {{ rotulo }}
-                    </label>
-                    {% endfor %}
+                {% if fin == 'assinaturas' %}
+                <div>
+                    <label for="busca">Escola</label>
+                    <input id="busca" type="text" name="busca" placeholder="Nome ou e-mail" value="{{ busca }}">
                 </div>
-                <button class="btn-sm btn-azul" type="submit">Salvar pacote</button>
+                <div>
+                    <label for="status">Status</label>
+                    <select id="status" name="status" onchange="this.form.submit()">
+                        <option value="">Todos</option>
+                        <option value="Pago" {% if status == 'Pago' %}selected{% endif %}>Pago</option>
+                        <option value="Pendente" {% if status == 'Pendente' %}selected{% endif %}>Pendente</option>
+                        <option value="Atrasado" {% if status == 'Atrasado' %}selected{% endif %}>Atrasado</option>
+                    </select>
+                </div>
+                {% endif %}
+                <button type="submit" class="btn btn-primary">Ver mês</button>
             </form>
-            {% endfor %}
+            <p class="hint">Apuração de <strong>{{ mes_label }}</strong> · assinaturas das escolas e custos da plataforma</p>
+        </div>
+
+        <div class="resumo-grid fin-kpis">
+            <a class="card-resumo recebido" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='assinaturas', mes=mes_atual, status='Pago') }}">
+                <h4>Total recebido</h4>
+                <div class="valor">R$ {{ totais.recebido|moeda }}</div>
+                <span class="sub">{{ totais.qtd_pago }} assinatura(s) paga(s)</span>
+            </a>
+            <a class="card-resumo pendente" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='assinaturas', mes=mes_atual, status='Pendente') }}">
+                <h4>Total pendente</h4>
+                <div class="valor">R$ {{ totais.pendente|moeda }}</div>
+                <span class="sub">{{ totais.qtd_pendente }} em aberto</span>
+            </a>
+            <a class="card-resumo atrasado" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='assinaturas', mes=mes_atual, status='Atrasado') }}">
+                <h4>Total atrasado</h4>
+                <div class="valor">R$ {{ totais.atrasado|moeda }}</div>
+                <span class="sub">{{ totais.qtd_atrasado }} vencida(s)</span>
+            </a>
+            <div class="card-resumo previsto">
+                <h4>Previsto no mês</h4>
+                <div class="valor">R$ {{ totais.previsto|moeda }}</div>
+                <span class="sub">{{ totais.qtd }} assinatura(s) lançada(s)</span>
+            </div>
+            <a class="card-resumo compras" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='custos', mes=mes_atual) }}">
+                <h4>Custos da plataforma</h4>
+                <div class="valor">R$ {{ totais.custos|moeda }}</div>
+                <span class="sub">Hospedagem, domínio, e-mail e outros</span>
+            </a>
+            <div class="card-resumo liquido">
+                <h4>Caixa restante</h4>
+                <div class="valor">R$ {{ totais.liquido|moeda }}</div>
+                <span class="sub">Recebido − custos da plataforma</span>
+            </div>
+        </div>
+
+        <div class="fin-tabs">
+            <a class="{% if fin == 'resumo' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='resumo', mes=mes_atual) }}">Resumo</a>
+            <a class="{% if fin == 'assinaturas' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='assinaturas', mes=mes_atual, busca=busca, status=status) }}">Assinaturas</a>
+            <a class="{% if fin == 'custos' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='custos', mes=mes_atual) }}">Custos</a>
+        </div>
+
+        {% if fin == 'resumo' %}
+        <div class="fin-chart"><canvas id="graficoPlataforma"></canvas></div>
+        <details class="fin-bloco" open>
+            <summary>Uso do caixa no mês</summary>
+            <div class="fin-bloco-body">
+                <div class="fin-linha"><span>(+) Recebido das escolas</span><strong>R$ {{ totais.recebido|moeda }}</strong></div>
+                <div class="fin-linha"><span>(−) Custos da plataforma</span><strong>R$ {{ totais.custos|moeda }}</strong></div>
+                <div class="fin-linha"><span>(=) Caixa restante</span><strong>R$ {{ totais.liquido|moeda }}</strong></div>
+                <div class="fin-linha"><span>Ainda a receber (pendente + atrasado)</span><strong>R$ {{ (totais.pendente + totais.atrasado)|moeda }}</strong></div>
+                <p class="hint">O previsto soma as assinaturas já lançadas. Escolas ativas com pacote e valor, sem lançamento neste mês, aparecem abaixo.</p>
+            </div>
+        </details>
+        <div class="card-box">
+            <h3>Escolas ativas sem assinatura em {{ mes_label }}</h3>
+            {% if painel.sem_lancamento %}
+            <div class="custo-lista">
+                {% for e in painel.sem_lancamento %}
+                <div class="custo-linha">
+                    <div>
+                        <span class="nome">{{ e.nome }}</span>
+                        <span class="meta">{{ e.pacote_nome or e.pacote }} · {{ e.email_admin }}</span>
+                    </div>
+                    <span>R$ {{ e.pacote_valor|moeda }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            <form method="POST" class="acoes">
+                <input type="hidden" name="acao" value="gerar_assinaturas">
+                <input type="hidden" name="aba" value="financeiro">
+                <input type="hidden" name="fin" value="resumo">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <input type="hidden" name="dia_vencimento" value="10">
+                <button class="btn" type="submit">Gerar assinaturas do mês (vence dia 10)</button>
+            </form>
+            {% else %}
+            <p class="hint">Toda escola ativa com valor de pacote já tem lançamento neste mês.</p>
+            {% endif %}
+            {% if painel.sem_valor %}
+            <p class="hint" style="margin-top:12px;">Sem valor de pacote, por isso não entram na geração: {{ painel.sem_valor|map(attribute='nome')|join(', ') }}.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if fin == 'assinaturas' %}
+        <div class="card-box">
+            <h3>Gerar assinaturas de {{ mes_label }}</h3>
+            <p class="hint">Cria uma cobrança para cada escola ativa cujo pacote tem valor mensal. O que já foi lançado neste mês permanece, inclusive baixa e valor editado.</p>
+            <form method="POST" class="simples-acoes">
+                <input type="hidden" name="acao" value="gerar_assinaturas">
+                <input type="hidden" name="aba" value="financeiro">
+                <input type="hidden" name="fin" value="assinaturas">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                {% if busca %}<input type="hidden" name="busca" value="{{ busca }}">{% endif %}
+                <div class="form-group">
+                    <label>Dia de vencimento</label>
+                    <input class="campo" type="number" name="dia_vencimento" min="1" max="28" value="10" required>
+                </div>
+                <button class="btn" type="submit">Gerar o mês</button>
+            </form>
+            <form method="POST" style="margin-top:8px;">
+                <input type="hidden" name="acao" value="atualizar_abertas">
+                <input type="hidden" name="aba" value="financeiro">
+                <input type="hidden" name="fin" value="assinaturas">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <button class="btn-sm btn-cinza" type="submit">Atualizar em aberto com o valor atual do pacote</button>
+            </form>
         </div>
 
         <div class="card-box">
-            <h3>Nova escola</h3>
-            <p class="hint">Ao cadastrar, o código vai para o e-mail da escola. O cliente informa o código e cria a senha.</p>
-            <form method="POST">
-                <input type="hidden" name="acao" value="criar_escola">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>Nome da escola</label>
-                        <input name="nome" required placeholder="Colégio Exemplo">
-                    </div>
-                    <div class="form-group">
-                        <label>E-mail que recebe o código</label>
-                        <input type="email" name="email_admin" required placeholder="escola@gmail.com">
-                    </div>
-                </div>
-                <label class="check">
-                    <input type="checkbox" name="recadastrar" value="1">
-                    <span>Recadastrar: apagar a escola já existente neste e-mail (banco e dados) e criar de novo.</span>
-                </label>
-                <p style="margin-top:14px;"><button class="btn" type="submit">Cadastrar e enviar e-mail</button></p>
-            </form>
-        </div>
-
-        <div class="card-box">
-            <h3>Escolas cadastradas</h3>
-            <p class="hint">Último caso: se o e-mail com código não chegar, defina a senha no campo ao lado de Redefinir senha. A escola entra com o e-mail admin e essa senha, sem código.</p>
-            {% for e in escolas %}
-            <div class="escola">
-                <h4>{{ e.nome }}</h4>
-                <div class="meta">
-                    E-mail admin: {{ e.email_admin }}<br>
-                    Banco: <code>{{ e.db_nome }}</code><br>
-                    Status:
-                    {% if not e.ativo %}Pausada
-                    {% elif e.senha_definida %}Ativa
-                    {% else %}Aguardando senha (código no e-mail){% endif %}<br>
-                    {% set ns = namespace(plano=None) %}
-                    {% for p in pacotes %}{% if p.codigo == e.pacote %}{% set ns.plano = p %}{% endif %}{% endfor %}
-                    Pacote:
-                    {% if ns.plano %}
-                        {{ ns.plano.nome }}{% if ns.plano.valor %} · R$ {{ ns.plano.valor|moeda }}{% endif %}
-                        · {{ ns.plano.telas|length }} tela(s)
-                    {% else %}
-                        Todas as telas
-                    {% endif %}
-                </div>
-                <form method="POST" class="acoes">
-                    <input type="hidden" name="acao" value="definir_pacote">
-                    <input type="hidden" name="escola_id" value="{{ e.id }}">
-                    <select name="pacote" style="padding:8px;border:1px solid #ccc;border-radius:6px;">
-                        <option value="" {% if not e.pacote %}selected{% endif %}>Todas as telas</option>
-                        {% for p in pacotes %}
-                        <option value="{{ p.codigo }}" {% if e.pacote == p.codigo %}selected{% endif %}>
-                            {{ p.nome }}{% if p.valor %} — R$ {{ p.valor|moeda }}{% endif %}
-                        </option>
+            <h3>Lançar assinatura avulsa</h3>
+            <form method="POST" class="form-grid">
+                <input type="hidden" name="acao" value="criar_cobranca">
+                <input type="hidden" name="aba" value="financeiro">
+                <input type="hidden" name="fin" value="assinaturas">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <div class="form-group">
+                    <label>Escola</label>
+                    <select name="escola_id" required>
+                        <option value="">Selecione</option>
+                        {% for e in escolas %}
+                        <option value="{{ e.id }}">{{ e.nome }}</option>
                         {% endfor %}
                     </select>
-                    <button class="btn-sm btn-verde" type="submit">Aplicar pacote</button>
-                </form>
-                <div class="acoes">
-                    <form method="POST">
-                        <input type="hidden" name="acao" value="acessar_escola">
-                        <input type="hidden" name="escola_id" value="{{ e.id }}">
-                        <button class="btn-sm btn-azul" type="submit">Acessar dados</button>
-                    </form>
-                    <form method="POST" class="acoes" style="gap:6px;">
-                        <input type="hidden" name="acao" value="redefinir_senha">
-                        <input type="hidden" name="escola_id" value="{{ e.id }}">
-                        <input type="password" name="nova_senha" minlength="6" placeholder="Nova senha (mín. 6)" required style="padding:8px;border:1px solid #ccc;border-radius:6px;min-width:180px;">
-                        <button class="btn-sm btn-ambar" type="submit">Redefinir senha</button>
-                    </form>
-                    <form method="POST">
-                        <input type="hidden" name="acao" value="reenviar_convite">
-                        <input type="hidden" name="escola_id" value="{{ e.id }}">
-                        {% if e.convite_token %}<input type="hidden" name="token" value="{{ e.convite_token }}">{% endif %}
-                        <button class="btn-sm btn-cinza" type="submit">{% if e.senha_definida %}Reenviar código de senha{% else %}Reenviar e-mail{% endif %}</button>
-                    </form>
-                    {% if e.ativo %}
-                    <form method="POST" onsubmit="return confirm('Pausar {{ e.nome }}? Ninguém dessa escola entra até retomar.');">
-                        <input type="hidden" name="acao" value="pausar_escola">
-                        <input type="hidden" name="escola_id" value="{{ e.id }}">
-                        <button class="btn-sm btn-cinza" type="submit">Pausar</button>
-                    </form>
-                    {% else %}
-                    <form method="POST">
-                        <input type="hidden" name="acao" value="retomar_escola">
-                        <input type="hidden" name="escola_id" value="{{ e.id }}">
-                        <button class="btn-sm btn-verde" type="submit">Retomar</button>
-                    </form>
-                    {% endif %}
-                    <form method="POST" onsubmit="return confirm('Excluir {{ e.nome }}? O banco e todos os dados dessa escola serão apagados.');">
-                        <input type="hidden" name="acao" value="excluir_escola">
-                        <input type="hidden" name="escola_id" value="{{ e.id }}">
-                        <button class="btn-sm btn-vermelho" type="submit">Excluir</button>
-                    </form>
                 </div>
-                {% if not e.senha_definida and e.convite_token and e.ativo %}
-                <form method="POST" class="acoes">
-                    <input type="hidden" name="acao" value="alterar_email">
-                    <input type="hidden" name="token" value="{{ e.convite_token }}">
-                    <input type="email" name="email_admin" required value="{{ e.email_admin }}" style="padding:8px;border:1px solid #ccc;border-radius:6px;">
-                    <button class="btn-sm btn-cinza" type="submit">Trocar e-mail e enviar</button>
-                </form>
-                {% endif %}
+                <div class="form-group">
+                    <label>Descrição</label>
+                    <input name="descricao" placeholder="Assinatura do mês" required>
+                </div>
+                <div class="form-group">
+                    <label>Valor (R$)</label>
+                    <input name="valor" inputmode="decimal" placeholder="0,00" required>
+                </div>
+                <div class="form-group">
+                    <label>Vencimento</label>
+                    <input type="date" name="data_vencimento" value="{{ mes_atual }}-10" required>
+                </div>
+                <div class="form-group">
+                    <label>&nbsp;</label>
+                    <button class="btn" type="submit">Registrar</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card-box">
+            <h3>Assinaturas de {{ mes_label }}{% if status %} <span style="font-weight:600;color:#2563eb;">({{ status }})</span>{% endif %}</h3>
+            <form id="formBaixaLote" method="POST">
+                <input type="hidden" name="acao" id="acaoBaixaLote" value="dar_baixa_lote">
+                <input type="hidden" name="aba" value="financeiro">
+                <input type="hidden" name="fin" value="assinaturas">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                {% if busca %}<input type="hidden" name="busca" value="{{ busca }}">{% endif %}
+            </form>
+            <div class="baixa-lote">
+                <label style="align-self:center;margin:0;">
+                    <input type="checkbox" id="todosCobrancas"> Selecionar todas
+                </label>
+                <div>
+                    <label for="formaLote">Forma de pagamento</label>
+                    <select id="formaLote" name="forma_pagamento" form="formBaixaLote" class="campo">
+                        <option value="Pix">Pix</option>
+                        <option value="Boleto">Boleto</option>
+                        <option value="Transferência">Transferência</option>
+                        <option value="Cartão">Cartão</option>
+                        <option value="Dinheiro">Dinheiro</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="dataLote">Data do pagamento</label>
+                    <input id="dataLote" type="date" name="data_pagamento" form="formBaixaLote" value="{{ data_hoje }}">
+                </div>
+                <button type="button" class="btn btn-success" id="btnBaixaLote" disabled>Dar baixa nos selecionados</button>
+                <button type="button" class="btn btn-warning" id="btnTirarLote" disabled>Tirar baixa dos selecionados</button>
+            </div>
+            <dialog id="dlgBaixaLote" class="calc-painel">
+                <div class="calc-head">
+                    <h3 id="dlgBaixaTitulo">Confirmar</h3>
+                    <button type="button" class="btn-sm btn-cinza" id="fecharBaixaLote">Fechar</button>
+                </div>
+                <div class="calc-body">
+                    <p id="dlgBaixaTexto"></p>
+                    <button type="submit" class="btn" form="formBaixaLote">Confirmar</button>
+                </div>
+            </dialog>
+
+            <div class="filtro-cards">
+                <a class="pago {% if status == 'Pago' %}ativo{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='assinaturas', mes=mes_atual, busca=busca, status='' if status == 'Pago' else 'Pago') }}">
+                    <div class="rotulo">Pago</div>
+                    <div class="valor">R$ {{ totais.recebido|moeda }}</div>
+                    <div class="qtd">{{ totais.qtd_pago }} assinatura(s)</div>
+                </a>
+                <a class="pendente {% if status == 'Pendente' %}ativo{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='assinaturas', mes=mes_atual, busca=busca, status='' if status == 'Pendente' else 'Pendente') }}">
+                    <div class="rotulo">Pendente</div>
+                    <div class="valor">R$ {{ totais.pendente|moeda }}</div>
+                    <div class="qtd">{{ totais.qtd_pendente }} assinatura(s)</div>
+                </a>
+                <a class="atrasado {% if status == 'Atrasado' %}ativo{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', fin='assinaturas', mes=mes_atual, busca=busca, status='' if status == 'Atrasado' else 'Atrasado') }}">
+                    <div class="rotulo">Atrasado</div>
+                    <div class="valor">R$ {{ totais.atrasado|moeda }}</div>
+                    <div class="qtd">{{ totais.qtd_atrasado }} assinatura(s)</div>
+                </a>
+            </div>
+
+            <div class="fin-mobile-list">
+                {% for item in painel.cobrancas %}
+                {% set st = 'pago' if item.status == 'Pago' else ('pendente' if item.status == 'Pendente' else 'atrasado') %}
+                <div class="fin-item st-{{ st }}">
+                    <div class="fin-item-top">
+                        <label style="display:flex;align-items:center;gap:8px;">
+                            <input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote">
+                            <strong>{{ item.escola_nome }}</strong>
+                        </label>
+                        <strong>R$ {{ item.valor|moeda }}</strong>
+                    </div>
+                    <div class="fin-item-meta">
+                        {{ item.descricao or 'Assinatura' }}
+                        · vence {{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}
+                        · <span class="badge badge-{{ st }}">{{ item.status }}</span>
+                        {% if item.status == 'Pago' and item.forma_pagamento %} · {{ item.forma_pagamento }}{% endif %}
+                    </div>
+                    <form method="POST" class="acoes">
+                        <input type="hidden" name="acao" value="editar_cobranca">
+                        <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                        <input type="hidden" name="aba" value="financeiro">
+                        <input type="hidden" name="fin" value="assinaturas">
+                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                        <input class="mini" name="descricao" value="{{ item.descricao or '' }}" placeholder="Descrição">
+                        <input class="mini" name="valor" value="{{ item.valor|moeda_campo }}" placeholder="Valor" style="width:110px;">
+                        <input class="mini" type="date" name="data_vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" required>
+                        <button class="btn-sm btn-azul" type="submit">Salvar</button>
+                    </form>
+                    <div class="fin-item-acoes">
+                        {% if item.status != 'Pago' %}
+                        <form method="POST" class="acoes" style="margin-top:0;">
+                            <input type="hidden" name="acao" value="dar_baixa">
+                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                            <input type="hidden" name="aba" value="financeiro">
+                            <input type="hidden" name="fin" value="assinaturas">
+                            <input type="hidden" name="mes" value="{{ mes_atual }}">
+                            <input type="hidden" name="data_pagamento" value="{{ data_hoje }}">
+                            <select name="forma_pagamento" class="mini">
+                                <option value="Pix">Pix</option>
+                                <option value="Boleto">Boleto</option>
+                                <option value="Transferência">Transferência</option>
+                                <option value="Cartão">Cartão</option>
+                            </select>
+                            <button class="btn-sm btn-verde" type="submit">Baixa</button>
+                        </form>
+                        {% else %}
+                        <form method="POST" onsubmit="return confirm('Tirar a baixa desta assinatura?');">
+                            <input type="hidden" name="acao" value="tirar_baixa">
+                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                            <input type="hidden" name="aba" value="financeiro">
+                            <input type="hidden" name="fin" value="assinaturas">
+                            <input type="hidden" name="mes" value="{{ mes_atual }}">
+                            <button class="btn-sm btn-ambar" type="submit">Tirar baixa</button>
+                        </form>
+                        {% endif %}
+                        <form method="POST" onsubmit="return confirm('Excluir esta assinatura?');">
+                            <input type="hidden" name="acao" value="excluir_cobranca">
+                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                            <input type="hidden" name="aba" value="financeiro">
+                            <input type="hidden" name="fin" value="assinaturas">
+                            <input type="hidden" name="mes" value="{{ mes_atual }}">
+                            <button class="btn-sm btn-vermelho" type="submit">Excluir</button>
+                        </form>
+                    </div>
+                </div>
+                {% else %}
+                <p class="hint">Nenhuma assinatura neste mês. Gere o mês ou lance uma avulsa.</p>
+                {% endfor %}
+            </div>
+
+            <div class="table-responsive fin-desktop-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Escola</th>
+                            <th>Descrição</th>
+                            <th>Valor</th>
+                            <th>Vencimento</th>
+                            <th>Status</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in painel.cobrancas %}
+                        {% set st = 'pago' if item.status == 'Pago' else ('pendente' if item.status == 'Pendente' else 'atrasado') %}
+                        <tr class="st-{{ st }}">
+                            <td><input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote" aria-label="Selecionar {{ item.escola_nome }}"></td>
+                            <td>
+                                <strong>{{ item.escola_nome }}</strong>
+                                <div class="hint" style="margin:0;">{{ item.email_admin }}</div>
+                            </td>
+                            <td><input class="mini" name="descricao" form="edit-{{ item.id }}" value="{{ item.descricao or '' }}"></td>
+                            <td><input class="mini" name="valor" form="edit-{{ item.id }}" value="{{ item.valor|moeda_campo }}" style="width:100px;"></td>
+                            <td><input class="mini" type="date" name="data_vencimento" form="edit-{{ item.id }}" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" required></td>
+                            <td>
+                                <span class="badge badge-{{ st }}">{{ item.status }}</span>
+                                {% if item.status == 'Pago' %}
+                                <div class="hint" style="margin:4px 0 0;">{{ item.forma_pagamento or 'Pago' }}{% if item.data_pagamento %} · {{ item.data_pagamento.strftime('%d/%m/%Y') }}{% endif %}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="acoes" style="margin-top:0;">
+                                    <form id="edit-{{ item.id }}" method="POST">
+                                        <input type="hidden" name="acao" value="editar_cobranca">
+                                        <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                        <input type="hidden" name="aba" value="financeiro">
+                                        <input type="hidden" name="fin" value="assinaturas">
+                                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                        <button class="btn-sm btn-azul" type="submit">Salvar</button>
+                                    </form>
+                                    {% if item.status != 'Pago' %}
+                                    <form method="POST" class="acoes" style="margin-top:0;">
+                                        <input type="hidden" name="acao" value="dar_baixa">
+                                        <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                        <input type="hidden" name="aba" value="financeiro">
+                                        <input type="hidden" name="fin" value="assinaturas">
+                                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                        <input type="hidden" name="data_pagamento" value="{{ data_hoje }}">
+                                        <select name="forma_pagamento" class="mini">
+                                            <option value="Pix">Pix</option>
+                                            <option value="Boleto">Boleto</option>
+                                            <option value="Transferência">Transferência</option>
+                                        </select>
+                                        <button class="btn-sm btn-verde" type="submit">Baixa</button>
+                                    </form>
+                                    {% else %}
+                                    <form method="POST" onsubmit="return confirm('Tirar a baixa desta assinatura?');">
+                                        <input type="hidden" name="acao" value="tirar_baixa">
+                                        <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                        <input type="hidden" name="aba" value="financeiro">
+                                        <input type="hidden" name="fin" value="assinaturas">
+                                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                        <button class="btn-sm btn-ambar" type="submit">Tirar baixa</button>
+                                    </form>
+                                    {% endif %}
+                                    <form method="POST" onsubmit="return confirm('Excluir esta assinatura?');">
+                                        <input type="hidden" name="acao" value="excluir_cobranca">
+                                        <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                        <input type="hidden" name="aba" value="financeiro">
+                                        <input type="hidden" name="fin" value="assinaturas">
+                                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                        <button class="btn-sm btn-vermelho" type="submit">Excluir</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="7" style="text-align:center;color:#64748b;">Nenhuma assinatura neste mês.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if fin == 'custos' %}
+        <div class="card-box">
+            <h3>Novo custo da plataforma</h3>
+            <p class="hint">Despesas de operar o sistema: hospedagem, domínio, envio de e-mail, impostos e outros. Entram no caixa do mês da data.</p>
+            <form method="POST" class="form-grid">
+                <input type="hidden" name="acao" value="criar_custo">
+                <input type="hidden" name="aba" value="financeiro">
+                <input type="hidden" name="fin" value="custos">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <div class="form-group">
+                    <label>Descrição</label>
+                    <input name="descricao" required placeholder="Ex: Render, domínio, Brevo">
+                </div>
+                <div class="form-group">
+                    <label>Categoria</label>
+                    <select name="categoria">
+                        <option>Hospedagem</option>
+                        <option>Domínio</option>
+                        <option>E-mail</option>
+                        <option>Impostos</option>
+                        <option>Outros</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Valor (R$)</label>
+                    <input name="valor" inputmode="decimal" required placeholder="0,00">
+                </div>
+                <div class="form-group">
+                    <label>Data</label>
+                    <input type="date" name="data_custo" value="{{ data_hoje }}" required>
+                </div>
+                <div class="form-group">
+                    <label>&nbsp;</label>
+                    <button class="btn" type="submit">Lançar custo</button>
+                </div>
+            </form>
+        </div>
+        <div class="card-box">
+            <h3>Custos de {{ mes_label }}</h3>
+            {% if painel.custos %}
+            <div class="custo-lista">
+                {% for c in painel.custos %}
+                <div class="custo-linha">
+                    <div>
+                        <span class="nome">{{ c.descricao }}</span>
+                        <span class="meta">{{ c.categoria or 'Outros' }} · {{ c.data_custo.strftime('%d/%m/%Y') if c.data_custo else '' }}</span>
+                    </div>
+                    <div class="acoes" style="margin:0;">
+                        <strong>R$ {{ c.valor|moeda }}</strong>
+                        <form method="POST" onsubmit="return confirm('Excluir este custo?');">
+                            <input type="hidden" name="acao" value="excluir_custo">
+                            <input type="hidden" name="custo_id" value="{{ c.id }}">
+                            <input type="hidden" name="aba" value="financeiro">
+                            <input type="hidden" name="fin" value="custos">
+                            <input type="hidden" name="mes" value="{{ mes_atual }}">
+                            <button class="btn-sm btn-vermelho" type="submit">Excluir</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+                <div class="custo-linha custo-total">
+                    <span class="nome">Total do mês</span>
+                    <strong>R$ {{ totais.custos|moeda }}</strong>
+                </div>
             </div>
             {% else %}
-            <p class="hint">Nenhuma escola ainda.</p>
-            {% endfor %}
+            <p class="hint">Nenhum custo neste mês.</p>
+            {% endif %}
         </div>
+        {% endif %}
+        {% endif %}
     </div>
+    {% if aba == 'financeiro' and fin == 'resumo' %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+    (function () {
+        var el = document.getElementById("graficoPlataforma");
+        if (!el || typeof Chart === "undefined") return;
+        new Chart(el, {
+            type: "bar",
+            data: {
+                labels: ["Recebido", "Pendente", "Atrasado", "Custos", "Caixa"],
+                datasets: [{
+                    label: "R$",
+                    data: [{{ painel.totais.recebido }}, {{ painel.totais.pendente }}, {{ painel.totais.atrasado }}, {{ painel.totais.custos }}, {{ painel.totais.liquido }}],
+                    backgroundColor: ["#2ecc71", "#f39c12", "#e74c3c", "#64748b", "#1abc9c"]
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
+    })();
+    </script>
+    {% endif %}
+    {% if aba == 'financeiro' and fin == 'assinaturas' %}
+    <script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var form = document.getElementById("formBaixaLote");
+        var acao = document.getElementById("acaoBaixaLote");
+        var dlg = document.getElementById("dlgBaixaLote");
+        var btnBaixa = document.getElementById("btnBaixaLote");
+        var btnTirar = document.getElementById("btnTirarLote");
+        var todos = document.getElementById("todosCobrancas");
+        if (!form || !dlg) return;
+        function painelVisivel() {
+            var desk = document.querySelector(".fin-desktop-table");
+            if (desk && desk.offsetParent !== null) return desk;
+            return document.querySelector(".fin-mobile-list");
+        }
+        function marcados() {
+            var ids = {};
+            var raiz = painelVisivel();
+            if (!raiz) return [];
+            raiz.querySelectorAll(".js-cobranca:checked").forEach(function (el) { ids[el.value] = true; });
+            return Object.keys(ids);
+        }
+        function atualizar() {
+            var n = marcados().length;
+            if (btnBaixa) btnBaixa.disabled = n === 0;
+            if (btnTirar) btnTirar.disabled = n === 0;
+        }
+        document.querySelectorAll(".js-cobranca").forEach(function (el) {
+            el.addEventListener("change", atualizar);
+        });
+        if (todos) {
+            todos.addEventListener("change", function () {
+                var raiz = painelVisivel();
+                if (!raiz) return;
+                raiz.querySelectorAll(".js-cobranca").forEach(function (el) { el.checked = todos.checked; });
+                atualizar();
+            });
+        }
+        function abrir(tipo) {
+            var n = marcados().length;
+            if (!n) return;
+            acao.value = tipo;
+            document.getElementById("dlgBaixaTitulo").textContent = tipo === "dar_baixa_lote" ? "Confirmar baixa" : "Confirmar retirada da baixa";
+            document.getElementById("dlgBaixaTexto").textContent = tipo === "dar_baixa_lote"
+                ? "Dar baixa em " + n + " assinatura(s)?"
+                : "Tirar a baixa de " + n + " assinatura(s)?";
+            if (dlg.showModal) dlg.showModal();
+        }
+        if (btnBaixa) btnBaixa.addEventListener("click", function () { abrir("dar_baixa_lote"); });
+        if (btnTirar) btnTirar.addEventListener("click", function () { abrir("tirar_baixa_lote"); });
+        form.addEventListener("submit", function () {
+            var raiz = painelVisivel();
+            document.querySelectorAll(".js-cobranca").forEach(function (el) {
+                if (!raiz || !raiz.contains(el)) el.checked = false;
+            });
+        });
+        var fechar = document.getElementById("fecharBaixaLote");
+        if (fechar) fechar.addEventListener("click", function () { dlg.close(); });
+        atualizar();
+    });
+    </script>
+    {% endif %}
+    {% if aba == 'escolas' %}
+    <script>
+    document.getElementById("filtroEscola").addEventListener("input", function () {
+        var q = this.value.trim().toLowerCase();
+        var visiveis = 0;
+        document.querySelectorAll(".escola").forEach(function (el) {
+            var ok = !q || (el.getAttribute("data-busca") || "").indexOf(q) >= 0;
+            el.hidden = !ok;
+            if (ok) visiveis += 1;
+        });
+        var vazio = document.getElementById("nenhumaFiltrada");
+        if (vazio) vazio.hidden = visiveis !== 0 || !q;
+    });
+    </script>
+    {% endif %}
 </body>
 </html>

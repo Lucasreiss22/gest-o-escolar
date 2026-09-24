@@ -105,6 +105,16 @@ from plataforma import (
     definir_pacote_escola,
     listar_pacotes,
     salvar_pacote,
+    painel_financeiro_plataforma,
+    gerar_cobrancas_plataforma,
+    atualizar_cobrancas_abertas_plataforma,
+    criar_cobranca_plataforma,
+    editar_cobranca_plataforma,
+    baixar_cobrancas_plataforma,
+    tirar_baixa_cobrancas_plataforma,
+    excluir_cobranca_plataforma,
+    criar_custo_plataforma,
+    excluir_custo_plataforma,
     telas_contratadas,
     eh_super_admin,
     email_super_admin,
@@ -2121,6 +2131,79 @@ def plataforma_autorizar_gmail():
     return redirect("https://accounts.google.com/o/oauth2/v2/auth?" + query)
 
 
+def _ids_cobranca_form():
+    ids = []
+    for bruto in request.form.getlist("cobranca_id"):
+        try:
+            cobranca_id = int(bruto)
+        except (TypeError, ValueError):
+            continue
+        if cobranca_id not in ids:
+            ids.append(cobranca_id)
+    return ids
+
+
+def _redirect_plataforma():
+    acao = (request.form.get("acao") or "").strip()
+    abas = {"escolas", "pacotes", "financeiro", "envio"}
+    aba = (request.form.get("aba") or "escolas").strip()
+    if acao in {
+        "gerar_assinaturas",
+        "atualizar_abertas",
+        "criar_cobranca",
+        "editar_cobranca",
+        "dar_baixa",
+        "dar_baixa_lote",
+        "tirar_baixa",
+        "tirar_baixa_lote",
+        "excluir_cobranca",
+        "criar_custo",
+        "excluir_custo",
+    }:
+        aba = "financeiro"
+    if aba not in abas:
+        aba = "escolas"
+    kwargs = {"aba": aba}
+    if aba != "financeiro":
+        return redirect(url_for("plataforma_escolas", **kwargs))
+    fin = (request.form.get("fin") or "resumo").strip()
+    if acao in {"criar_custo", "excluir_custo"}:
+        fin = "custos"
+    elif acao in {
+        "gerar_assinaturas",
+        "atualizar_abertas",
+        "criar_cobranca",
+        "editar_cobranca",
+        "dar_baixa",
+        "dar_baixa_lote",
+        "tirar_baixa",
+        "tirar_baixa_lote",
+        "excluir_cobranca",
+    }:
+        fin = "assinaturas"
+    if fin not in {"resumo", "assinaturas", "custos"}:
+        fin = "resumo"
+    kwargs["fin"] = fin
+    mes = (request.form.get("mes") or "")[:7]
+    if acao in {"editar_cobranca", "criar_cobranca"}:
+        venc = (request.form.get("data_vencimento") or "")[:7]
+        if len(venc) == 7:
+            mes = venc
+    if acao == "criar_custo":
+        quando = (request.form.get("data_custo") or "")[:7]
+        if len(quando) == 7:
+            mes = quando
+    if len(mes) == 7:
+        kwargs["mes"] = mes
+    status = (request.form.get("status") or "").strip()
+    busca = (request.form.get("busca") or "").strip()
+    if status:
+        kwargs["status"] = status
+    if busca:
+        kwargs["busca"] = busca
+    return redirect(url_for("plataforma_escolas", **kwargs))
+
+
 @app.route("/plataforma/escolas", methods=["GET", "POST"])
 def plataforma_escolas():
     garantir_plataforma()
@@ -2340,12 +2423,106 @@ def plataforma_escolas():
                 return redirect(url_for("dashboard"))
             except Exception as e:
                 flash(f"Não foi possível abrir a escola: {e}", "danger")
+        elif acao == "gerar_assinaturas":
+            try:
+                resultado = gerar_cobrancas_plataforma(
+                    request.form.get("mes"),
+                    request.form.get("dia_vencimento") or 10,
+                )
+                texto = (
+                    f"Assinaturas do mês: {resultado['criadas']} nova(s). "
+                    f"{resultado['ja_existiam']} já existia(m) e foi mantida."
+                )
+                if resultado["sem_valor"]:
+                    texto += " Sem valor de pacote: " + ", ".join(resultado["sem_valor"]) + "."
+                flash(texto, "success" if resultado["criadas"] or resultado["ja_existiam"] else "warning")
+            except Exception as e:
+                flash(f"Não foi possível gerar as assinaturas: {e}", "danger")
+        elif acao == "atualizar_abertas":
+            try:
+                qtd = atualizar_cobrancas_abertas_plataforma(request.form.get("mes"))
+                flash(f"{qtd} assinatura(s) em aberto atualizada(s) com o valor atual do pacote.", "success")
+            except Exception as e:
+                flash(f"Não foi possível atualizar os valores: {e}", "danger")
+        elif acao == "criar_cobranca":
+            try:
+                criar_cobranca_plataforma(
+                    request.form.get("escola_id"),
+                    _parse_moeda(request.form.get("valor"), 0.0),
+                    request.form.get("data_vencimento"),
+                    request.form.get("descricao"),
+                )
+                flash("Assinatura lançada.", "success")
+            except Exception as e:
+                flash(f"Não foi possível lançar a assinatura: {e}", "danger")
+        elif acao == "editar_cobranca":
+            try:
+                editar_cobranca_plataforma(
+                    int(request.form.get("cobranca_id")),
+                    _parse_moeda(request.form.get("valor"), 0.0),
+                    request.form.get("data_vencimento"),
+                    request.form.get("descricao"),
+                )
+                flash("Assinatura atualizada.", "success")
+            except Exception as e:
+                flash(f"Não foi possível salvar a assinatura: {e}", "danger")
+        elif acao == "dar_baixa":
+            try:
+                qtd = baixar_cobrancas_plataforma(
+                    [request.form.get("cobranca_id")],
+                    request.form.get("forma_pagamento"),
+                    request.form.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d"),
+                )
+                flash("Baixa realizada." if qtd else "Essa assinatura já estava paga.", "success" if qtd else "warning")
+            except Exception as e:
+                flash(f"Não foi possível dar baixa: {e}", "danger")
+        elif acao == "dar_baixa_lote":
+            try:
+                ids = _ids_cobranca_form()
+                qtd = baixar_cobrancas_plataforma(
+                    ids,
+                    request.form.get("forma_pagamento") or "Pix",
+                    request.form.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d"),
+                )
+                flash(f"Baixa registrada em {qtd} assinatura(s).", "success")
+            except Exception as e:
+                flash(f"Não foi possível dar baixa: {e}", "danger")
+        elif acao in {"tirar_baixa", "tirar_baixa_lote"}:
+            try:
+                ids = _ids_cobranca_form()
+                qtd = tirar_baixa_cobrancas_plataforma(ids)
+                flash(f"Baixa retirada de {qtd} assinatura(s).", "success")
+            except Exception as e:
+                flash(f"Não foi possível tirar a baixa: {e}", "danger")
+        elif acao == "excluir_cobranca":
+            try:
+                excluir_cobranca_plataforma(int(request.form.get("cobranca_id")))
+                flash("Assinatura excluída.", "success")
+            except Exception as e:
+                flash(f"Não foi possível excluir a assinatura: {e}", "danger")
+        elif acao == "criar_custo":
+            try:
+                criar_custo_plataforma(
+                    request.form.get("descricao"),
+                    request.form.get("categoria"),
+                    _parse_moeda(request.form.get("valor"), 0.0),
+                    request.form.get("data_custo") or datetime.now().strftime("%Y-%m-%d"),
+                )
+                flash("Custo da plataforma lançado.", "success")
+            except Exception as e:
+                flash(f"Não foi possível lançar o custo: {e}", "danger")
+        elif acao == "excluir_custo":
+            try:
+                excluir_custo_plataforma(int(request.form.get("custo_id")))
+                flash("Custo excluído.", "success")
+            except Exception as e:
+                flash(f"Não foi possível excluir o custo: {e}", "danger")
         if conexao:
             try:
                 conexao.close()
             except Exception:
                 pass
-        return redirect(url_for("plataforma_escolas"))
+        return _redirect_plataforma()
     smtp = {}
     escolas = []
     try:
@@ -2386,11 +2563,57 @@ def plataforma_escolas():
     except Exception:
         cred_google = {}
     cid_google = (cred_google.get("client_id") or "").strip()
+    aba = (request.args.get("aba") or "escolas").strip()
+    if aba not in {"escolas", "pacotes", "financeiro", "envio"}:
+        aba = "escolas"
+    fin = (request.args.get("fin") or "resumo").strip()
+    if fin not in {"resumo", "assinaturas", "custos"}:
+        fin = "resumo"
+    mes_atual = (request.args.get("mes") or datetime.now().strftime("%Y-%m")).strip()[:7]
+    try:
+        datetime.strptime(mes_atual, "%Y-%m")
+    except ValueError:
+        mes_atual = datetime.now().strftime("%Y-%m")
+    status_fin = (request.args.get("status") or "").strip()
+    busca_fin = (request.args.get("busca") or "").strip()
+    if status_fin and fin == "resumo":
+        fin = "assinaturas"
+    painel = {
+        "cobrancas": [],
+        "custos": [],
+        "sem_valor": [],
+        "sem_lancamento": [],
+        "totais": {
+            "recebido": 0.0,
+            "pendente": 0.0,
+            "atrasado": 0.0,
+            "previsto": 0.0,
+            "custos": 0.0,
+            "liquido": 0.0,
+            "qtd_pago": 0,
+            "qtd_pendente": 0,
+            "qtd_atrasado": 0,
+            "qtd": 0,
+        },
+    }
+    if aba == "financeiro":
+        try:
+            painel = painel_financeiro_plataforma(mes_atual, status_fin, busca_fin)
+        except Exception as e:
+            flash(f"Não foi possível carregar o financeiro da plataforma: {e}", "danger")
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
         pacotes=pacotes,
         telas_plano=TELAS_PLANO,
+        aba=aba,
+        fin=fin,
+        mes_atual=mes_atual,
+        mes_label=nome_mes_extenso(mes_atual),
+        status=status_fin,
+        busca=busca_fin,
+        painel=painel,
+        data_hoje=date.today().isoformat(),
         smtp=smtp,
         diagnostico=diagnostico,
         google_client_id=cid_google,

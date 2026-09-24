@@ -1,3 +1,4 @@
+import calendar
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -112,6 +113,31 @@ def garantir_plataforma():
                 )
                 if not cursor.fetchone():
                     cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {spec}")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS plataforma_cobrancas (
+                    id SERIAL PRIMARY KEY,
+                    escola_id INT NOT NULL,
+                    competencia VARCHAR(7) NOT NULL,
+                    pacote VARCHAR(40),
+                    descricao VARCHAR(180),
+                    valor NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    data_vencimento DATE,
+                    data_pagamento DATE,
+                    forma_pagamento VARCHAR(40),
+                    status VARCHAR(30) DEFAULT 'Pendente',
+                    UNIQUE (escola_id, competencia)
+                );
+                CREATE TABLE IF NOT EXISTS plataforma_custos (
+                    id SERIAL PRIMARY KEY,
+                    descricao VARCHAR(180) NOT NULL,
+                    categoria VARCHAR(80) DEFAULT 'Outros',
+                    valor NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    data_custo DATE NOT NULL DEFAULT CURRENT_DATE,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
             for codigo, nome, descricao, telas in PACOTES_INICIAIS:
                 cursor.execute(
                     """
@@ -282,6 +308,510 @@ def definir_pacote_escola(escola_id, codigo):
     return buscar_escola_por_id(escola_id)
 
 
+def _numero(valor):
+    try:
+        return float(valor or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _competencia_valida(competencia):
+    competencia = (competencia or "").strip()[:7]
+    datetime.strptime(competencia, "%Y-%m")
+    return competencia
+
+
+def _vencimento_da_competencia(competencia, dia):
+    ano, mes = [int(parte) for parte in competencia.split("-")]
+    try:
+        dia = int(dia or 10)
+    except (TypeError, ValueError):
+        dia = 10
+    ultimo = calendar.monthrange(ano, mes)[1]
+    dia = min(max(dia, 1), ultimo)
+    return datetime(ano, mes, dia).date()
+
+
+def atualizar_status_cobrancas_plataforma():
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        return
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE plataforma_cobrancas
+                SET status = CASE
+                    WHEN data_vencimento < CURRENT_DATE THEN 'Atrasado'
+                    ELSE 'Pendente'
+                END
+                WHERE COALESCE(status, '') <> 'Pago'
+                """
+            )
+        conexao.commit()
+    finally:
+        conexao.close()
+
+
+def gerar_cobrancas_plataforma(competencia, dia_vencimento=10):
+    garantir_plataforma()
+    competencia = _competencia_valida(competencia)
+    vencimento = _vencimento_da_competencia(competencia, dia_vencimento)
+    rotulo = vencimento.strftime("%m/%Y")
+    pacotes = {p["codigo"]: p for p in listar_pacotes()}
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    criadas = 0
+    ja_existiam = 0
+    sem_valor = []
+    try:
+        with conexao.cursor() as cursor:
+            for escola in listar_escolas():
+                if escola.get("ativo") is False:
+                    continue
+                pacote = pacotes.get(escola.get("pacote") or "")
+                valor = _numero(pacote.get("valor")) if pacote else 0
+                if valor <= 0:
+                    sem_valor.append(escola.get("nome") or escola.get("email_admin"))
+                    continue
+                cursor.execute(
+                    """
+                    INSERT INTO plataforma_cobrancas
+                        (escola_id, competencia, pacote, descricao, valor, data_vencimento, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'Pendente')
+                    ON CONFLICT (escola_id, competencia) DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        escola["id"],
+                        competencia,
+                        pacote["codigo"],
+                        f"Assinatura {pacote['nome']} {rotulo}",
+                        valor,
+                        vencimento,
+                    ),
+                )
+                if cursor.fetchone():
+                    criadas += 1
+                else:
+                    ja_existiam += 1
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    atualizar_status_cobrancas_plataforma()
+    return {"criadas": criadas, "ja_existiam": ja_existiam, "sem_valor": sem_valor}
+
+
+def atualizar_cobrancas_abertas_plataforma(competencia):
+    garantir_plataforma()
+    competencia = _competencia_valida(competencia)
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE plataforma_cobrancas AS c
+                SET valor = p.valor,
+                    pacote = e.pacote,
+                    descricao = 'Assinatura ' || p.nome || ' ' || to_char(c.data_vencimento, 'MM/YYYY')
+                FROM plataforma_escolas AS e
+                JOIN plataforma_pacotes AS p ON p.codigo = e.pacote
+                WHERE c.escola_id = e.id
+                  AND c.competencia = %s
+                  AND COALESCE(c.status, '') <> 'Pago'
+                  AND p.valor IS NOT NULL
+                  AND p.valor > 0
+                """,
+                (competencia,),
+            )
+            atualizadas = cursor.rowcount
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    return atualizadas
+
+
+def criar_cobranca_plataforma(escola_id, valor, vencimento, descricao):
+    garantir_plataforma()
+    escola = buscar_escola_por_id(escola_id)
+    if not escola:
+        raise ValueError("Escola não encontrada.")
+    if isinstance(vencimento, str):
+        vencimento = datetime.strptime(vencimento[:10], "%Y-%m-%d").date()
+    valor = _numero(valor)
+    if valor <= 0:
+        raise ValueError("Informe o valor da assinatura.")
+    descricao = (descricao or "").strip() or f"Assinatura {vencimento.strftime('%m/%Y')}"
+    competencia = vencimento.strftime("%Y-%m")
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id FROM plataforma_cobrancas
+                WHERE escola_id = %s AND competencia = %s
+                """,
+                (escola["id"], competencia),
+            )
+            if cursor.fetchone():
+                raise ValueError(f"{escola['nome']} já tem assinatura em {competencia}.")
+            status = "Atrasado" if vencimento < datetime.now().date() else "Pendente"
+            cursor.execute(
+                """
+                INSERT INTO plataforma_cobrancas
+                    (escola_id, competencia, pacote, descricao, valor, data_vencimento, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (escola["id"], competencia, escola.get("pacote"), descricao, valor, vencimento, status),
+            )
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    return competencia
+
+
+def editar_cobranca_plataforma(cobranca_id, valor, vencimento, descricao):
+    garantir_plataforma()
+    if isinstance(vencimento, str):
+        vencimento = datetime.strptime(vencimento[:10], "%Y-%m-%d").date()
+    valor = _numero(valor)
+    if valor <= 0:
+        raise ValueError("Informe o valor da assinatura.")
+    descricao = (descricao or "").strip() or f"Assinatura {vencimento.strftime('%m/%Y')}"
+    competencia = vencimento.strftime("%Y-%m")
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "SELECT escola_id, status FROM plataforma_cobrancas WHERE id = %s",
+                (cobranca_id,),
+            )
+            atual = cursor.fetchone()
+            if not atual:
+                raise ValueError("Assinatura não encontrada.")
+            cursor.execute(
+                """
+                SELECT id FROM plataforma_cobrancas
+                WHERE escola_id = %s AND competencia = %s AND id <> %s
+                """,
+                (atual["escola_id"], competencia, cobranca_id),
+            )
+            if cursor.fetchone():
+                raise ValueError("Esta escola já tem outra assinatura nesse mês.")
+            cursor.execute(
+                """
+                UPDATE plataforma_cobrancas
+                SET valor = %s,
+                    descricao = %s,
+                    data_vencimento = %s,
+                    competencia = %s,
+                    status = CASE
+                        WHEN status = 'Pago' THEN 'Pago'
+                        WHEN %s < CURRENT_DATE THEN 'Atrasado'
+                        ELSE 'Pendente'
+                    END
+                WHERE id = %s
+                """,
+                (valor, descricao, vencimento, competencia, vencimento, cobranca_id),
+            )
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    return competencia
+
+
+def baixar_cobrancas_plataforma(ids, forma, data_pagamento):
+    garantir_plataforma()
+    ids = [int(item) for item in ids]
+    if not ids:
+        raise ValueError("Selecione ao menos uma assinatura.")
+    if isinstance(data_pagamento, str):
+        data_pagamento = datetime.strptime(data_pagamento[:10], "%Y-%m-%d").date()
+    forma = (forma or "Pix").strip() or "Pix"
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE plataforma_cobrancas
+                SET status = 'Pago', forma_pagamento = %s, data_pagamento = %s
+                WHERE id = ANY(%s) AND COALESCE(status, '') <> 'Pago'
+                """,
+                (forma, data_pagamento, ids),
+            )
+            baixadas = cursor.rowcount
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    return baixadas
+
+
+def tirar_baixa_cobrancas_plataforma(ids):
+    garantir_plataforma()
+    ids = [int(item) for item in ids]
+    if not ids:
+        raise ValueError("Selecione ao menos uma assinatura.")
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE plataforma_cobrancas
+                SET status = CASE
+                        WHEN data_vencimento < CURRENT_DATE THEN 'Atrasado'
+                        ELSE 'Pendente'
+                    END,
+                    forma_pagamento = NULL,
+                    data_pagamento = NULL
+                WHERE id = ANY(%s) AND status = 'Pago'
+                """,
+                (ids,),
+            )
+            alteradas = cursor.rowcount
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    return alteradas
+
+
+def excluir_cobranca_plataforma(cobranca_id):
+    garantir_plataforma()
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM plataforma_cobrancas WHERE id = %s RETURNING id",
+                (cobranca_id,),
+            )
+            apagada = cursor.fetchone()
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    if not apagada:
+        raise ValueError("Assinatura não encontrada.")
+
+
+def criar_custo_plataforma(descricao, categoria, valor, data_custo):
+    garantir_plataforma()
+    descricao = (descricao or "").strip()
+    if not descricao:
+        raise ValueError("Informe a descrição do custo.")
+    valor = _numero(valor)
+    if valor <= 0:
+        raise ValueError("Informe o valor do custo.")
+    categoria = (categoria or "Outros").strip() or "Outros"
+    if isinstance(data_custo, str):
+        data_custo = datetime.strptime(data_custo[:10], "%Y-%m-%d").date()
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO plataforma_custos (descricao, categoria, valor, data_custo)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (descricao, categoria, valor, data_custo),
+            )
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    return data_custo.strftime("%Y-%m")
+
+
+def excluir_custo_plataforma(custo_id):
+    garantir_plataforma()
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM plataforma_custos WHERE id = %s RETURNING id",
+                (custo_id,),
+            )
+            apagado = cursor.fetchone()
+        conexao.commit()
+    except Exception:
+        conexao.rollback()
+        raise
+    finally:
+        conexao.close()
+    if not apagado:
+        raise ValueError("Custo não encontrado.")
+
+
+def painel_financeiro_plataforma(competencia, status="", busca=""):
+    garantir_plataforma()
+    competencia = _competencia_valida(competencia)
+    atualizar_status_cobrancas_plataforma()
+    status = (status or "").strip()
+    if status not in {"Pago", "Pendente", "Atrasado"}:
+        status = ""
+    busca = (busca or "").strip()
+    conexao = obter_conexao(master=True)
+    vazio = {
+        "cobrancas": [],
+        "custos": [],
+        "sem_valor": [],
+        "sem_lancamento": [],
+        "totais": {
+            "recebido": 0.0,
+            "pendente": 0.0,
+            "atrasado": 0.0,
+            "previsto": 0.0,
+            "custos": 0.0,
+            "liquido": 0.0,
+            "qtd_pago": 0,
+            "qtd_pendente": 0,
+            "qtd_atrasado": 0,
+            "qtd": 0,
+        },
+    }
+    if not conexao:
+        return vazio
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN status = 'Pago' THEN valor ELSE 0 END), 0) AS recebido,
+                    COALESCE(SUM(CASE WHEN status = 'Pendente' THEN valor ELSE 0 END), 0) AS pendente,
+                    COALESCE(SUM(CASE WHEN status = 'Atrasado' THEN valor ELSE 0 END), 0) AS atrasado,
+                    COALESCE(SUM(CASE WHEN status = 'Pago' THEN 1 ELSE 0 END), 0) AS qtd_pago,
+                    COALESCE(SUM(CASE WHEN status = 'Pendente' THEN 1 ELSE 0 END), 0) AS qtd_pendente,
+                    COALESCE(SUM(CASE WHEN status = 'Atrasado' THEN 1 ELSE 0 END), 0) AS qtd_atrasado,
+                    COUNT(*) AS qtd
+                FROM plataforma_cobrancas
+                WHERE competencia = %s
+                """,
+                (competencia,),
+            )
+            totais_row = cursor.fetchone() or {}
+            filtros = ["c.competencia = %s"]
+            params = [competencia]
+            if status:
+                filtros.append("c.status = %s")
+                params.append(status)
+            if busca:
+                filtros.append("(e.nome ILIKE %s OR e.email_admin ILIKE %s OR c.descricao ILIKE %s)")
+                like = f"%{busca}%"
+                params.extend([like, like, like])
+            cursor.execute(
+                f"""
+                SELECT c.*, e.nome AS escola_nome, e.email_admin, e.ativo AS escola_ativa
+                FROM plataforma_cobrancas c
+                JOIN plataforma_escolas e ON e.id = c.escola_id
+                WHERE {' AND '.join(filtros)}
+                ORDER BY
+                    CASE c.status WHEN 'Atrasado' THEN 0 WHEN 'Pendente' THEN 1 ELSE 2 END,
+                    e.nome
+                """,
+                params,
+            )
+            cobrancas = []
+            for row in cursor.fetchall() or []:
+                item = dict(row)
+                item["valor"] = _numero(item.get("valor"))
+                cobrancas.append(item)
+            cursor.execute(
+                """
+                SELECT * FROM plataforma_custos
+                WHERE to_char(data_custo, 'YYYY-MM') = %s
+                ORDER BY data_custo, id
+                """,
+                (competencia,),
+            )
+            custos = []
+            for row in cursor.fetchall() or []:
+                item = dict(row)
+                item["valor"] = _numero(item.get("valor"))
+                custos.append(item)
+            cursor.execute(
+                """
+                SELECT e.id, e.nome, e.email_admin, e.pacote, p.nome AS pacote_nome, p.valor AS pacote_valor
+                FROM plataforma_escolas e
+                LEFT JOIN plataforma_pacotes p ON p.codigo = e.pacote
+                LEFT JOIN plataforma_cobrancas c
+                    ON c.escola_id = e.id AND c.competencia = %s
+                WHERE e.ativo IS TRUE AND c.id IS NULL
+                ORDER BY e.nome
+                """,
+                (competencia,),
+            )
+            sem_valor = []
+            sem_lancamento = []
+            for row in cursor.fetchall() or []:
+                item = dict(row)
+                item["pacote_valor"] = _numero(item.get("pacote_valor"))
+                if item["pacote_valor"] > 0:
+                    sem_lancamento.append(item)
+                else:
+                    sem_valor.append(item)
+        recebido = _numero(totais_row.get("recebido"))
+        pendente = _numero(totais_row.get("pendente"))
+        atrasado = _numero(totais_row.get("atrasado"))
+        custos_total = sum(item["valor"] for item in custos)
+        return {
+            "cobrancas": cobrancas,
+            "custos": custos,
+            "sem_valor": sem_valor,
+            "sem_lancamento": sem_lancamento,
+            "totais": {
+                "recebido": recebido,
+                "pendente": pendente,
+                "atrasado": atrasado,
+                "previsto": recebido + pendente + atrasado,
+                "custos": custos_total,
+                "liquido": recebido - custos_total,
+                "qtd_pago": int(totais_row.get("qtd_pago") or 0),
+                "qtd_pendente": int(totais_row.get("qtd_pendente") or 0),
+                "qtd_atrasado": int(totais_row.get("qtd_atrasado") or 0),
+                "qtd": int(totais_row.get("qtd") or 0),
+            },
+        }
+    finally:
+        conexao.close()
+
+
 def telas_contratadas(escola):
     if not escola or not escola.get("pacote"):
         return None
@@ -328,6 +858,7 @@ def excluir_escola(escola_id):
     conexao = obter_conexao(master=True)
     try:
         with conexao.cursor() as cursor:
+            cursor.execute("DELETE FROM plataforma_cobrancas WHERE escola_id = %s", (escola_id,))
             cursor.execute("DELETE FROM plataforma_escolas WHERE id = %s", (escola_id,))
         conexao.commit()
     finally:
