@@ -404,9 +404,14 @@
         <div class="card border-0 shadow-sm mt-4">
             <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-wallet2 text-warning"></i> Extrato Financeiro / Mensalidades</span>
+                <span>
+                    {% if pode('nfse') %}
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('pagina_notas_fiscais', aluno=aluno.id or aluno[0]) }}">Notas fiscais</a>
+                    {% endif %}
                 <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#modalNovaCobranca">
                     <i class="bi bi-plus-lg"></i> Nova Cobrança
                 </button>
+                </span>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -532,6 +537,9 @@
                                                     <button class="btn btn-sm btn-outline-primary" type="submit">E-mail</button>
                                                 </form>
                                             {% endif %}
+                                            {% with mensalidade=cobranca, destino='aluno', aluno_id=aluno.id or aluno[0] %}
+                                            {% include '_nfse_acoes.html' %}
+                                            {% endwith %}
                                         </td>
                                     </tr>
                                 {% endfor %}
@@ -546,6 +554,14 @@
             </div>
         </div>
 
+        {% endif %}
+
+        {% if pode('nfse') and not pode('financeiro') %}
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-body">
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('pagina_notas_fiscais', aluno=aluno.id or aluno[0]) }}">Notas fiscais deste aluno</a>
+            </div>
+        </div>
         {% endif %}
 
         {% if pode('pedagogico') %}

@@ -14,6 +14,7 @@ MODULOS = {
     "usuarios": {"admin", "administrador", "direcao", "supervisor", "financeiro"},
     "contracheque": PAPEIS_TOTAIS | {"professor", "funcionario", "secretaria"},
     "auditoria": {"admin"},
+    "nfse": {"admin", "financeiro"},
 }
 
 ENDPOINTS = {
@@ -63,6 +64,12 @@ ENDPOINTS = {
     "enviar_contracheques_mes": "financeiro",
     "aluno_vincular_turma": "pedagogico_cadastro",
     "pagina_auditoria": "auditoria",
+    "pagina_notas_fiscais": "nfse",
+    "nfse_emitir": "nfse",
+    "nfse_cancelar": "nfse",
+    "nfse_substituir": "nfse",
+    "nfse_consultar": "nfse",
+    "nfse_lote": "nfse",
 }
 
 
@@ -98,6 +105,7 @@ AREAS_ACESSO = [
     ("contracheque", "Contra-cheque"),
     ("configuracoes", "Configurações"),
     ("usuarios", "Usuários e permissões"),
+    ("nfse", "Notas fiscais"),
 ]
 
 ACOES_ACESSO = ("acessar", "ver", "alterar", "excluir")
@@ -122,6 +130,7 @@ MODULO_PARA_TELA = {
     "financeiro": "financeiro",
     "calendario": "calendario",
     "contracheque": "contracheque",
+    "nfse": "financeiro",
 }
 
 PACOTES_INICIAIS = [
@@ -159,6 +168,12 @@ _TELA_EXTRA = {
     "boletim_pdf": "pedagogico",
     "anexar_boletim": "pedagogico",
     "ajustar_contracheque": "contracheque",
+    "pagina_notas_fiscais": "financeiro",
+    "nfse_emitir": "financeiro",
+    "nfse_cancelar": "financeiro",
+    "nfse_substituir": "financeiro",
+    "nfse_consultar": "financeiro",
+    "nfse_lote": "financeiro",
 }
 
 _POST_SO_LEITURA = {"pdf_contracheque_rota", "relatorio_pdf_consulta", "relatorio_tributario", "relatorio_pdf_custos"}

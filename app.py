@@ -56,6 +56,24 @@ from simples_nacional import (
     parse_moeda_livre,
 )
 from database import obter_conexao, garantir_tabelas_pedagogicas, garantir_tabelas_folha, definir_banco_escola, limpar_banco_escola, resetar_tenant, erro_conexao_atual, host_postgres_configurado
+from nfse import (
+    anexar_ultima_nota,
+    cancelar_nota,
+    consultar_nota,
+    emitir_cobranca_plataforma,
+    emitir_mensalidade,
+    faturamento_das_notas,
+    ler_config_plataforma_tela,
+    listar_cobrancas_plataforma,
+    listar_notas_escola,
+    listar_notas_plataforma,
+    preparar_config_tela,
+    salvar_config_escola,
+    salvar_config_plataforma,
+    salvar_tomador_escola,
+    substituir_nota,
+    valor_na_competencia,
+)
 from tributacao import (
     apurar_simples,
     apurar_pis_cofins,
@@ -2440,6 +2458,56 @@ def plataforma_escolas():
         except Exception as e:
             flash(f"Banco indisponível: {e}", "danger")
             return redirect(url_for("plataforma_escolas"))
+        if acao in {
+            "salvar_nfse_plataforma",
+            "emitir_nfse_plataforma",
+            "cancelar_nfse_plataforma",
+            "substituir_nfse_plataforma",
+            "consultar_nfse_plataforma",
+            "salvar_tomador_escola",
+        }:
+            mes_nf = (request.form.get("mes") or "")[:7]
+            try:
+                with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                    if acao == "salvar_nfse_plataforma":
+                        salvar_config_plataforma(cursor, request.form, request.files.get("nfse_certificado"))
+                        mensagem = "Token e certificado da plataforma salvos no servidor."
+                    elif acao == "salvar_tomador_escola":
+                        escola_id = request.form.get("escola_id", type=int)
+                        if not escola_id:
+                            raise ValueError("Escolha a escola tomadora.")
+                        salvar_tomador_escola(cursor, escola_id, request.form)
+                        mensagem = "Dados fiscais da escola salvos."
+                    elif acao == "emitir_nfse_plataforma":
+                        mensagem = emitir_cobranca_plataforma(cursor, request.form.get("cobranca_id", type=int))
+                    elif acao == "cancelar_nfse_plataforma":
+                        mensagem = cancelar_nota(
+                            cursor,
+                            request.form.get("nota_id", type=int),
+                            "plataforma_notas_fiscais",
+                            request.form.get("justificativa"),
+                        )
+                    elif acao == "substituir_nfse_plataforma":
+                        mensagem = substituir_nota(
+                            cursor,
+                            request.form.get("nota_id", type=int),
+                            "plataforma_notas_fiscais",
+                        )
+                    else:
+                        mensagem = consultar_nota(
+                            cursor,
+                            request.form.get("nota_id", type=int),
+                            "plataforma_notas_fiscais",
+                        )
+                if acao in {"salvar_nfse_plataforma", "salvar_tomador_escola"}:
+                    conexao.commit()
+                flash(mensagem, "success")
+            except Exception as e:
+                conexao.rollback()
+                flash(str(e), "danger")
+            finally:
+                conexao.close()
+            return redirect(url_for("plataforma_escolas", aba="nfse", mes=mes_nf))
         if acao in {"salvar_smtp", "salvar_smtp_e_enviar"}:
             try:
                 senha_app = (request.form.get("smtp_password") or "").strip()
@@ -2813,7 +2881,7 @@ def plataforma_escolas():
         cred_google = {}
     cid_google = (cred_google.get("client_id") or "").strip()
     aba = (request.args.get("aba") or "escolas").strip()
-    if aba not in {"escolas", "pacotes", "financeiro", "envio", "auditoria"}:
+    if aba not in {"escolas", "pacotes", "financeiro", "envio", "auditoria", "nfse"}:
         aba = "escolas"
     fin = (request.args.get("fin") or "resumo").strip()
     if fin not in {"resumo", "assinaturas", "custos"}:
@@ -2863,6 +2931,24 @@ def plataforma_escolas():
             auditoria = listar_auditoria(filtro_escola, filtro_tipo, busca_fin)
         except Exception as e:
             flash(f"Não foi possível carregar a auditoria: {e}", "danger")
+    nfse_cfg = {}
+    nfse_notas = []
+    nfse_cobrancas = []
+    nfse_faturado = 0
+    if aba == "nfse":
+        conexao_nf = None
+        try:
+            conexao_nf = obter_conexao(master=True)
+            with conexao_nf.cursor(cursor_factory=RealDictCursor) as cursor:
+                nfse_cfg = ler_config_plataforma_tela(cursor)
+                nfse_notas = listar_notas_plataforma(cursor, (request.args.get("nota") or "").strip() or None)
+                nfse_cobrancas = listar_cobrancas_plataforma(cursor, mes_atual)
+                nfse_faturado = valor_na_competencia(listar_notas_plataforma(cursor), mes_atual)
+        except Exception as e:
+            flash(f"Não foi possível carregar as notas da plataforma: {e}", "danger")
+        finally:
+            if conexao_nf:
+                conexao_nf.close()
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
@@ -2886,6 +2972,11 @@ def plataforma_escolas():
         auditoria=auditoria,
         filtro_tipo=filtro_tipo,
         filtro_escola=filtro_escola,
+        nfse_cfg=nfse_cfg,
+        nfse_notas=nfse_notas,
+        nfse_cobrancas=nfse_cobrancas,
+        nfse_faturado=nfse_faturado,
+        nota_filtro=(request.args.get("nota") or "").strip(),
     )
 
 
@@ -4555,6 +4646,10 @@ def detalhes_aluno(aluno_id):
                     """
                 )
                 todas_turmas = cursor.fetchall()
+                try:
+                    anexar_ultima_nota(cursor, financeiro_aluno)
+                except Exception:
+                    conexao.rollback()
         finally:
             conexao.close()
 
@@ -6437,6 +6532,10 @@ def pagina_financeiro():
                     quadro_simples = montar_quadro_simples(cursor, mes_filtro, regime_apuracao)
                     if apuracao_simples is None:
                         apuracao_simples, _colabs_fator_r = calcular_apuracao_simples(cursor, mes_filtro)
+                try:
+                    anexar_ultima_nota(cursor, lancamentos)
+                except Exception:
+                    conexao.rollback()
         finally:
             conexao.close()
 
@@ -7243,6 +7342,20 @@ def pagina_configuracoes():
     if request.method == "POST":
         acao = request.form.get("acao")
         
+        if acao == "salvar_nfse":
+            if conexao:
+                try:
+                    with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                        salvar_config_escola(cursor, request.form, request.files.get("nfse_certificado"))
+                        conexao.commit()
+                        flash("Dados da nota fiscal salvos. O token fica só no servidor.", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"Não foi possível salvar a nota fiscal: {e}", "danger")
+                finally:
+                    conexao.close()
+            return redirect(url_for("pagina_configuracoes"))
+
         if acao == "salvar_acesso":
             uid = request.form.get("usuario_id", type=int)
             if conexao and uid:
@@ -7316,7 +7429,7 @@ def pagina_configuracoes():
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                 try:
                     cursor.execute("SELECT * FROM configuracoes WHERE id = 1;")
-                    config = cursor.fetchone() or {}
+                    config = preparar_config_tela(cursor.fetchone() or {})
                 except Exception:
                     conexao.rollback()
                 try:
@@ -7507,6 +7620,134 @@ def cobranca_email(cobranca_id):
     finally:
         conexao.close()
     return redirect(request.referrer or url_for("pagina_financeiro", aba="receitas"))
+
+
+def _redirecionar_nfse():
+    destino = (request.form.get("voltar") or "").strip()
+    aluno_id = request.form.get("aluno_id", type=int)
+    if destino == "aluno" and aluno_id:
+        return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+    if destino == "financeiro":
+        return redirect(url_for("pagina_financeiro", aba="receitas", mes=request.form.get("mes") or ""))
+    params = {}
+    status_nota = (request.form.get("status_nota") or "").strip()
+    if status_nota:
+        params["status"] = status_nota
+    if aluno_id:
+        params["aluno"] = aluno_id
+    return redirect(url_for("pagina_notas_fiscais", **params))
+
+
+def _executar_nfse(funcao):
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return _redirecionar_nfse()
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            mensagem = funcao(cursor)
+        flash(mensagem, "success")
+    except Exception as e:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        flash(str(e), "danger")
+    finally:
+        conexao.close()
+    return _redirecionar_nfse()
+
+
+@app.route("/notas-fiscais")
+def pagina_notas_fiscais():
+    garantir_tabelas_folha()
+    status = (request.args.get("status") or "").strip()
+    aluno = request.args.get("aluno", type=int)
+    mes = (request.args.get("mes") or datetime.now().strftime("%Y-%m"))[:7]
+    grupos = []
+    faturado = 0
+    conexao = obter_conexao()
+    if conexao:
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                grupos = listar_notas_escola(cursor, status or None, aluno)
+                faturado = faturamento_das_notas(cursor, mes)
+        except Exception as e:
+            flash(f"Não foi possível listar as notas: {e}", "danger")
+        finally:
+            conexao.close()
+    return render_template(
+        "notas_fiscais.html",
+        grupos=grupos,
+        status=status,
+        aluno_id=aluno,
+        mes=mes,
+        faturado=faturado,
+    )
+
+
+@app.route("/notas-fiscais/emitir", methods=["POST"])
+def nfse_emitir():
+    return _executar_nfse(lambda cursor: emitir_mensalidade(cursor, request.form.get("mensalidade_id", type=int)))
+
+
+@app.route("/notas-fiscais/cancelar", methods=["POST"])
+def nfse_cancelar():
+    return _executar_nfse(
+        lambda cursor: cancelar_nota(
+            cursor,
+            request.form.get("nota_id", type=int),
+            "notas_fiscais",
+            request.form.get("justificativa"),
+        )
+    )
+
+
+@app.route("/notas-fiscais/substituir", methods=["POST"])
+def nfse_substituir():
+    return _executar_nfse(
+        lambda cursor: substituir_nota(cursor, request.form.get("nota_id", type=int), "notas_fiscais")
+    )
+
+
+@app.route("/notas-fiscais/consultar", methods=["POST"])
+def nfse_consultar():
+    return _executar_nfse(
+        lambda cursor: consultar_nota(cursor, request.form.get("nota_id", type=int), "notas_fiscais")
+    )
+
+
+@app.route("/notas-fiscais/lote", methods=["POST"])
+def nfse_lote():
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return _redirecionar_nfse()
+    ids = [int(item) for item in request.form.getlist("cobranca_id") if str(item).isdigit()]
+    if not ids:
+        flash("Selecione ao menos uma mensalidade.", "danger")
+        conexao.close()
+        return _redirecionar_nfse()
+    feitos = 0
+    erros = []
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            for item in ids:
+                try:
+                    emitir_mensalidade(cursor, item)
+                    feitos += 1
+                except Exception as erro:
+                    conexao.rollback()
+                    erros.append(str(erro))
+    finally:
+        conexao.close()
+    if feitos:
+        flash(f"{feitos} NFS-e processada(s).", "success")
+    if erros:
+        flash(" ; ".join(erros[:5]), "danger")
+    return _redirecionar_nfse()
 
 
 if __name__ == "__main__":

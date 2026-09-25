@@ -24,6 +24,9 @@
     {% if pode('financeiro') %}
     <a href="{{ url_for('pagina_financeiro') }}" class="{% if nav_active == 'financeiro' %}active{% endif %}">Financeiro</a>
     {% endif %}
+    {% if pode('nfse') %}
+    <a href="{{ url_for('pagina_notas_fiscais') }}" class="{% if nav_active == 'nfse' %}active{% endif %}">Notas fiscais</a>
+    {% endif %}
     {% if pode('calendario') %}
     <a href="{{ url_for('calendario_escolar') }}" class="{% if nav_active == 'calendario' %}active{% endif %}">Calendário Escolar</a>
     {% endif %}

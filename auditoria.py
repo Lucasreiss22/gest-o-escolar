@@ -76,6 +76,15 @@ _ROTULOS = {
     "pausar_escola": "Pausou escola",
     "reativar_escola": "Reativou escola",
     "excluir_escola": "Excluiu escola",
+    "salvar_nfse": "Alterou a nota fiscal",
+    "salvar_nfse_plataforma": "Alterou a nota fiscal da plataforma",
+    "emitir_nfse_plataforma": "Emitiu NFS-e da licença",
+    "cancelar_nfse_plataforma": "Cancelou NFS-e da licença",
+    "substituir_nfse_plataforma": "Substituiu NFS-e da licença",
+    "nfse_emitir": "Emitiu NFS-e",
+    "nfse_cancelar": "Cancelou NFS-e",
+    "nfse_substituir": "Substituiu NFS-e",
+    "nfse_lote": "Emitiu NFS-e em lote",
 }
 
 _MODULOS = {
@@ -102,6 +111,12 @@ _MODULOS = {
     "contracheque": "Contra-cheque",
     "ajustar_contracheque": "Contra-cheque",
     "plataforma_escolas": "Plataforma",
+    "pagina_notas_fiscais": "Notas fiscais",
+    "nfse_emitir": "Notas fiscais",
+    "nfse_cancelar": "Notas fiscais",
+    "nfse_substituir": "Notas fiscais",
+    "nfse_consultar": "Notas fiscais",
+    "nfse_lote": "Notas fiscais",
 }
 
 _TIPOS = {

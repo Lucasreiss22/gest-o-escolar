@@ -1047,6 +1047,7 @@
                 <input type="hidden" name="acao" id="acaoBaixaLote" value="dar_baixa_lote">
                 <input type="hidden" name="aba" value="receitas">
                 <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <input type="hidden" name="voltar" value="financeiro">
                 {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
                 {% if busca %}<input type="hidden" name="busca" value="{{ busca }}">{% endif %}
             </form>
@@ -1078,6 +1079,10 @@
                     <input id="multaLote" type="text" name="multa_valor" form="formBaixaLote" inputmode="decimal" placeholder="0,00" aria-label="Multa em valor fixo">
                 </div>
                 <button type="button" class="btn btn-success" id="btnBaixaLote" disabled>Dar baixa nos selecionados</button>
+                {% if pode_alterar('nfse') %}
+                <button type="submit" class="btn" formaction="{{ url_for('nfse_lote') }}" form="formBaixaLote">Emitir NFS-e dos selecionados</button>
+                <a class="btn" href="{{ url_for('pagina_notas_fiscais', mes=mes_atual) }}">Notas do mês</a>
+                {% endif %}
                 <button type="button" class="btn btn-warning" id="btnTirarLote" disabled>Tirar baixa dos selecionados</button>
             </div>
             <dialog id="dlgBaixaLote" class="calc-painel">
@@ -1194,6 +1199,9 @@
                                 <button type="submit" class="btn btn-danger btn-mini" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
                             </form>
                             {% endif %}
+                            {% with mensalidade=item, destino='financeiro', mes=mes_atual %}
+                            {% include '_nfse_acoes.html' %}
+                            {% endwith %}
                         </div>
                     </div>
                     {% endfor %}
@@ -1297,6 +1305,9 @@
                                             <button type="submit" class="btn btn-danger btn-mini" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
                                         </form>
                                         {% endif %}
+                                        {% with mensalidade=item, destino='financeiro', mes=mes_atual %}
+                                        {% include '_nfse_acoes.html' %}
+                                        {% endwith %}
                                     </div>
                                 </td>
                             </tr>

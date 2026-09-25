@@ -842,6 +842,21 @@ def garantir_tabelas_folha():
                 ("financeiro_mensalidades", "juros_valor", "NUMERIC(12,2) DEFAULT 0"),
                 ("financeiro_mensalidades", "multa_valor", "NUMERIC(12,2) DEFAULT 0"),
                 ("configuracoes", "regime_apuracao", "VARCHAR(20) DEFAULT 'competencia'"),
+                ("configuracoes", "nfse_token", "TEXT"),
+                ("configuracoes", "nfse_ambiente", "VARCHAR(20) DEFAULT 'homologacao'"),
+                ("configuracoes", "nfse_cnpj", "VARCHAR(20)"),
+                ("configuracoes", "nfse_inscricao_municipal", "VARCHAR(40)"),
+                ("configuracoes", "nfse_codigo_municipio", "VARCHAR(10)"),
+                ("configuracoes", "nfse_item_lista", "VARCHAR(10) DEFAULT '08.01'"),
+                ("configuracoes", "nfse_codigo_tributacao", "VARCHAR(20) DEFAULT '0801'"),
+                ("configuracoes", "nfse_aliquota", "NUMERIC(6,2) DEFAULT 2"),
+                ("configuracoes", "nfse_opcao_simples", "VARCHAR(2)"),
+                ("configuracoes", "nfse_c_beneficio", "VARCHAR(20)"),
+                ("configuracoes", "nfse_p_ibs", "NUMERIC(8,4) DEFAULT 0"),
+                ("configuracoes", "nfse_p_cbs", "NUMERIC(8,4) DEFAULT 0"),
+                ("configuracoes", "nfse_certificado_pfx", "BYTEA"),
+                ("configuracoes", "nfse_certificado_nome", "VARCHAR(180)"),
+                ("configuracoes", "nfse_certificado_senha", "VARCHAR(255)"),
                 ("configuracoes", "smtp_host", "VARCHAR(120)"),
                 ("configuracoes", "smtp_port", "INT DEFAULT 587"),
                 ("configuracoes", "smtp_user", "VARCHAR(150)"),
@@ -864,6 +879,8 @@ def garantir_tabelas_folha():
                         WHERE status IS NULL OR TRIM(status) = ''
                         """
                     )
+            from nfse import garantir_tabela_escola
+            garantir_tabela_escola(cursor)
             conexao.commit()
             _tabelas_ok.add(chave)
     except Exception as e:

@@ -179,6 +179,21 @@ def garantir_plataforma():
                     """,
                     (codigo, nome, descricao, json.dumps(telas)),
                 )
+            from nfse import garantir_tabela_plataforma
+            garantir_tabela_plataforma(cursor)
+            for coluna, spec in (
+                ("cnpj", "VARCHAR(20)"),
+                ("nfse_email", "VARCHAR(150)"),
+                ("nfse_logradouro", "VARCHAR(150)"),
+                ("nfse_numero", "VARCHAR(20)"),
+                ("nfse_bairro", "VARCHAR(100)"),
+                ("nfse_codigo_municipio", "VARCHAR(10)"),
+                ("nfse_uf", "CHAR(2)"),
+                ("nfse_cep", "VARCHAR(9)"),
+            ):
+                cursor.execute(
+                    f"ALTER TABLE plataforma_escolas ADD COLUMN IF NOT EXISTS {coluna} {spec}"
+                )
         conexao.commit()
     except Exception as e:
         try:

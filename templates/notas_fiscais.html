@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Notas fiscais</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        h2 { font-weight: 600; color: #2c3e50; margin: 0; }
+        .card-box { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 4px 10px rgba(0,0,0,.05); margin-bottom: 16px; }
+        .hint { color: #64748b; font-size: .88rem; line-height: 1.45; }
+        .filtros { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+        .filtros a { text-decoration: none; border: 1px solid #dbe3ee; border-radius: 999px; padding: 6px 12px; color: #1e293b; background: #fff; font-size: .85rem; }
+        .filtros a.ativa { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+        .aluno-bloco { border-top: 1px solid #e2e8f0; padding-top: 14px; margin-top: 14px; }
+        .aluno-bloco h3 { margin: 0 0 8px; font-size: 1rem; color: #1e293b; }
+        table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #eef2f7; text-align: left; vertical-align: top; }
+        th { background: #f8fafc; }
+        .nfse-status { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: .75rem; font-weight: 700; }
+        .nfse-faturada { background: #dcfce7; color: #166534; }
+        .nfse-cancelada { background: #fee2e2; color: #991b1b; }
+        .nfse-substituida { background: #ffedd5; color: #9a3412; }
+        .nfse-pendente { background: #e0f2fe; color: #075985; }
+        .nfse-erro { background: #fee2e2; color: #991b1b; }
+        .nfse-tarja { margin: 8px 0 0; padding: 8px 10px; background: #fef3c7; color: #78350f; border-radius: 8px; font-size: .82rem; line-height: 1.4; }
+        .nfse-erro-txt { color: #991b1b; font-size: .8rem; margin: 6px 0 0; }
+        .acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .acoes form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .acoes input[type="text"] { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; min-width: 220px; }
+        .btn { padding: 7px 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; font-size: .8rem; background: #e2e8f0; color: #1e293b; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-warning { background: #f59e0b; color: #1e293b; }
+        .alert { padding: 12px; margin: 12px 0; border-radius: 6px; }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-danger { background: #f8d7da; color: #721c24; }
+        .total { font-size: 1.15rem; font-weight: 700; color: #1e293b; }
+        .mes-form { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+        .mes-form input { padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+    </style>
+</head>
+<body>
+    {% set nav_active = 'nfse' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        <h2>Notas fiscais</h2>
+        <p class="hint">Notas de serviço por aluno. Faturada está válida. Cancelada saiu da base. Substituída aponta a nota nova, e a substituta aponta a nota original. Se a troca acontecer em mês posterior, o valor continua no mês da nota original.</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+
+        <div class="card-box">
+            <form class="mes-form" method="GET">
+                {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                {% if aluno_id %}<input type="hidden" name="aluno" value="{{ aluno_id }}">{% endif %}
+                <label>Competência do faturamento
+                    <input type="month" name="mes" value="{{ mes }}">
+                </label>
+                <button class="btn btn-primary" type="submit">Ver competência</button>
+            </form>
+            <p class="total">Faturamento fiscal em {{ mes }}: R$ {{ faturado|moeda }}</p>
+            <p class="hint">Entram só notas faturadas. A substituta de mês posterior soma no mês original, não no mês em que a substituição saiu. Cancelada e substituída não entram de novo.</p>
+            <div class="filtros">
+                <a class="{% if not status %}ativa{% endif %}" href="{{ url_for('pagina_notas_fiscais', mes=mes, aluno=aluno_id) }}">Todas</a>
+                {% for codigo in ['FATURADA', 'CANCELADA', 'SUBSTITUIDA', 'PENDENTE', 'ERRO'] %}
+                <a class="{% if status == codigo %}ativa{% endif %}" href="{{ url_for('pagina_notas_fiscais', status=codigo, mes=mes, aluno=aluno_id) }}">{{ codigo }}</a>
+                {% endfor %}
+            </div>
+        </div>
+
+        {% if not grupos %}
+        <div class="card-box"><p class="hint">Nenhuma nota neste filtro.</p></div>
+        {% endif %}
+        {% for grupo in grupos %}
+        <div class="card-box">
+            <div class="aluno-bloco" style="border-top:0;margin-top:0;padding-top:0;">
+                <h3>{{ grupo.aluno_nome }}{% if grupo.matricula %} · {{ grupo.matricula }}{% endif %}</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Situação</th>
+                            <th>Número</th>
+                            <th>Competência fiscal</th>
+                            <th>Valor</th>
+                            <th>Vínculo</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for nota in grupo.notas %}
+                        <tr>
+                            <td><span class="nfse-status nfse-{{ (nota.status or '')|lower }}">{{ nota.status }}</span></td>
+                            <td>{{ nota.numero_nfse or '—' }}{% if nota.codigo_verificacao %}<div class="hint">Cód. {{ nota.codigo_verificacao }}</div>{% endif %}</td>
+                            <td>{{ nota.periodo_competencia_original or nota.periodo_competencia or '—' }}</td>
+                            <td>R$ {{ (nota.valor or 0)|moeda }}</td>
+                            <td>
+                                {% if nota.status == 'SUBSTITUIDA' %}
+                                    Substituída pela nota {{ nota.substituta_numero or ('#' ~ nota.nota_substituta_id) }}
+                                {% elif nota.substituida_numero or nota.nota_substituida_id %}
+                                    Substitui a nota {{ nota.substituida_numero or ('#' ~ nota.nota_substituida_id) }}
+                                {% elif nota.status == 'FATURADA' %}
+                                    Válida
+                                {% elif nota.status == 'CANCELADA' %}
+                                    Cancelada
+                                {% else %}
+                                    {{ nota.status }}
+                                {% endif %}
+                                {% if nota.tarja %}<p class="nfse-tarja">{{ nota.tarja }}</p>{% endif %}
+                                {% if nota.mensagem_erro %}<p class="nfse-erro-txt">{{ nota.mensagem_erro }}</p>{% endif %}
+                            </td>
+                            <td>
+                                {% if pode_alterar('nfse') %}
+                                <div class="acoes">
+                                    {% if nota.status == 'PENDENTE' %}
+                                    <form method="POST" action="{{ url_for('nfse_consultar') }}">
+                                        <input type="hidden" name="nota_id" value="{{ nota.id }}">
+                                        <input type="hidden" name="aluno_id" value="{{ grupo.aluno_id or '' }}">
+                                        <input type="hidden" name="status_nota" value="{{ status }}">
+                                        <button class="btn" type="submit">Atualizar</button>
+                                    </form>
+                                    {% endif %}
+                                    {% if nota.status == 'FATURADA' %}
+                                    <form method="POST" action="{{ url_for('nfse_cancelar') }}">
+                                        <input type="hidden" name="nota_id" value="{{ nota.id }}">
+                                        <input type="hidden" name="aluno_id" value="{{ grupo.aluno_id or '' }}">
+                                        <input type="hidden" name="status_nota" value="{{ status }}">
+                                        <input type="text" name="justificativa" required minlength="15" placeholder="Motivo do cancelamento" aria-label="Motivo do cancelamento">
+                                        <button class="btn btn-danger" type="submit">Cancelar</button>
+                                    </form>
+                                    <form method="POST" action="{{ url_for('nfse_substituir') }}" onsubmit="return confirm('Emitir a nota substituta apontando esta nota?');">
+                                        <input type="hidden" name="nota_id" value="{{ nota.id }}">
+                                        <input type="hidden" name="aluno_id" value="{{ grupo.aluno_id or '' }}">
+                                        <input type="hidden" name="status_nota" value="{{ status }}">
+                                        <button class="btn btn-warning" type="submit">Substituir</button>
+                                    </form>
+                                    {% endif %}
+                                    {% if nota.url_pdf %}
+                                    <a class="btn btn-primary" href="{{ nota.url_pdf }}" target="_blank" rel="noopener">Abrir nota</a>
+                                    {% endif %}
+                                </div>
+                                {% elif nota.url_pdf %}
+                                <a class="btn btn-primary" href="{{ nota.url_pdf }}" target="_blank" rel="noopener">Abrir nota</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+<style>
+    .nfse-mini { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+    .nfse-mini form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .nfse-mini input[type="text"] { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; min-width: 180px; font-size: .8rem; }
+    .nfse-status { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: .72rem; font-weight: 700; }
+    .nfse-faturada { background: #dcfce7; color: #166534; }
+    .nfse-cancelada, .nfse-erro { background: #fee2e2; color: #991b1b; }
+    .nfse-substituida { background: #ffedd5; color: #9a3412; }
+    .nfse-pendente { background: #e0f2fe; color: #075985; }
+    .nfse-tarja { flex-basis: 100%; margin: 0; padding: 8px 10px; background: #fef3c7; color: #78350f; border-radius: 8px; font-size: .78rem; line-height: 1.4; }
+    .nfse-erro { flex-basis: 100%; margin: 0; font-size: .78rem; }
+</style>
+{% if pode('nfse') %}
+{% set nota = mensalidade.nfse if mensalidade is mapping and mensalidade.nfse is defined else none %}
+<div class="nfse-mini">
+    {% if nota %}
+    <span class="nfse-status nfse-{{ (nota.status or '')|lower }}">{{ nota.status }}</span>
+    {% if nota.numero_nfse %}<span>nº {{ nota.numero_nfse }}</span>{% endif %}
+    {% if nota.tarja %}<p class="nfse-tarja">{{ nota.tarja }}</p>{% endif %}
+    {% if nota.status == 'ERRO' and nota.mensagem_erro %}<p class="nfse-erro">{{ nota.mensagem_erro }}</p>{% endif %}
+    {% endif %}
+    {% if pode_alterar('nfse') %}
+        {% if not nota or nota.status in ['ERRO', 'CANCELADA', 'SUBSTITUIDA'] %}
+        <form method="POST" action="{{ url_for('nfse_emitir') }}">
+            <input type="hidden" name="mensalidade_id" value="{{ mensalidade.id }}">
+            <input type="hidden" name="voltar" value="{{ destino or 'financeiro' }}">
+            {% if aluno_id %}<input type="hidden" name="aluno_id" value="{{ aluno_id }}">{% endif %}
+            {% if mes %}<input type="hidden" name="mes" value="{{ mes }}">{% endif %}
+            <button type="submit" class="btn btn-sm btn-outline-primary btn-mini">Emitir NFS-e</button>
+        </form>
+        {% endif %}
+        {% if nota and nota.status == 'PENDENTE' %}
+        <form method="POST" action="{{ url_for('nfse_consultar') }}">
+            <input type="hidden" name="nota_id" value="{{ nota.id }}">
+            <input type="hidden" name="voltar" value="{{ destino or 'financeiro' }}">
+            {% if aluno_id %}<input type="hidden" name="aluno_id" value="{{ aluno_id }}">{% endif %}
+            {% if mes %}<input type="hidden" name="mes" value="{{ mes }}">{% endif %}
+            <button type="submit" class="btn btn-sm btn-outline-secondary btn-mini">Atualizar NFS-e</button>
+        </form>
+        {% endif %}
+        {% if nota and nota.status == 'FATURADA' %}
+        <form method="POST" action="{{ url_for('nfse_cancelar') }}" class="nfse-form-linha">
+            <input type="hidden" name="nota_id" value="{{ nota.id }}">
+            <input type="hidden" name="voltar" value="{{ destino or 'financeiro' }}">
+            {% if aluno_id %}<input type="hidden" name="aluno_id" value="{{ aluno_id }}">{% endif %}
+            {% if mes %}<input type="hidden" name="mes" value="{{ mes }}">{% endif %}
+            <input type="text" name="justificativa" required minlength="15" maxlength="255" placeholder="Motivo do cancelamento (mín. 15 letras)" aria-label="Motivo do cancelamento">
+            <button type="submit" class="btn btn-sm btn-outline-danger btn-mini">Cancelar NFS-e</button>
+        </form>
+        <form method="POST" action="{{ url_for('nfse_substituir') }}" onsubmit="return confirm('Emitir a nota substituta? A original só fica substituída quando a nova for autorizada.');">
+            <input type="hidden" name="nota_id" value="{{ nota.id }}">
+            <input type="hidden" name="voltar" value="{{ destino or 'financeiro' }}">
+            {% if aluno_id %}<input type="hidden" name="aluno_id" value="{{ aluno_id }}">{% endif %}
+            {% if mes %}<input type="hidden" name="mes" value="{{ mes }}">{% endif %}
+            <button type="submit" class="btn btn-sm btn-outline-warning btn-mini">Substituir NFS-e</button>
+        </form>
+        {% endif %}
+    {% endif %}
+</div>
+{% endif %}
