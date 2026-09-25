@@ -305,6 +305,38 @@ input, select, textarea, button {
     .nav-tabs .nav-link {
         white-space: nowrap;
     }
+
+    #alunoTab.nav-tabs {
+        flex-direction: column;
+        flex-wrap: nowrap;
+        overflow: visible;
+        gap: 8px;
+        border: none;
+        margin-bottom: 16px;
+    }
+
+    #alunoTab .nav-item {
+        width: 100%;
+        margin: 0;
+    }
+
+    #alunoTab .nav-link {
+        width: 100%;
+        text-align: left;
+        white-space: normal;
+        margin: 0;
+        padding: 12px 14px;
+        border: 1px solid #dbe3ee;
+        border-radius: 10px;
+        background: #f8fafc;
+        color: #1e3a5f;
+    }
+
+    #alunoTab .nav-link.active {
+        background: #1e3a5f;
+        color: #fff;
+        border-color: #1e3a5f;
+    }
 }
 
 .pdf-bar {
