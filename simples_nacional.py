@@ -200,6 +200,24 @@ def folha_sistema_mes(cursor, competencia):
     return float((cursor.fetchone() or {}).get("total") or 0)
 
 
+def listar_folha_janela(cursor, competencias):
+    competencias = [item for item in (competencias or []) if item]
+    if not competencias:
+        return []
+    cursor.execute(
+        """
+        SELECT fi.competencia, fi.tipo_contrato, fi.bruto, fi.encargos, fi.custo_escola,
+               fi.liquido, fi.inss_funcionario, fi.irrf, f.nome_completo
+        FROM folha_itens fi
+        LEFT JOIN funcionarios f ON f.id = fi.funcionario_id
+        WHERE fi.competencia = ANY(%s)
+        ORDER BY fi.competencia, f.nome_completo
+        """,
+        (competencias,),
+    )
+    return cursor.fetchall() or []
+
+
 def mapa_competencias(cursor):
     cursor.execute(
         """

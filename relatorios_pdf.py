@@ -229,66 +229,137 @@ def pdf_calculo_rbt12(escola, mes_label, apuracao, regime_apuracao="competencia"
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label}")
     pdf.paragrafo(
-        "A RBT12 soma a receita bruta dos 12 meses anteriores ao mês de apuração. "
-        "O mês vigente fica de fora: ele é a base do DAS, não desta soma."
+        "A Lei Complementar 123/2006 manda somar a receita bruta dos 12 meses anteriores. "
+        "Essa soma é a RBT12. O mês da apuração não entra nela: ele só serve de base para o DAS. "
+        "A Resolução CGSN 140/2018 detalha essa conta."
     )
     if caixa:
-        pdf.paragrafo("No regime de caixa, entra só o que teve baixa. O que não foi pago fica fora.")
+        pdf.paragrafo("No regime de caixa, a soma usa só o que teve baixa. O que não foi pago fica fora.")
     else:
-        pdf.paragrafo("No regime de competência, entra a receita pelo vencimento, paga ou não.")
+        pdf.paragrafo("No regime de competência, a soma usa o vencimento, pago ou não.")
+    soma = 0.0
     linhas = []
     for linha in _quadro_linhas(ap):
+        valor = float(linha.get("receita_bruta") or 0)
+        entra = bool(linha.get("entra_rbt12"))
+        if entra:
+            soma += valor
         linhas.append([
             linha.get("rotulo") or linha.get("competencia") or "",
-            "Sim" if linha.get("entra_rbt12") else "Não",
-            _brl(linha.get("receita_bruta")),
-            linha.get("origem") or "—",
+            _brl(valor),
+            "Sim" if entra else "Não",
+            _brl(soma) if entra else "—",
         ])
     if linhas:
-        pdf.tabela(["Competência", "Entra", "Receita bruta", "Origem"], linhas, [40, 28, 48, 40])
+        pdf.tabela(["Competência", "Receita", "Entra", "Soma até aqui"], linhas, [40, 42, 24, 48])
     else:
         pdf.paragrafo("Nenhuma competência lançada na janela.")
-    pdf.linha("Soma dos meses que entram", _brl(ap.get("rbt_acumulado")))
+    pdf.linha("Soma dos meses que entram", _brl(ap.get("rbt_acumulado")), negrito=True)
     pdf.linha("Meses considerados", ap.get("meses_atividade") or 0)
     if ap.get("annualizado"):
         meses = ap.get("meses_atividade") or 1
         pdf.paragrafo(
-            f"Menos de 12 meses na janela. RBT12 = ({_brl(ap.get('rbt_acumulado'))} ÷ {meses}) × 12."
+            f"Ainda não há 12 meses. A lei manda annualizar: "
+            f"({_brl(ap.get('rbt_acumulado'))} ÷ {meses}) × 12 = {_brl(ap.get('rbt12'))}."
         )
+    else:
+        pdf.paragrafo("Há 12 meses na janela, então a RBT12 é a própria soma. Não há annualização.")
     pdf.linha("RBT12", _brl(ap.get("rbt12")), negrito=True)
     return _saida(pdf)
 
 
-def pdf_calculo_fs12(escola, mes_label, apuracao, regime_apuracao="competencia"):
+def _folhas_da_competencia(folhas, competencia):
+    return [item for item in (folhas or []) if item.get("competencia") == competencia]
+
+
+def _encargos_do_mes(pdf, itens):
+    chaves = (
+        ("Salário e demais valores brutos", "bruto"),
+        ("FGTS 8%", "fgts"),
+        ("Provisão de 13º", "provisao_13"),
+        ("Férias com 1/3", "ferias_terco"),
+        ("FGTS sobre 13º e férias", "reflexos_fgts"),
+        ("INSS patronal", "inss_patronal"),
+        ("RAT", "rat"),
+        ("Sistema S", "sistema_s"),
+    )
+    algum = False
+    for rotulo, chave in chaves:
+        total = sum(float(item.get(chave) or 0) for item in itens or [])
+        if total:
+            pdf.linha(rotulo, _brl(total))
+            algum = True
+    if not algum:
+        pdf.paragrafo("Não há lançamento de folha aberto neste mês para detalhar cada encargo.")
+    pdf.paragrafo(
+        "No Simples Nacional, INSS patronal, RAT e Sistema S não entram de novo na folha: "
+        "eles já estão dentro do DAS. Entram na FS12 o que foi pago de salário, 13º, férias com 1/3 e FGTS."
+    )
+
+
+def pdf_calculo_fs12(escola, mes_label, apuracao, regime_apuracao="competencia", folhas=None, itens_mes=None, totais_mes=None):
     ap = apuracao or {}
-    pdf = RelatorioPDF("Cálculo da folha e encargos")
+    quadro = ap.get("quadro") or {}
+    pdf = RelatorioPDF("Folha e encargos dos 12 meses")
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label}")
     pdf.paragrafo(
-        "A FS12 soma a folha e os encargos dos mesmos meses que entram na RBT12. "
-        "Mês que ficou de fora da receita também fica de fora da folha."
+        "A FS12 soma a folha e os encargos dos mesmos 12 meses que entram na RBT12. "
+        "Cada mês abaixo mostra quem foi pago e o custo da escola, que é o salário mais os encargos."
     )
-    linhas = []
+    soma = 0.0
     for linha in _quadro_linhas(ap):
         if not linha.get("entra_rbt12"):
             continue
-        linhas.append([
-            linha.get("rotulo") or linha.get("competencia") or "",
-            _brl(linha.get("folha_encargos")),
-            linha.get("origem") or "—",
-        ])
-    if linhas:
-        pdf.tabela(["Competência", "Folha e encargos", "Origem"], linhas, [55, 60, 45])
-    else:
-        pdf.paragrafo("Nenhuma folha entrou na janela.")
-    pdf.linha("Soma da folha", _brl(ap.get("fs_acumulado")))
-    pdf.linha("Meses considerados", ap.get("meses_atividade") or 0)
+        valor = float(linha.get("folha_encargos") or 0)
+        soma += valor
+        pdf.secao(linha.get("rotulo") or linha.get("competencia") or "Mês")
+        pessoas = _folhas_da_competencia(folhas, linha.get("competencia"))
+        if pessoas:
+            tabela = []
+            for pessoa in pessoas:
+                tabela.append([
+                    (pessoa.get("nome_completo") or "Colaborador")[:32],
+                    _brl(pessoa.get("bruto")),
+                    _brl(pessoa.get("encargos")),
+                    _brl(pessoa.get("custo_escola")),
+                ])
+            pdf.tabela(["Colaborador", "Bruto", "Encargos", "Custo pago"], tabela, [62, 36, 40, 40])
+        else:
+            pdf.paragrafo("Este mês não tem a folha aberta por colaborador. Entra o total gravado na competência.")
+        pdf.linha("Pago neste mês", _brl(valor), negrito=True)
+        pdf.linha("Soma da folha até aqui", _brl(soma))
+    pdf.linha("Soma dos 12 meses", _brl(ap.get("fs_acumulado")), negrito=True)
     if ap.get("annualizado"):
         meses = ap.get("meses_atividade") or 1
         pdf.paragrafo(
-            f"Menos de 12 meses na janela. FS12 = ({_brl(ap.get('fs_acumulado'))} ÷ {meses}) × 12."
+            f"Ainda não há 12 meses. FS12 = ({_brl(ap.get('fs_acumulado'))} ÷ {meses}) × 12 = {_brl(ap.get('fs12'))}."
         )
     pdf.linha("Folha e encargos (FS12)", _brl(ap.get("fs12")), negrito=True)
+
+    apuracao_mes = quadro.get("linha_apuracao") or {}
+    pdf.add_page()
+    _titulo_folha(pdf, "Folha paga no mês da apuração")
+    pdf.paragrafo(
+        "Este mês não entra na FS12. Ele aparece aqui para mostrar o que foi pago de folha e de encargo agora."
+    )
+    pdf.linha("Total do mês", _brl(apuracao_mes.get("folha_encargos")), negrito=True)
+    if itens_mes:
+        tabela = []
+        for pessoa in itens_mes:
+            tabela.append([
+                (pessoa.get("nome_completo") or "Colaborador")[:32],
+                _brl(pessoa.get("bruto")),
+                _brl(pessoa.get("encargos")),
+                _brl(pessoa.get("custo_escola")),
+            ])
+        pdf.tabela(["Colaborador", "Bruto", "Encargos", "Custo pago"], tabela, [62, 36, 40, 40])
+        pdf.secao("Encargos que compõem esse custo")
+        _encargos_do_mes(pdf, itens_mes)
+        if totais_mes:
+            pdf.linha("Custo total da escola neste mês", _brl(totais_mes.get("custo_escola")), negrito=True)
+    else:
+        pdf.paragrafo("Não há colaboradores ativos para abrir os encargos deste mês.")
     return _saida(pdf)
 
 
@@ -296,44 +367,47 @@ def pdf_calculo_fator_r(escola, mes_label, apuracao, regime_apuracao="competenci
     ap = apuracao or {}
     fator = float(ap.get("fator_r_pct") or 0)
     anexo = ap.get("anexo") or "-"
+    fs = float(ap.get("fs12") or 0)
+    rbt = float(ap.get("rbt12") or 0)
     pdf = RelatorioPDF("Cálculo do Fator R")
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label}")
-    pdf.linha("Fórmula", "FS12 ÷ RBT12")
-    pdf.linha("Folha e encargos (FS12)", _brl(ap.get("fs12")))
-    pdf.linha("RBT12", _brl(ap.get("rbt12")))
-    pdf.linha("Conta", f"{_brl(ap.get('fs12'))} ÷ {_brl(ap.get('rbt12'))}")
-    pdf.linha("Fator R", f"{fator:.2f}%", negrito=True)
-    if fator >= 28:
-        pdf.paragrafo(f"{fator:.2f}% é igual ou maior que 28%. O anexo da receita de serviços de educação é o III.")
-    else:
-        pdf.paragrafo(f"{fator:.2f}% ficou abaixo de 28%. O anexo da receita de serviços de educação é o V.")
-    pdf.linha("Anexo", anexo, negrito=True)
-    return _saida(pdf)
-
-
-def _tabela_nao_pagos(pdf, itens, titulo_total):
+    pdf.paragrafo(
+        "O Fator R é a folha dos 12 meses anteriores dividida pela receita bruta dos mesmos 12 meses. "
+        "A Lei Complementar 123/2006 usa 28% como corte. Igual ou acima, a escola de educação fica no Anexo III. "
+        "Abaixo, fica no Anexo V. A Resolução CGSN 140/2018 descreve essa divisão. "
+        "O mês da apuração não entra nela."
+    )
     linhas = []
-    total = 0.0
-    for item in itens or []:
-        valor = float(item.get("valor") or 0)
-        total += valor
-        parcela = item.get("parcela_contrato")
+    for linha in _quadro_linhas(ap):
         linhas.append([
-            (item.get("nome_completo") or "Aluno")[:28],
-            str(item.get("matricula") or "—")[:12],
-            str(parcela) if parcela else "—",
-            _data_br(item.get("data_vencimento")),
-            _brl(valor),
+            linha.get("rotulo") or linha.get("competencia") or "",
+            _brl(linha.get("receita_bruta")),
+            _brl(linha.get("folha_encargos")),
+            "Sim" if linha.get("entra_rbt12") else "Não",
         ])
     if linhas:
-        pdf.tabela(
-            ["Aluno", "Matrícula", "Parcela", "Vencimento", "Valor"],
-            linhas,
-            [52, 28, 24, 32, 36],
+        pdf.tabela(["Competência", "Receita (RBT12)", "Folha (FS12)", "Entra"], linhas, [40, 48, 48, 24])
+    pdf.linha("Soma da receita (RBT12)", _brl(rbt), negrito=True)
+    pdf.linha("Soma da folha (FS12)", _brl(fs), negrito=True)
+    if rbt:
+        razao = fs / rbt
+        pdf.linha("Divisão", f"{_brl(fs)} ÷ {_brl(rbt)}")
+        pdf.linha("Resultado da divisão", f"{razao:.6f}")
+        pdf.linha("Em percentual", f"{razao * 100:.2f}%", negrito=True)
+        pdf.paragrafo(
+            f"{_brl(fs)} dividido por {_brl(rbt)} dá {razao:.6f}. "
+            f"Multiplicado por 100, isso é {razao * 100:.2f}%. Essa é a origem do Fator R."
         )
-    pdf.linha(titulo_total, _brl(total), negrito=True)
-    return total
+    else:
+        pdf.paragrafo("A RBT12 está zerada, então o Fator R não tem como ser dividido.")
+    pdf.linha("Fator R usado na apuração", f"{fator:.2f}%", negrito=True)
+    if fator >= 28:
+        pdf.paragrafo(f"{fator:.2f}% alcança 28%. Por isso o anexo é o III.")
+    else:
+        pdf.paragrafo(f"{fator:.2f}% não alcança 28%. Por isso o anexo é o V.")
+    pdf.linha("Anexo", anexo, negrito=True)
+    return _saida(pdf)
 
 
 def pdf_extrato_pgdas(
@@ -355,9 +429,10 @@ def pdf_extrato_pgdas(
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label}")
     pdf.paragrafo(
-        "Extrato detalhado da apuração do Simples Nacional, no formato do PGDAS. "
-        "Reúne a base do mês, a RBT12, a folha, o Fator R e o DAS que será pago. "
-        "Não substitui o extrato oficial da Receita Federal."
+        "Memória completa da apuração do Simples Nacional, no formato do PGDAS. "
+        "Segue a Lei Complementar 123/2006 e a Resolução CGSN 140/2018: "
+        "soma da receita e da folha dos 12 meses anteriores, Fator R, anexo, alíquota efetiva e o DAS a pagar. "
+        "Não é o documento oficial da Receita Federal."
     )
     if caixa:
         pdf.linha("Regime de apuração", "Regime de caixa", negrito=True)
@@ -416,12 +491,18 @@ def pdf_extrato_pgdas(
     pdf.linha("Folha e encargos (FS12)", _brl(fs), negrito=True)
 
     pdf.secao("Fator R e anexo")
-    pdf.linha("Conta", f"{_brl(fs)} ÷ {_brl(rbt)}")
+    if rbt:
+        razao = fs / rbt
+        pdf.linha("Divisão", f"{_brl(fs)} ÷ {_brl(rbt)} = {razao:.6f}")
+        pdf.paragrafo(
+            f"A folha {_brl(fs)} dividida pela receita {_brl(rbt)} dá {razao:.6f}, "
+            f"ou {razao * 100:.2f}%. Essa conta é o Fator R."
+        )
     pdf.linha("Fator R", f"{fator:.2f}%", negrito=True)
     if fator >= 28:
-        pdf.paragrafo(f"{fator:.2f}% alcança 28%. A receita de serviços de educação usa o Anexo III.")
+        pdf.paragrafo(f"{fator:.2f}% alcança 28%. Pela Lei Complementar 123/2006, o anexo é o III.")
     else:
-        pdf.paragrafo(f"{fator:.2f}% ficou abaixo de 28%. A receita de serviços de educação usa o Anexo V.")
+        pdf.paragrafo(f"{fator:.2f}% ficou abaixo de 28%. Pela Lei Complementar 123/2006, o anexo é o V.")
     pdf.linha("Anexo", anexo, negrito=True)
 
     pdf.secao("Como o DAS foi calculado")
@@ -436,21 +517,13 @@ def pdf_extrato_pgdas(
 
     if caixa:
         nao_pagos, anteriores = _separar_nao_pagos(pendentes, atrasados, mes_filtro)
-        pdf.add_page()
-        _titulo_folha(pdf, "O que não foi pago")
-        pdf.paragrafo(
-            "No regime de caixa, estas mensalidades não tiveram baixa. "
-            "Por isso não entraram na base do DAS nem na RBT12."
-        )
-        pdf.secao("Sem baixa neste mês")
-        if nao_pagos:
-            _tabela_nao_pagos(pdf, nao_pagos, "Total não pago no mês")
-        else:
-            pdf.paragrafo("Nenhuma mensalidade deste mês ficou sem baixa.")
-        if anteriores:
-            pdf.secao("Parcelas anteriores ainda sem baixa")
-            pdf.paragrafo("Venceram antes deste mês e continuam fora da apuração até a baixa.")
-            _tabela_nao_pagos(pdf, anteriores, "Total de parcelas anteriores sem baixa")
+        total_fora = sum(float(item.get("valor") or 0) for item in nao_pagos)
+        total_anteriores = sum(float(item.get("valor") or 0) for item in anteriores)
+        pdf.secao("O que não entrou no cálculo da DAS")
+        pdf.linha("Não calculado no período", _brl(total_fora), negrito=True)
+        pdf.paragrafo("Não entrou no cálculo da DAS devido ao regime de caixa.")
+        if total_anteriores:
+            pdf.linha("Parcelas anteriores também fora", _brl(total_anteriores))
     return _saida(pdf)
 
 

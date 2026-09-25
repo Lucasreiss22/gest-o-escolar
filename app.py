@@ -51,6 +51,7 @@ from simples_nacional import (
     resumo_emitido_e_caixa,
     listar_recebimentos_mes,
     folha_sistema_mes,
+    listar_folha_janela,
     _linhas_arquivo,
     parse_moeda_livre,
 )
@@ -6549,7 +6550,17 @@ def extrato_pgdas_pdf():
                 buffer = pdf_calculo_rbt12(escola, mes_label, apuracao, regime_apuracao)
                 nome_arquivo = f"calculo_rbt12_{mes_filtro}.pdf"
             elif campo == "fs12":
-                buffer = pdf_calculo_fs12(escola, mes_label, apuracao, regime_apuracao)
+                quadro = apuracao.get("quadro") or {}
+                comps = [linha.get("competencia") for linha in (quadro.get("linhas") or [])]
+                apuracao_mes = quadro.get("linha_apuracao") or {}
+                if apuracao_mes.get("competencia"):
+                    comps.append(apuracao_mes.get("competencia"))
+                folhas = listar_folha_janela(cursor, comps)
+                itens_mes, totais_mes = montar_folha_contratos(cursor, "simples_nacional", mes_filtro)
+                buffer = pdf_calculo_fs12(
+                    escola, mes_label, apuracao, regime_apuracao,
+                    folhas=folhas, itens_mes=itens_mes, totais_mes=totais_mes,
+                )
                 nome_arquivo = f"calculo_folha_{mes_filtro}.pdf"
             elif campo == "fator":
                 buffer = pdf_calculo_fator_r(escola, mes_label, apuracao, regime_apuracao)

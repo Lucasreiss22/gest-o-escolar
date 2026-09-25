@@ -171,7 +171,27 @@ class RelatoriosDosCartoes(unittest.TestCase):
             "quadro": {"linhas": []}, "regime_apuracao": "caixa",
         }
         _pdf(pdf_calculo_rbt12("Escola", "Setembro/2026", ap, "caixa"))
-        _pdf(pdf_calculo_fs12("Escola", "Setembro/2026", ap, "caixa"))
+        _pdf(pdf_calculo_fs12(
+            "Escola", "Setembro/2026", ap, "caixa",
+            folhas=[{
+                "competencia": "2026-08",
+                "nome_completo": "Ana",
+                "bruto": 3000,
+                "encargos": 900,
+                "custo_escola": 3900,
+            }],
+            itens_mes=[{
+                "nome_completo": "Ana",
+                "bruto": 3000,
+                "encargos": 900,
+                "custo_escola": 3900,
+                "fgts": 240,
+                "provisao_13": 250,
+                "ferias_terco": 333,
+                "reflexos_fgts": 46,
+            }],
+            totais_mes={"custo_escola": 3900},
+        ))
         _pdf(pdf_calculo_fator_r("Escola", "Setembro/2026", ap, "caixa"))
         _pdf(pdf_extrato_pgdas(
             "Escola", "Setembro/2026", ap, "caixa",
