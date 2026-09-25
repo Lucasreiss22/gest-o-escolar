@@ -442,7 +442,10 @@ def pdf_extrato_pgdas(
         )
     else:
         pdf.linha("Regime de apuração", "Regime de competência", negrito=True)
-        pdf.paragrafo("A receita entra pelo vencimento da mensalidade, tenha sido paga ou não.")
+        pdf.paragrafo(
+            "A receita do mês soma o que venceu nele: pago, pendente e atrasado. "
+            "O que não foi pago entra na base do DAS."
+        )
     pdf.linha("Tipo de receita", f"Serviços de educação — Anexo {anexo}", negrito=True)
     pdf.linha("DAS a pagar neste mês", _brl(ap.get("das")), negrito=True)
 

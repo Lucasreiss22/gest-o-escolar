@@ -134,7 +134,7 @@ def receita_sistema_mes(cursor, competencia, regime_apuracao="competencia"):
             SELECT COALESCE(SUM(valor::numeric), 0) AS total
             FROM financeiro_mensalidades
             WHERE TO_CHAR(data_vencimento, 'YYYY-MM') = %s
-              AND LOWER(COALESCE(status, '')) NOT IN ('cancelado', 'cancelada')
+              AND LOWER(COALESCE(status, '')) IN ('pago', 'pendente', 'atrasado')
             """,
             (competencia,),
         )
@@ -229,10 +229,23 @@ def mapa_competencias(cursor):
     return {row["competencia"]: dict(row) for row in (cursor.fetchall() or [])}
 
 
-def _receita_da_linha(cursor, comp, gravado, regime_apuracao):
+def receita_para_apuracao(gravado, regime, receita_calculada, competencia, mes_apuracao):
+    """No mês da apuração em competência, a base é a receita do sistema.
+
+    Um valor gravado enquanto a escola estava no caixa não continua valendo
+    depois que o regime passa a ser o vencimento, pago ou não.
+    """
+    regime = normalizar_regime_apuracao(regime)
+    if regime == "competencia" and competencia == mes_apuracao:
+        return float(receita_calculada or 0)
     if gravado and (gravado.get("origem") or "") in _ORIGENS_CONGELADAS:
         return float(gravado.get("receita_bruta") or 0)
-    return receita_sistema_mes(cursor, comp, regime_apuracao)
+    return float(receita_calculada or 0)
+
+
+def _receita_da_linha(cursor, comp, gravado, regime_apuracao, mes_apuracao=None):
+    calculada = receita_sistema_mes(cursor, comp, regime_apuracao)
+    return receita_para_apuracao(gravado, regime_apuracao, calculada, comp, mes_apuracao)
 
 
 def montar_quadro_simples(cursor, mes_apuracao, regime_apuracao="competencia"):
@@ -247,7 +260,7 @@ def montar_quadro_simples(cursor, mes_apuracao, regime_apuracao="competencia"):
     for comp in janela:
         fora_primeira = bool(primeira and comp < primeira)
         gravado = gravados.get(comp) or {}
-        rec = _receita_da_linha(cursor, comp, gravado, regime_apuracao)
+        rec = _receita_da_linha(cursor, comp, gravado, regime_apuracao, mes_apuracao)
         folha = float(gravado.get("folha_encargos") or 0) if gravado else folha_sistema_mes(cursor, comp)
         entra = not fora_primeira
         if entra:
@@ -266,13 +279,16 @@ def montar_quadro_simples(cursor, mes_apuracao, regime_apuracao="competencia"):
             }
         )
     gravado_mes = gravados.get(mes_apuracao) or {}
-    receita_mes = _receita_da_linha(cursor, mes_apuracao, gravado_mes, regime_apuracao)
+    receita_mes = _receita_da_linha(cursor, mes_apuracao, gravado_mes, regime_apuracao, mes_apuracao)
     folha_mes = float(gravado_mes.get("folha_encargos") or 0) or folha_sistema_mes(cursor, mes_apuracao)
+    origem_mes = gravado_mes.get("origem") or ("sistema" if receita_mes or folha_mes else "")
+    if regime_apuracao == "competencia":
+        origem_mes = "sistema"
     linha_apuracao = {
         "competencia": mes_apuracao,
         "receita_bruta": receita_mes,
         "folha_encargos": folha_mes,
-        "origem": gravado_mes.get("origem") or ("sistema" if receita_mes or folha_mes else ""),
+        "origem": origem_mes,
         "observacao": gravado_mes.get("observacao") or "",
         "entra_rbt12": False,
         "rotulo": _rotulo_comp(mes_apuracao),
