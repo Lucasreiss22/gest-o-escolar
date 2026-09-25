@@ -57,14 +57,19 @@ class RelatorioPDF(FPDF):
         )
 
     def secao(self, texto):
+        self.set_x(self.l_margin)
         self.set_font(self.fonte, "B", 11)
         self.set_text_color(30, 58, 95)
         self.cell(0, 8, texto, new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(40, 40, 40)
 
     def paragrafo(self, texto):
+        self.set_x(self.l_margin)
         self.set_font(self.fonte, "", 10)
-        self.multi_cell(0, 5.4, texto)
+        self.multi_cell(
+            0, 5.4, "" if texto is None else str(texto),
+            align="L", new_x="LMARGIN", new_y="NEXT", wrapmode="CHAR",
+        )
         self.ln(1)
 
     def _coube(self, texto, largura):
@@ -80,13 +85,18 @@ class RelatorioPDF(FPDF):
         self.set_font(self.fonte, "B" if negrito else "", 10)
         rotulo = "" if rotulo is None else str(rotulo)
         valor = "" if valor is None else str(valor)
+        self.set_x(self.l_margin)
         if self.get_y() > 272:
             self.add_page()
+            self.set_x(self.l_margin)
         largura = self.epw
         largura_valor = min(70, max(32, self.get_string_width(valor) + 3))
+        if largura_valor > largura - 20:
+            largura_valor = max(largura - 20, 20)
         largura_rotulo = largura - largura_valor
         cabe = (
-            self.get_string_width(rotulo) <= largura_rotulo - 1
+            largura_rotulo > 8
+            and self.get_string_width(rotulo) <= largura_rotulo - 1
             and self.get_string_width(valor) <= largura_valor - 1
         )
         if cabe:
@@ -94,14 +104,23 @@ class RelatorioPDF(FPDF):
             self.cell(largura_valor, 6, valor, align="R", new_x="LMARGIN", new_y="NEXT")
             return
         if rotulo:
-            self.multi_cell(largura, 5.4, rotulo)
+            self.set_x(self.l_margin)
+            self.multi_cell(
+                0, 5.4, rotulo,
+                align="L", new_x="LMARGIN", new_y="NEXT", wrapmode="CHAR",
+            )
         if valor:
+            self.set_x(self.l_margin)
             self.set_font(self.fonte, "B", 10)
-            self.multi_cell(largura, 5.4, valor, align="R")
+            self.multi_cell(
+                0, 5.4, valor,
+                align="R", new_x="LMARGIN", new_y="NEXT", wrapmode="CHAR",
+            )
 
     def tabela(self, cabecalhos, linhas, larguras=None):
         if not larguras:
             larguras = [self.epw / len(cabecalhos)] * len(cabecalhos)
+        self.set_x(self.l_margin)
         self.set_font(self.fonte, "B", 8)
         self.set_fill_color(30, 58, 95)
         self.set_text_color(255, 255, 255)
@@ -115,6 +134,7 @@ class RelatorioPDF(FPDF):
             if self.get_y() > 270:
                 self.add_page()
                 self.set_font(self.fonte, "", 8)
+            self.set_x(self.l_margin)
             self.set_fill_color(243, 246, 251)
             for i, celula in enumerate(linha):
                 self.cell(larguras[i], 6, self._coube(celula, larguras[i]), border=1, fill=fill)
@@ -582,9 +602,13 @@ def pdf_composicao_custos(escola, mes_label, titulo, explicacao, itens, total):
     for item in itens or []:
         pdf.linha((item.get("descricao") or "Custo")[:70], _brl(item.get("valor")))
         if item.get("porque"):
+            pdf.set_x(pdf.l_margin)
             pdf.set_font(pdf.fonte, "", 8)
             pdf.set_text_color(100, 116, 139)
-            pdf.multi_cell(0, 4.5, str(item.get("porque"))[:240])
+            pdf.multi_cell(
+                0, 4.5, str(item.get("porque"))[:240],
+                align="L", new_x="LMARGIN", new_y="NEXT", wrapmode="CHAR",
+            )
             pdf.set_text_color(40, 40, 40)
             pdf.ln(1)
     pdf.linha("Total do cartão", _brl(total), negrito=True)

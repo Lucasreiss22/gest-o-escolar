@@ -1,8 +1,10 @@
 import unittest
 from datetime import date
+from io import BytesIO
 
 from tributacao import acrescimos_recebimento
 from relatorios_pdf import (
+    RelatorioPDF,
     pdf_caixa_restante,
     pdf_composicao_custos,
     pdf_composicao_mensalidades,
@@ -66,6 +68,24 @@ class RelatoriosDosCartoes(unittest.TestCase):
                 "data_vencimento": date(2026, 8, 1),
             }],
         ))
+
+    def test_rotulo_longo_nao_estoura_a_linha(self):
+        pdf = RelatorioPDF("Regime de caixa")
+        pdf.add_page()
+        rotulo = (
+            "Alice Pereira Santos · parcela 1 · Mensalidade Escolar 01/2026 "
+            "(1/12) tarde e noite " * 3
+        )
+        pdf.linha(rotulo, "R$ 7.500,00", negrito=True)
+        pdf.paragrafo(
+            "Vencia em 10/01/2026. baixa em 04/09/2026. "
+            "entrou porque a baixa é deste mês."
+        )
+        buffer = BytesIO()
+        pdf.output(buffer)
+        buffer.seek(0)
+        _pdf(buffer)
+
     def test_mensalidades_lista_cada_baixa(self):
         _pdf(pdf_composicao_mensalidades(
             "Escola",
