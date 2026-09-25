@@ -75,6 +75,7 @@ from relatorios_pdf import (
     pdf_lucro_presumido,
     pdf_lucro_real,
     pdf_simples_nacional,
+    pdf_extrato_pgdas,
     pdf_cobranca_mensalidade,
     pdf_composicao_mensalidades,
     pdf_composicao_custos,
@@ -939,7 +940,7 @@ _AUDITORIA_IGNORAR = {
     "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
     "pagina_auditoria", "relatorio_tributario", "relatorio_pdf_folha", "relatorio_pdf_custos",
     "relatorio_cartao_financeiro",
-    "cobranca_pdf", "cobranca_email", "memoria_simples_pdf", "boletim_pdf", "pdf_contracheque_rota",
+    "cobranca_pdf", "cobranca_email", "memoria_simples_pdf", "extrato_pgdas_pdf", "boletim_pdf", "pdf_contracheque_rota",
     "modelo_alunos_csv", "modelo_custos_csv", "modelo_simples_csv", "modelo_alunos_financeiro_csv",
 }
 
@@ -6520,6 +6521,39 @@ def _pdf_memoria_simples(mes_filtro):
         return buffer, f"memoria_simples_{mes_filtro}.pdf", None
     finally:
         conexao.close()
+
+
+@app.route("/financeiro/simples/pgdas")
+def extrato_pgdas_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    mes_filtro = (request.args.get("mes") or "").strip() or datetime.now().strftime("%Y-%m")
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco para gerar o extrato PGDAS.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro, aba="simples"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT nome_escola, regime_apuracao FROM configuracoes WHERE id = 1;")
+            config = cursor.fetchone() or {}
+            escola = config.get("nome_escola") or "Gestão Escolar"
+            regime_apuracao = normalizar_regime_apuracao(config.get("regime_apuracao"))
+            apuracao, _colabs = calcular_apuracao_simples(cursor, mes_filtro)
+            buffer = pdf_extrato_pgdas(
+                escola, nome_mes_extenso(mes_filtro), apuracao, regime_apuracao
+            )
+    except Exception as e:
+        flash(f"Não foi possível gerar o extrato PGDAS: {e}", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro, aba="simples"))
+    finally:
+        conexao.close()
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"extrato_pgdas_{mes_filtro}.pdf",
+    )
 
 
 @app.route("/financeiro/simples/pdf")

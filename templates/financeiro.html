@@ -282,11 +282,11 @@
                 <div class="valor">R$ {{ (totais.folha_pagamento)|moeda }}</div>
                 <span class="hint" style="color: #9b59b6;">Líquido R$ {{ (totais_folha.liquido)|moeda }} · abrir relatório</span>
             </a>
-            <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
+            <a href="{% if regime_atual == 'simples_nacional' and apuracao_simples %}{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}{% else %}{{ url_for('relatorio_tributario', mes=mes_atual) }}{% endif %}" class="card-resumo tributos">
                 {% if regime_atual == 'simples_nacional' and apuracao_simples %}
                 <h4>DAS ({{ "%.2f"|format(apuracao_simples.aliquota_efetiva_pct) }}% · Anexo {{ apuracao_simples.anexo }})</h4>
                 <div class="valor">R$ {{ (totais.tributos)|moeda }}</div>
-                <span class="hint" style="color: #e67e22;">Abrir cálculo e DASN</span>
+                <span class="hint" style="color: #e67e22;">Abrir extrato PGDAS</span>
                 {% elif regime_atual == 'lucro_presumido' and apuracao_presumido %}
                 <h4>Tributos da empresa</h4>
                 <div class="valor">R$ {{ (apuracao_presumido.tributos)|moeda }}</div>
@@ -470,6 +470,7 @@
             {% endif %}
 
             <div class="simples-acoes">
+                <a class="btn btn-primary" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}">Gerar extrato PGDAS</a>
                 <form method="POST" action="{{ url_for('pagina_financeiro') }}">
                     <input type="hidden" name="acao" value="simples_carregar_sistema">
                     <input type="hidden" name="mes" value="{{ mes_atual }}">
@@ -503,6 +504,7 @@
                 <button class="btn btn-success" type="submit">Importar competências</button>
             </form>
             <p class="simples-hint">Aceita CSV/Excel com colunas competência e receita (e folha, se houver). No extrato PGDAS o sistema procura o mês e o valor de receita bruta em cada linha.</p>
+            <p class="simples-hint">O botão Gerar extrato PGDAS mostra o DAS que será pago, com tipo de receita, RBT12, folha e encargos e o regime de apuração. O PDF tributos, no topo, é a memória de cálculo mais o demonstrativo, no lugar da DRE.</p>
 
             <form method="POST" action="{{ url_for('pagina_financeiro') }}">
                 <input type="hidden" name="acao" value="simples_salvar_quadro">

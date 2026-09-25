@@ -14,6 +14,7 @@ from relatorios_pdf import (
     pdf_regime_apuracao,
     pdf_regime_detalhado,
     pdf_simples_nacional,
+    pdf_extrato_pgdas,
 )
 
 
@@ -166,6 +167,7 @@ class RelatoriosDosCartoes(unittest.TestCase):
             "aliquota_nominal": 0.06, "parcela_deduzir": 0, "aliquota_efetiva_pct": 6,
             "quadro": {"linhas": []}, "regime_apuracao": "caixa",
         }
+        _pdf(pdf_extrato_pgdas("Escola", "Setembro/2026", ap, "caixa"))
         _pdf(pdf_simples_nacional(
             "Escola", "Maio/2026", "simples_nacional", ap, [], [],
             dre={"receita": 1500, "das": 90, "folha": 0, "compras": 0, "servicos": 0},

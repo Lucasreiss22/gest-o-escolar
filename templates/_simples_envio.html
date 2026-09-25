@@ -1,6 +1,7 @@
 <div class="calc-passo">
     <strong>PDF e e-mail</strong>
-    <a class="btn btn-success" href="{{ url_for('memoria_simples_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Gerar PDF</a>
+    <a class="btn btn-primary" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Extrato PGDAS</a>
+    <a class="btn btn-success" href="{{ url_for('memoria_simples_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Memória e demonstrativo</a>
     <form method="POST" action="{{ url_for('enviar_memoria_simples') }}" class="calc-envio">
         <input type="hidden" name="mes" value="{{ mes_atual }}">
         <div class="form-group">
