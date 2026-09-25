@@ -95,6 +95,13 @@ from permissoes import (
     permissoes_padrao,
     padroes_por_papel,
 )
+from auditoria import (
+    classificar_movimento,
+    listar_auditoria,
+    modulo_da_rota,
+    montar_detalhe,
+    registrar_auditoria,
+)
 from plataforma import (
     buscar_admin_plataforma,
     buscar_escola_por_email,
@@ -902,6 +909,65 @@ def isolar_banco_da_requisicao():
 @app.teardown_request
 def encerrar_tenant(_erro):
     resetar_tenant()
+
+
+_AUDITORIA_IGNORAR = {
+    None, "login", "logout", "static", "ping", "login_google", "login_google_callback",
+    "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
+    "pagina_auditoria", "relatorio_tributario", "relatorio_pdf_folha", "relatorio_pdf_custos",
+    "cobranca_pdf", "cobranca_email", "memoria_simples_pdf", "boletim_pdf", "pdf_contracheque_rota",
+    "modelo_alunos_csv", "modelo_custos_csv", "modelo_simples_csv", "modelo_alunos_financeiro_csv",
+}
+
+
+def _flash_de_erro():
+    for item in session.get("_flashes") or []:
+        if isinstance(item, (list, tuple)) and item and item[0] == "danger":
+            return True
+    return False
+
+
+@app.after_request
+def gravar_auditoria(resposta):
+    try:
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return resposta
+        if resposta.status_code >= 400:
+            return resposta
+        endpoint = request.endpoint
+        if endpoint in _AUDITORIA_IGNORAR or (endpoint or "").endswith("_pdf"):
+            return resposta
+        if not session.get("usuario_id") and not session.get("super_admin"):
+            return resposta
+        if _flash_de_erro():
+            return resposta
+        acao = (request.form.get("acao") or "").strip()
+        tipo, rotulo = classificar_movimento(endpoint, acao)
+        detalhe = montar_detalhe(request.form, request.files)
+        assunto = ""
+        for chave in ("nome_completo", "nome", "aluno_nome", "descricao", "titulo", "email"):
+            assunto = (request.form.get(chave) or "").strip()
+            if assunto:
+                break
+        resumo = f"{rotulo}: {assunto}" if assunto else rotulo
+        escola_id = session.get("escola_id")
+        if not escola_id:
+            bruto = (request.form.get("escola_id") or "").strip()
+            if bruto.isdigit():
+                escola_id = int(bruto)
+        registrar_auditoria(
+            escola_id,
+            session.get("escola_nome") or ("Plataforma" if session.get("super_admin") else ""),
+            session.get("usuario_nome"),
+            session.get("usuario_email"),
+            tipo,
+            modulo_da_rota(endpoint),
+            resumo,
+            detalhe,
+        )
+    except Exception as erro:
+        print(f"auditoria: {erro}")
+    return resposta
 
 
 @app.before_request
@@ -2152,7 +2218,7 @@ def _ids_cobranca_form():
 
 def _redirect_plataforma():
     acao = (request.form.get("acao") or "").strip()
-    abas = {"escolas", "pacotes", "financeiro", "envio"}
+    abas = {"escolas", "pacotes", "financeiro", "envio", "auditoria"}
     aba = (request.form.get("aba") or "escolas").strip()
     if acao in {
         "gerar_assinaturas",
@@ -2591,7 +2657,7 @@ def plataforma_escolas():
         cred_google = {}
     cid_google = (cred_google.get("client_id") or "").strip()
     aba = (request.args.get("aba") or "escolas").strip()
-    if aba not in {"escolas", "pacotes", "financeiro", "envio"}:
+    if aba not in {"escolas", "pacotes", "financeiro", "envio", "auditoria"}:
         aba = "escolas"
     fin = (request.args.get("fin") or "resumo").strip()
     if fin not in {"resumo", "assinaturas", "custos"}:
@@ -2633,6 +2699,14 @@ def plataforma_escolas():
             painel = painel_financeiro_plataforma(mes_atual, status_fin, busca_fin)
         except Exception as e:
             flash(f"Não foi possível carregar o financeiro da plataforma: {e}", "danger")
+    auditoria = []
+    filtro_tipo = (request.args.get("tipo") or "").strip()
+    filtro_escola = request.args.get("escola", type=int)
+    if aba == "auditoria":
+        try:
+            auditoria = listar_auditoria(filtro_escola, filtro_tipo, busca_fin)
+        except Exception as e:
+            flash(f"Não foi possível carregar a auditoria: {e}", "danger")
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
@@ -2653,6 +2727,32 @@ def plataforma_escolas():
         google_login=_google_habilitado(),
         google_autorizado=bool((smtp or {}).get("google_refresh_token") if isinstance(smtp, dict) else getattr(smtp, "google_refresh_token", None)),
         google_redirect=url_for("login_google_callback", _external=True),
+        auditoria=auditoria,
+        filtro_tipo=filtro_tipo,
+        filtro_escola=filtro_escola,
+    )
+
+
+@app.route("/auditoria")
+def pagina_auditoria():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if session.get("usuario_papel") != "admin":
+        flash("A auditoria fica disponível apenas para o administrador da escola.", "danger")
+        return redirect(url_for("dashboard"))
+    tipo = (request.args.get("tipo") or "").strip()
+    busca = (request.args.get("busca") or "").strip()
+    registros = []
+    try:
+        registros = listar_auditoria(session.get("escola_id"), tipo, busca)
+    except Exception as e:
+        flash(f"Não foi possível carregar a auditoria: {e}", "danger")
+    return render_template(
+        "auditoria.html",
+        registros=registros,
+        tipo=tipo,
+        busca=busca,
+        escola_nome=session.get("escola_nome") or "",
     )
 
 

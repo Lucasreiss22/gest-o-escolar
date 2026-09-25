@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Auditoria - Gestão Escolar</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+    {% set nav_active = 'auditoria' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+        <h2>Auditoria</h2>
+        <p class="hint">Inclusões, alterações e exclusões de {{ escola_nome or "esta escola" }}. Visível apenas para o administrador.</p>
+        <form class="audit-filtros" method="GET" action="{{ url_for('pagina_auditoria') }}">
+            <div>
+                <label for="tipo">Movimento</label>
+                <select id="tipo" name="tipo">
+                    <option value="">Todos</option>
+                    <option value="inclusao" {% if tipo == 'inclusao' %}selected{% endif %}>Inclusão</option>
+                    <option value="alteracao" {% if tipo == 'alteracao' %}selected{% endif %}>Alteração</option>
+                    <option value="exclusao" {% if tipo == 'exclusao' %}selected{% endif %}>Exclusão</option>
+                </select>
+            </div>
+            <div>
+                <label for="busca">Busca</label>
+                <input id="busca" name="busca" value="{{ busca }}" placeholder="Usuário, aluno, descrição">
+            </div>
+            <button class="btn btn-primary" type="submit">Filtrar</button>
+        </form>
+        {% with registros=registros, mostrar_escola=false %}
+            {% include '_auditoria_lista.html' %}
+        {% endwith %}
+    </div>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{% if registros %}
+<div class="audit-lista">
+    {% for item in registros %}
+    <article class="audit-item">
+        <div class="audit-top">
+            <span class="audit-tipo {{ item.tipo }}">{{ item.tipo_rotulo }}</span>
+            <time>{{ item.quando }}</time>
+        </div>
+        <strong>{{ item.resumo }}</strong>
+        <p class="audit-meta">
+            {{ item.usuario_nome or item.usuario_email or "Usuário" }}
+            {% if item.usuario_email and item.usuario_nome %} · {{ item.usuario_email }}{% endif %}
+            {% if item.modulo %} · {{ item.modulo }}{% endif %}
+            {% if mostrar_escola and item.escola_nome %} · {{ item.escola_nome }}{% endif %}
+        </p>
+        {% if item.detalhe %}<p class="audit-detalhe">{{ item.detalhe }}</p>{% endif %}
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<p class="hint">Nenhuma inclusão, alteração ou exclusão registrada com esse filtro.</p>
+{% endif %}

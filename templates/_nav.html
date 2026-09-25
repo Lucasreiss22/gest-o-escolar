@@ -36,6 +36,9 @@
     {% if pode('configuracoes') %}
     <a href="{{ url_for('pagina_configuracoes') }}" class="{% if nav_active == 'configuracoes' %}active{% endif %}">Configurações</a>
     {% endif %}
+    {% if session.get('usuario_papel') == 'admin' %}
+    <a href="{{ url_for('pagina_auditoria') }}" class="{% if nav_active == 'auditoria' %}active{% endif %}">Auditoria</a>
+    {% endif %}
     {% if origem_plataforma %}
     <a href="{{ url_for('plataforma_voltar') }}" class="nav-logout">Voltar à plataforma</a>
     {% endif %}

@@ -13,6 +13,7 @@ MODULOS = {
     "configuracoes": PAPEIS_TOTAIS,
     "usuarios": {"admin", "administrador", "direcao", "supervisor", "financeiro"},
     "contracheque": PAPEIS_TOTAIS | {"professor", "funcionario", "secretaria"},
+    "auditoria": {"admin"},
 }
 
 ENDPOINTS = {
@@ -59,6 +60,7 @@ ENDPOINTS = {
     "pdf_contracheque_rota": "contracheque",
     "enviar_contracheques_mes": "financeiro",
     "aluno_vincular_turma": "pedagogico_cadastro",
+    "pagina_auditoria": "auditoria",
 }
 
 

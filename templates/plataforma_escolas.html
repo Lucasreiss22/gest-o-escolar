@@ -153,11 +153,48 @@
             <a class="{% if aba == 'pacotes' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='pacotes') }}">Pacotes</a>
             <a class="{% if aba == 'financeiro' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', mes=mes_atual) }}">Financeiro</a>
             <a class="{% if aba == 'envio' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='envio') }}">Envio de e-mail</a>
+            <a class="{% if aba == 'auditoria' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='auditoria') }}">Auditoria</a>
         </nav>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
+
+        {% if aba == 'auditoria' %}
+        <div class="card-box">
+            <h3>Auditoria do sistema</h3>
+            <p class="hint">Tudo que foi incluído, alterado ou excluído nas escolas e nesta plataforma, com data, hora e usuário.</p>
+            <form class="audit-filtros" method="GET" action="{{ url_for('plataforma_escolas') }}">
+                <input type="hidden" name="aba" value="auditoria">
+                <div>
+                    <label for="escola">Escola</label>
+                    <select id="escola" name="escola">
+                        <option value="">Todas</option>
+                        {% for e in escolas %}
+                        <option value="{{ e.id }}" {% if filtro_escola == e.id %}selected{% endif %}>{{ e.nome }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="tipo">Movimento</label>
+                    <select id="tipo" name="tipo">
+                        <option value="">Todos</option>
+                        <option value="inclusao" {% if filtro_tipo == 'inclusao' %}selected{% endif %}>Inclusão</option>
+                        <option value="alteracao" {% if filtro_tipo == 'alteracao' %}selected{% endif %}>Alteração</option>
+                        <option value="exclusao" {% if filtro_tipo == 'exclusao' %}selected{% endif %}>Exclusão</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="busca">Busca</label>
+                    <input id="busca" name="busca" value="{{ busca }}" placeholder="Usuário, escola ou descrição">
+                </div>
+                <button class="btn" type="submit">Filtrar</button>
+            </form>
+            {% with registros=auditoria, mostrar_escola=true %}
+                {% include '_auditoria_lista.html' %}
+            {% endwith %}
+        </div>
+        {% endif %}
 
         {% if aba == 'escolas' %}
         {% set ns = namespace(ativas=0, pausadas=0, senha=0) %}
@@ -165,7 +202,7 @@
             {% if not e.ativo %}{% set ns.pausadas = ns.pausadas + 1 %}
             {% elif e.senha_definida %}{% set ns.ativas = ns.ativas + 1 %}
             {% else %}{% set ns.senha = ns.senha + 1 %}{% endif %}
-        {% endfor %}
+                    {% endfor %}
         <div class="stats">
             <div class="stat"><span>Cadastradas</span><strong>{{ escolas|length }}</strong></div>
             <div class="stat"><span>Ativas</span><strong>{{ ns.ativas }}</strong></div>
@@ -207,7 +244,7 @@
             {% for e in escolas %}
             <div class="escola" data-busca="{{ (e.nome ~ ' ' ~ e.email_admin)|lower }}">
                 <div class="escola-head">
-                    <h4>{{ e.nome }}</h4>
+                <h4>{{ e.nome }}</h4>
                     {% if not e.ativo %}<span class="badge badge-pausada">Pausada</span>
                     {% elif e.senha_definida %}<span class="badge badge-ativa">Ativa</span>
                     {% else %}<span class="badge badge-senha">Aguardando senha</span>{% endif %}
@@ -234,20 +271,20 @@
                     <strong>Todas as telas</strong>
                     <p class="hint">Sem pacote. A escola usa o sistema inteiro. Defina um valor fixo abaixo se quiser cobrar mesmo assim.</p>
                     {% endif %}
-                    <form method="POST" class="acoes">
-                        <input type="hidden" name="acao" value="definir_pacote">
+                <form method="POST" class="acoes">
+                    <input type="hidden" name="acao" value="definir_pacote">
                         <input type="hidden" name="aba" value="escolas">
-                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                    <input type="hidden" name="escola_id" value="{{ e.id }}">
                         <select name="pacote" class="campo">
-                            <option value="" {% if not e.pacote %}selected{% endif %}>Todas as telas</option>
-                            {% for p in pacotes %}
-                            <option value="{{ p.codigo }}" {% if e.pacote == p.codigo %}selected{% endif %}>
-                                {{ p.nome }}{% if p.valor %} — R$ {{ p.valor|moeda }}{% endif %}
-                            </option>
-                            {% endfor %}
-                        </select>
-                        <button class="btn-sm btn-verde" type="submit">Aplicar pacote</button>
-                    </form>
+                        <option value="" {% if not e.pacote %}selected{% endif %}>Todas as telas</option>
+                        {% for p in pacotes %}
+                        <option value="{{ p.codigo }}" {% if e.pacote == p.codigo %}selected{% endif %}>
+                            {{ p.nome }}{% if p.valor %} — R$ {{ p.valor|moeda }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn-sm btn-verde" type="submit">Aplicar pacote</button>
+                </form>
                     <form method="POST" class="js-calculo" style="margin-top:12px;">
                         <input type="hidden" name="acao" value="salvar_cobranca_escola">
                         <input type="hidden" name="aba" value="escolas">
