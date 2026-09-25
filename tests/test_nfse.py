@@ -2,8 +2,10 @@ import unittest
 from datetime import datetime
 
 from nfse import (
+    ambiente_do_token,
     competencia_fiscal,
     interpretar_resposta,
+    limpar_token,
     montar_payload,
     pode_emitir_mensalidade,
     substituicao_retroativa,
@@ -118,6 +120,27 @@ class NfseRegrasTeste(unittest.TestCase):
         self.assertEqual(lido["status"], "FATURADA")
         self.assertEqual(lido["xml_caminho"], "/arquivos/nota.xml")
         self.assertEqual(lido["url_pdf"], "/arquivos/danfse.pdf")
+
+    def test_limpa_token_colado_com_prefixo(self):
+        self.assertEqual(limpar_token('  Token "abc def"  '), "abcdef")
+
+    def test_token_que_so_vale_em_producao_troca_o_ambiente(self):
+        def cliente(metodo, url, token, payload):
+            if "homologacao" in url:
+                return 401, {"mensagem": "Access token inválido (host: homologacao.focusnfe.com.br)"}
+            return 404, {"mensagem": "Nota fiscal não encontrada"}
+
+        ambiente, aviso = ambiente_do_token("abc", "homologacao", cliente)
+        self.assertEqual(ambiente, "producao")
+        self.assertIn("produção", aviso)
+
+    def test_token_recusado_nos_dois_ambientes(self):
+        def cliente(metodo, url, token, payload):
+            return 401, {"mensagem": "Access token inválido"}
+
+        ambiente, aviso = ambiente_do_token("abc", "homologacao", cliente)
+        self.assertIsNone(ambiente)
+        self.assertIn("recusou", aviso)
 
 
 class NfsePermissaoTeste(unittest.TestCase):

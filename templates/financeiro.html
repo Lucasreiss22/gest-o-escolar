@@ -159,8 +159,11 @@
         .baixa-lote label { font-size: 0.78rem; color: #64748b; font-weight: 700; display: block; margin-bottom: 4px; }
         .baixa-lote select, .baixa-lote input[type="date"], .baixa-lote input[type="text"] { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; width: 140px; }
         .aviso-caixa { background: #e0f2fe; color: #0c4a6e; border-radius: 10px; padding: 10px 12px; font-size: 0.84rem; line-height: 1.45; margin: 0 0 12px; }
-        .tabela-cobrancas { min-width: 980px; }
-        .tabela-cobrancas th, .tabela-cobrancas td { vertical-align: middle; padding: 10px 8px; }
+        .tabela-cobrancas { min-width: 720px; width: max-content; max-width: 100%; }
+        .tabela-cobrancas th, .tabela-cobrancas td { vertical-align: middle; padding: 6px; }
+        .busca-mensal { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 0 0 10px; }
+        .busca-mensal label { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; font-weight: 700; color: #64748b; }
+        .busca-mensal input { min-width: 260px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem; font-weight: 500; color: #1e293b; }
         .cobranca-nome { display: block; font-size: 0.88rem; }
         .cobranca-turma { display: block; margin-top: 2px; color: #64748b; font-size: 0.75rem; font-weight: 500; }
         .baixa-linha { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
@@ -1041,10 +1044,22 @@
 
         <!-- Tabela de Lançamentos -->
         <div class="card-box" style="margin-top: 12px;">
-            <h3 style="font-size: 1.05rem; color: #2c3e50; margin-bottom: 12px;">
+            <h3 style="font-size: 1.05rem; color: #2c3e50; margin-bottom: 8px;">
                 Cobranças de {{ mes_label }}
                 {% if status %}<span style="font-size: 0.85rem; color: #3498db; font-weight: normal;">({{ status }})</span>{% endif %}
                 </h3>
+            <form class="busca-mensal" method="GET" action="{{ url_for('pagina_financeiro') }}">
+                <input type="hidden" name="aba" value="receitas">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                <label for="buscaMensalidade">Pesquisar aluno
+                    <input id="buscaMensalidade" type="search" name="busca" value="{{ busca or '' }}" placeholder="Nome, matrícula ou CPF">
+                </label>
+                <button class="btn btn-primary" type="submit">Buscar</button>
+                {% if busca %}
+                <a class="btn" href="{{ url_for('pagina_financeiro', aba='receitas', mes=mes_atual, status=status) }}">Limpar</a>
+                {% endif %}
+            </form>
             {% if regime_apuracao == 'caixa' %}
             <p class="aviso-caixa">No regime de caixa, a data da baixa é o dia em que o valor entrou. O imposto usa esse mês, e não o vencimento.</p>
             {% endif %}

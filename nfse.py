@@ -62,13 +62,34 @@ def apenas_digitos(valor):
     return "".join(caractere for caractere in str(valor or "") if caractere.isdigit())
 
 
+def limpar_token(token):
+    texto = (token or "").replace("\n", "").replace("\r", "").replace("\t", "")
+    texto = texto.strip().strip('"').strip("'").strip()
+    baixo = texto.lower()
+    for prefixo in ("bearer ", "token ", "basic "):
+        if baixo.startswith(prefixo):
+            texto = texto[len(prefixo):].strip()
+            break
+    if texto.lower().startswith("token:"):
+        texto = texto.split(":", 1)[1].strip()
+    texto = texto.strip().strip('"').strip("'").strip()
+    return "".join(texto.split())
+
+
 def mascarar_token(token):
-    texto = (token or "").strip()
+    texto = limpar_token(token)
     if not texto:
         return ""
     if len(texto) <= 4:
         return "••••"
     return "••••" + texto[-4:]
+
+
+def token_recusado(mensagem, codigo=None):
+    texto = (mensagem or "").lower()
+    if "access token" in texto or "token inválido" in texto or "token invalido" in texto:
+        return True
+    return int(codigo or 0) in {401, 403} and "token" in texto
 
 
 def periodo_de(data):
@@ -331,17 +352,68 @@ def cliente_focus(metodo, url, token, payload=None):
     return resposta.status_code, corpo
 
 
-def emitir_focus(token, ambiente, ref, payload, cliente=None, tentativas=4):
-    cliente = cliente or cliente_focus
+def _emitir_uma_vez(token, ambiente, ref, payload, cliente, tentativas):
     base = url_base(ambiente)
     codigo, corpo = cliente("POST", f"{base}?ref={ref}", token, payload)
     lido = interpretar_resposta(codigo, corpo)
     espera = 0
-    while lido["status"] == STATUS_PENDENTE and espera < tentativas:
+    while lido["status"] == STATUS_PENDENTE and espera < tentativas and not token_recusado(lido.get("mensagem"), codigo):
         time.sleep(1.2)
         codigo, corpo = cliente("GET", f"{base}/{ref}", token, None)
         lido = interpretar_resposta(codigo, corpo)
         espera += 1
+    return lido
+
+
+def token_aceito(token, ambiente, cliente=None):
+    cliente = cliente or cliente_focus
+    try:
+        codigo, corpo = cliente("GET", f"{url_base(ambiente)}/sonda-gestaoescolar", token, None)
+    except Exception:
+        return None
+    mensagem = _mensagem_focus(corpo) if isinstance(corpo, dict) else str(corpo or "")
+    if token_recusado(mensagem, codigo):
+        return False
+    if int(codigo or 0) in {401, 403}:
+        return False
+    return True
+
+
+def ambiente_do_token(token, preferido="homologacao", cliente=None):
+    token = limpar_token(token)
+    if not token:
+        return None, "Cole o token da Focus. Ele fica só no servidor."
+    preferido = "producao" if preferido == "producao" else "homologacao"
+    hom = token_aceito(token, "homologacao", cliente)
+    pro = token_aceito(token, "producao", cliente)
+    if hom is None and pro is None:
+        return preferido, "Não foi possível consultar a Focus agora. O token foi salvo."
+    if preferido == "producao" and pro:
+        return "producao", "A Focus aceitou o token na produção."
+    if hom:
+        return "homologacao", "A Focus aceitou o token na homologação."
+    if pro:
+        return "producao", "Esse token não vale na homologação. Ele vale na produção, e o ambiente foi ajustado."
+    return None, (
+        "A Focus recusou o token na homologação e na produção. "
+        "Abra o painel da Focus, copie o token de novo e cole sem espaço, aspas ou a palavra Token na frente."
+    )
+
+
+def emitir_focus(token, ambiente, ref, payload, cliente=None, tentativas=4):
+    cliente = cliente or cliente_focus
+    token = limpar_token(token)
+    lido = _emitir_uma_vez(token, ambiente, ref, payload, cliente, tentativas)
+    if token_recusado(lido.get("mensagem")):
+        outro = "producao" if (ambiente or "") != "producao" else "homologacao"
+        lido2 = _emitir_uma_vez(token, outro, ref, payload, cliente, tentativas)
+        if not token_recusado(lido2.get("mensagem")):
+            lido2["ambiente_corrigido"] = outro
+            return lido2
+        lido["mensagem"] = (
+            "A Focus recusou o token na homologação e na produção. "
+            "Em Configurações, cole de novo o token do painel da Focus, sem espaço, aspas ou a palavra Token na frente."
+        )
     return lido
 
 
@@ -500,8 +572,24 @@ def _cfg_escola(cursor):
     return cfg
 
 
+def _gravar_ambiente(cursor, ambiente, plataforma=False):
+    if plataforma:
+        cursor.execute("UPDATE plataforma_nfse SET ambiente = %s WHERE id = 1", (ambiente,))
+    else:
+        cursor.execute("UPDATE configuracoes SET nfse_ambiente = %s WHERE id = 1", (ambiente,))
+    _commit(cursor)
+
+
+def _aviso_ambiente(lido):
+    ambiente = lido.get("ambiente_corrigido")
+    if not ambiente:
+        return ""
+    nome = "produção" if ambiente == "producao" else "homologação"
+    return f" O ambiente foi ajustado para {nome}, porque o token não valia no outro."
+
+
 def _exigir_credencial(cfg):
-    token = (cfg.get("nfse_token") or cfg.get("token") or "").strip()
+    token = limpar_token(cfg.get("nfse_token") or cfg.get("token"))
     if not token:
         raise ValueError("Informe o token da Focus em Configurações, no bloco da nota fiscal.")
     cnpj = apenas_digitos(cfg.get("nfse_cnpj") or cfg.get("cnpj"))
@@ -706,14 +794,18 @@ def emitir_mensalidade(cursor, mensalidade_id, cliente=None):
         lambda: emitir_focus(token, cfg.get("nfse_ambiente"), ref, payload, cliente),
     )
     _gravar_nota(cursor, "notas_fiscais", nota_id, _aplicar_leitura({"status": STATUS_PENDENTE}, lido, quando))
-    _commit(cursor)
+    if lido.get("ambiente_corrigido"):
+        _gravar_ambiente(cursor, lido["ambiente_corrigido"])
+    else:
+        _commit(cursor)
+    aviso = _aviso_ambiente(lido)
     if lido["status"] == STATUS_ERRO:
         raise ValueError(lido["mensagem"] or "A Focus recusou a NFS-e.")
     if lido["status"] == STATUS_PENDENTE:
-        return "NFS-e enviada e ainda pendente de autorização. Atualize o status para baixar o XML e a DANFSe."
+        return "NFS-e enviada e ainda pendente de autorização. Atualize o status para baixar o XML e a DANFSe." + aviso
     return (
         f"NFS-e faturada{(' nº ' + lido['numero_nfse']) if lido.get('numero_nfse') else ''}. "
-        "O XML e a DANFSe estão na nota."
+        "O XML e a DANFSe estão na nota." + aviso
     )
 
 
@@ -982,9 +1074,16 @@ def faturamento_das_notas(cursor, competencia):
 def listar_alunos_nfse(cursor):
     cursor.execute(
         """
-        SELECT id, nome_completo, matricula
-        FROM alunos
-        ORDER BY nome_completo
+        SELECT a.id, a.nome_completo, a.matricula, a.cpf,
+               (
+                   SELECT t.nome FROM turma_alunos ta
+                   JOIN turmas t ON t.id = ta.turma_id
+                   WHERE ta.aluno_id = a.id
+                   ORDER BY ta.turma_id DESC
+                   LIMIT 1
+               ) AS turma_nome
+        FROM alunos a
+        ORDER BY a.nome_completo
         """
     )
     return cursor.fetchall() or []
@@ -1058,7 +1157,7 @@ def documento_da_nota(cursor, nota_id, tipo):
 
 def salvar_config_escola(cursor, form, arquivo):
     atual = _cfg_escola(cursor)
-    token = (form.get("nfse_token") or "").strip() or (atual.get("nfse_token") or "")
+    token = limpar_token(form.get("nfse_token")) or limpar_token(atual.get("nfse_token"))
     senha = (form.get("nfse_certificado_senha") or "").strip() or (atual.get("nfse_certificado_senha") or "")
     pfx = atual.get("nfse_certificado_pfx")
     nome_arquivo = atual.get("nfse_certificado_nome") or ""
@@ -1076,6 +1175,14 @@ def salvar_config_escola(cursor, form, arquivo):
         pfx = conteudo
         nome_arquivo = arquivo.filename[:180]
     ambiente = "producao" if (form.get("nfse_ambiente") or "") == "producao" else "homologacao"
+    aceito = True
+    aviso = "O token fica só no servidor."
+    if token:
+        ajustado, aviso = ambiente_do_token(token, ambiente)
+        if ajustado:
+            ambiente = ajustado
+        else:
+            aceito = False
     item = (form.get("nfse_item_lista") or "08.01").strip()[:10]
     dados = (
         token,
@@ -1130,6 +1237,7 @@ def salvar_config_escola(cursor, form, arquivo):
             """,
             dados,
         )
+    return aceito, aviso
 
 
 def preparar_config_tela(config):
@@ -1168,7 +1276,7 @@ def salvar_config_plataforma(cursor, form, arquivo):
     garantir_tabela_plataforma(cursor)
     cursor.execute("SELECT token, certificado_pfx, certificado_nome, certificado_senha FROM plataforma_nfse WHERE id = 1")
     atual = cursor.fetchone() or {}
-    token = (form.get("nfse_token") or "").strip() or (atual.get("token") or "")
+    token = limpar_token(form.get("nfse_token")) or limpar_token(atual.get("token"))
     senha = (form.get("nfse_certificado_senha") or "").strip() or (atual.get("certificado_senha") or "")
     pfx = atual.get("certificado_pfx")
     nome_arquivo = atual.get("certificado_nome") or ""
@@ -1368,12 +1476,16 @@ def emitir_cobranca_plataforma(cursor, cobranca_id, cliente=None):
         lambda: emitir_focus(token, cfg.get("ambiente"), ref, payload, cliente),
     )
     _gravar_nota(cursor, "plataforma_notas_fiscais", nota_id, _aplicar_leitura({"status": STATUS_PENDENTE}, lido, quando))
-    _commit(cursor)
+    if lido.get("ambiente_corrigido"):
+        _gravar_ambiente(cursor, lido["ambiente_corrigido"], plataforma=True)
+    else:
+        _commit(cursor)
+    aviso = _aviso_ambiente(lido)
     if lido["status"] == STATUS_ERRO:
         raise ValueError(lido["mensagem"] or "A Focus recusou a NFS-e.")
     if lido["status"] == STATUS_PENDENTE:
-        return "NFS-e da licença enviada e ainda pendente de autorização."
-    return f"NFS-e da licença faturada{(' nº ' + lido['numero_nfse']) if lido.get('numero_nfse') else ''}."
+        return "NFS-e da licença enviada e ainda pendente de autorização." + aviso
+    return f"NFS-e da licença faturada{(' nº ' + lido['numero_nfse']) if lido.get('numero_nfse') else ''}." + aviso
 
 
 def _cfg_plataforma_completo(cursor):

@@ -6474,8 +6474,19 @@ def pagina_financeiro():
                 params = [mes_filtro]
 
                 if busca:
-                    query_lancamentos += " AND a.nome_completo ILIKE %s"
-                    params.append(f"%{busca}%")
+                    termo = f"%{busca.strip()}%"
+                    digitos = "".join(caractere for caractere in busca if caractere.isdigit())
+                    query_lancamentos += """
+                        AND (
+                            a.nome_completo ILIKE %s
+                            OR COALESCE(a.matricula, '') ILIKE %s
+                            OR COALESCE(a.cpf, '') ILIKE %s
+                    """
+                    params.extend([termo, termo, termo])
+                    if digitos:
+                        query_lancamentos += " OR regexp_replace(COALESCE(a.cpf, ''), '\\D', '', 'g') LIKE %s"
+                        params.append(f"%{digitos}%")
+                    query_lancamentos += ")"
 
                 if status_filtro:
                     status_norm = status_filtro.strip().lower()
@@ -6490,14 +6501,14 @@ def pagina_financeiro():
                         query_lancamentos += " AND LOWER(COALESCE(f.status, '')) = %s"
                         params.append(status_norm)
 
-                query_lancamentos += " ORDER BY f.data_vencimento DESC;"
+                query_lancamentos += " ORDER BY a.nome_completo, f.data_vencimento;"
 
                 cursor.execute(query_lancamentos, params)
                 lancamentos = cursor.fetchall()
 
                 cursor.execute(
                     """
-                    SELECT a.id, a.nome_completo, a.valor_mensalidade,
+                    SELECT a.id, a.nome_completo, a.matricula, a.cpf, a.valor_mensalidade,
                            TO_CHAR(a.contrato_inicio, 'YYYY-MM-DD') AS contrato_inicio,
                            (
                                SELECT t.nome FROM turma_alunos ta
@@ -7355,9 +7366,9 @@ def pagina_configuracoes():
             if conexao:
                 try:
                     with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-                        salvar_config_escola(cursor, request.form, request.files.get("nfse_certificado"))
+                        aceito, aviso = salvar_config_escola(cursor, request.form, request.files.get("nfse_certificado"))
                         conexao.commit()
-                        flash("Dados da nota fiscal salvos. O token fica só no servidor.", "success")
+                        flash("Dados da nota fiscal salvos. " + aviso, "success" if aceito else "danger")
                 except Exception as e:
                     conexao.rollback()
                     flash(f"Não foi possível salvar a nota fiscal: {e}", "danger")

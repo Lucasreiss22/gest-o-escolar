@@ -1,8 +1,27 @@
 {% if pode_alterar('nfse') %}
 <div class="card-box nfse-emitir">
     <h3>Emitir NFS-e</h3>
-    <p class="hint">Escolha o aluno e a mensalidade. Depois da autorização, a nota libera o XML e a DANFSe. Salvar o token em Configurações não emite a nota.</p>
-    <form method="GET" action="{{ url_for(destino_rota) }}" class="nfse-emitir-linha">
+    <p class="hint">Pesquise por nome, matrícula ou CPF, ou filtre pela turma e role a lista. Depois escolha a mensalidade. Salvar o token em Configurações não emite a nota.</p>
+    <div class="nfse-emitir-linha">
+        <label>Pesquisar
+            <input type="search" id="nfseBuscaAluno" placeholder="Nome, matrícula ou CPF" autocomplete="off">
+        </label>
+        <label>Turma
+            <select id="nfseTurma">
+                <option value="">Todas as turmas</option>
+                {% set turmas = [] %}
+                {% for aluno in alunos_nfse %}
+                    {% if aluno.turma_nome and aluno.turma_nome not in turmas %}
+                        {% set _ = turmas.append(aluno.turma_nome) %}
+                    {% endif %}
+                {% endfor %}
+                {% for turma in turmas|sort %}
+                <option value="{{ turma }}">{{ turma }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+    <form method="GET" action="{{ url_for(destino_rota) }}" id="nfseFormAluno">
         {% if destino == 'financeiro' %}
         <input type="hidden" name="aba" value="receitas">
         <input type="hidden" name="mes" value="{{ mes or '' }}">
@@ -10,17 +29,28 @@
         <input type="hidden" name="mes" value="{{ mes or '' }}">
         {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
         {% endif %}
-        <label>Aluno
-            <select name="{{ 'nfse_aluno' if destino == 'financeiro' else 'aluno' }}" onchange="this.form.submit()" required>
-                <option value="">Selecione o aluno</option>
-                {% for aluno in alunos_nfse %}
-                <option value="{{ aluno.id }}" {% if aluno_id and aluno.id == aluno_id %}selected{% endif %}>
-                    {{ aluno.nome_completo }}{% if aluno.matricula %} · {{ aluno.matricula }}{% endif %}{% if aluno.turma_nome %} · {{ aluno.turma_nome }}{% endif %}
-                </option>
-                {% endfor %}
-            </select>
-        </label>
+        <div class="nfse-lista" id="nfseListaAlunos">
+            {% for aluno in alunos_nfse %}
+            {% set cpf = (aluno.cpf or '')|replace('.', '')|replace('-', '')|replace(' ', '') %}
+            <button type="submit" name="{{ 'nfse_aluno' if destino == 'financeiro' else 'aluno' }}" value="{{ aluno.id }}"
+                class="nfse-aluno {% if aluno_id and aluno.id == aluno_id %}sel{% endif %}"
+                data-nome="{{ (aluno.nome_completo or '')|lower }}"
+                data-matricula="{{ (aluno.matricula or '')|lower }}"
+                data-cpf="{{ cpf }}"
+                data-turma="{{ aluno.turma_nome or '' }}">
+                <strong>{{ aluno.nome_completo }}</strong>
+                <span>
+                    {% if aluno.matricula %}matrícula {{ aluno.matricula }}{% endif %}
+                    {% if aluno.cpf %} · CPF {{ aluno.cpf }}{% endif %}
+                    {% if aluno.turma_nome %} · {{ aluno.turma_nome }}{% endif %}
+                </span>
+            </button>
+            {% else %}
+            <p class="hint">Nenhum aluno cadastrado.</p>
+            {% endfor %}
+        </div>
     </form>
+    <p class="hint nfse-vazio" id="nfseSemAluno" hidden>Nenhum aluno com esse nome, matrícula, CPF ou turma.</p>
     {% if aluno_id %}
         {% if mensalidades_nfse %}
         <form method="POST" action="{{ url_for('nfse_emitir') }}" class="nfse-emitir-linha">
@@ -53,7 +83,42 @@
 <style>
     .nfse-emitir h3 { margin: 0 0 8px; color: #1e293b; font-size: 1.05rem; }
     .nfse-emitir-linha { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 12px; }
-    .nfse-emitir-linha label { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; font-weight: 600; color: #334155; min-width: 240px; flex: 1; }
-    .nfse-emitir-linha select { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: .9rem; font-weight: 500; }
+    .nfse-emitir-linha label { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; font-weight: 600; color: #334155; min-width: 220px; flex: 1; }
+    .nfse-emitir-linha select, .nfse-emitir-linha input { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: .9rem; font-weight: 500; }
+    .nfse-lista { max-height: 280px; overflow: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+    .nfse-aluno { text-align: left; border: 1px solid #e2e8f0; background: #fff; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+    .nfse-aluno strong { display: block; color: #1e293b; }
+    .nfse-aluno span { display: block; color: #64748b; font-size: .78rem; margin-top: 2px; }
+    .nfse-aluno.sel, .nfse-aluno:hover { border-color: #3498db; background: #eff6ff; }
 </style>
+<script>
+(function () {
+    var busca = document.getElementById("nfseBuscaAluno");
+    var turma = document.getElementById("nfseTurma");
+    var lista = document.getElementById("nfseListaAlunos");
+    var vazio = document.getElementById("nfseSemAluno");
+    if (!busca || !lista) return;
+    function limpar(valor) {
+        return (valor || "").toLowerCase().replace(/[.\-\s]/g, "");
+    }
+    function filtrar() {
+        var termo = limpar(busca.value);
+        var turmaSel = turma ? turma.value : "";
+        var visiveis = 0;
+        lista.querySelectorAll(".nfse-aluno").forEach(function (item) {
+            var cpf = limpar(item.getAttribute("data-cpf"));
+            var nome = item.getAttribute("data-nome") || "";
+            var matricula = (item.getAttribute("data-matricula") || "");
+            var daTurma = !turmaSel || item.getAttribute("data-turma") === turmaSel;
+            var doTexto = !termo || nome.indexOf(busca.value.trim().toLowerCase()) >= 0 || matricula.indexOf(busca.value.trim().toLowerCase()) >= 0 || (cpf && cpf.indexOf(termo) >= 0);
+            var mostra = daTurma && doTexto;
+            item.hidden = !mostra;
+            if (mostra) visiveis += 1;
+        });
+        if (vazio) vazio.hidden = visiveis !== 0;
+    }
+    busca.addEventListener("input", filtrar);
+    if (turma) turma.addEventListener("change", filtrar);
+})();
+</script>
 {% endif %}
