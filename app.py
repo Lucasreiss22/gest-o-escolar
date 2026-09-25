@@ -64,6 +64,7 @@ from tributacao import (
     folha_mensal_fator_r,
     janela_12_meses_anteriores,
     parse_mes,
+    br_money,
 )
 from relatorios_pdf import (
     pdf_boletim,
@@ -75,6 +76,10 @@ from relatorios_pdf import (
     pdf_lucro_real,
     pdf_simples_nacional,
     pdf_cobranca_mensalidade,
+    pdf_composicao_mensalidades,
+    pdf_composicao_custos,
+    pdf_caixa_restante,
+    pdf_regime_apuracao,
 )
 from folha import (
     calcular_folha_pessoa,
@@ -922,6 +927,7 @@ _AUDITORIA_IGNORAR = {
     None, "login", "logout", "static", "ping", "login_google", "login_google_callback",
     "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
     "pagina_auditoria", "relatorio_tributario", "relatorio_pdf_folha", "relatorio_pdf_custos",
+    "relatorio_cartao_financeiro",
     "cobranca_pdf", "cobranca_email", "memoria_simples_pdf", "boletim_pdf", "pdf_contracheque_rota",
     "modelo_alunos_csv", "modelo_custos_csv", "modelo_simples_csv", "modelo_alunos_financeiro_csv",
 }
@@ -1661,6 +1667,73 @@ def receita_do_mes(cursor, mes_filtro, regime_apuracao=None):
     if regime_apuracao is None:
         regime_apuracao = regime_apuracao_escola(cursor)
     return receita_sistema_mes(cursor, mes_filtro, regime_apuracao)
+
+
+def _titulos_base_imposto(cursor, mes_filtro, regime_apuracao):
+    if regime_apuracao == "caixa":
+        return listar_recebimentos_mes(cursor, mes_filtro)
+    cursor.execute(
+        """
+        SELECT f.data_pagamento, f.data_vencimento, f.descricao, f.forma_pagamento, f.valor,
+               a.nome_completo
+        FROM financeiro_mensalidades f
+        LEFT JOIN alunos a ON a.id = f.aluno_id
+        WHERE TO_CHAR(f.data_vencimento, 'YYYY-MM') = %s
+          AND LOWER(COALESCE(f.status, '')) NOT IN ('cancelado', 'cancelada')
+        ORDER BY f.data_vencimento, a.nome_completo
+        """,
+        (mes_filtro,),
+    )
+    return cursor.fetchall() or []
+
+
+def _mensalidades_do_cartao(cursor, mes_filtro, status):
+    cursor.execute(
+        """
+        SELECT a.nome_completo, f.descricao, f.valor, f.data_vencimento,
+               f.data_pagamento, f.forma_pagamento, f.status
+        FROM financeiro_mensalidades f
+        LEFT JOIN alunos a ON a.id = f.aluno_id
+        WHERE TO_CHAR(f.data_vencimento, 'YYYY-MM') = %s
+          AND f.status = %s
+        ORDER BY f.data_vencimento, a.nome_completo
+        """,
+        (mes_filtro, status),
+    )
+    return cursor.fetchall() or []
+
+
+def _porque_custo(item):
+    valor = float(item.get("valor") or 0)
+    efeito, tipo = _efeito_caixa_custo(item)
+    data = item.get("data_custo") or item.get("data_inicio") or ""
+    if hasattr(data, "strftime"):
+        data = data.strftime("%d/%m/%Y")
+    else:
+        data = str(data)[:10]
+    rotulo_tipo = {
+        "avista": "À vista",
+        "recorrente": "Recorrente no mês",
+        "parcelado": "Parcela",
+        "servico": "Serviço",
+    }.get(tipo, tipo)
+    partes = [rotulo_tipo]
+    if item.get("categoria"):
+        partes.append(str(item.get("categoria")))
+    if item.get("prestador"):
+        partes.append(str(item.get("prestador")))
+    if data:
+        partes.append(data)
+    partes.append(f"valor lançado {br_money(valor)}")
+    if abs(efeito - valor) > 0.004:
+        partes.append(
+            "impostos que não estavam na nota somam "
+            + br_money(efeito - valor)
+            + "; o cartão usa o lançado mais esses impostos"
+        )
+    elif tipo == "servico":
+        partes.append("os impostos já estavam na nota, então o cartão usa o valor lançado")
+    return " · ".join(partes), efeito
 
 
 def listar_lancamentos_mes(cursor, mes_filtro, status=None):
@@ -6407,6 +6480,174 @@ def enviar_memoria_simples():
     return redirect(destino)
 
 
+@app.route("/financeiro/relatorio/<tipo>")
+def relatorio_cartao_financeiro(tipo):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    mes_filtro = request.args.get("mes", "").strip() or datetime.now().strftime("%Y-%m")
+    tipos = {
+        "recebido", "pendente", "atrasado", "folha", "compras", "servicos",
+        "caixa", "pago_mes", "regime",
+    }
+    if tipo not in tipos:
+        flash("Esse relatório não existe.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro))
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco para gerar o relatório.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """
+                UPDATE financeiro_mensalidades
+                SET status = CASE
+                    WHEN data_vencimento < CURRENT_DATE THEN 'Atrasado'
+                    ELSE 'Pendente'
+                END
+                WHERE COALESCE(status, '') <> 'Pago'
+                  AND data_vencimento IS NOT NULL
+                  AND status IS DISTINCT FROM (
+                      CASE
+                          WHEN data_vencimento < CURRENT_DATE THEN 'Atrasado'
+                          ELSE 'Pendente'
+                      END
+                  )
+                """
+            )
+            conexao.commit()
+            cursor.execute("SELECT nome_escola, regime_tributario, regime_apuracao FROM configuracoes WHERE id = 1;")
+            config = cursor.fetchone() or {}
+            escola = config.get("nome_escola") or "Gestão Escolar"
+            regime = config.get("regime_tributario") or "lucro_presumido"
+            regime_apuracao = normalizar_regime_apuracao(config.get("regime_apuracao"))
+            mes_label = nome_mes_extenso(mes_filtro)
+            nome_arquivo = f"relatorio_{tipo}_{mes_filtro}.pdf"
+
+            if tipo in ("recebido", "pendente", "atrasado"):
+                status_mapa = {"recebido": "Pago", "pendente": "Pendente", "atrasado": "Atrasado"}
+                status = status_mapa[tipo]
+                itens = _mensalidades_do_cartao(cursor, mes_filtro, status)
+                total = sum(float(item.get("valor") or 0) for item in itens)
+                textos = {
+                    "recebido": (
+                        "Total recebido",
+                        "Entram as mensalidades com vencimento neste mês que já receberam baixa. "
+                        "A data da baixa mostra quando o valor entrou. Este cartão segue o vencimento, "
+                        "não o mês da baixa. No regime de caixa, o imposto usa o relatório Pago no mês.",
+                    ),
+                    "pendente": (
+                        "Total pendente",
+                        "Entram as mensalidades com vencimento neste mês que ainda não venceram e não têm baixa.",
+                    ),
+                    "atrasado": (
+                        "Total atrasado",
+                        "Entram as mensalidades com vencimento neste mês que já passaram do dia e continuam sem baixa.",
+                    ),
+                }
+                titulo, explicacao = textos[tipo]
+                buffer = pdf_composicao_mensalidades(escola, mes_label, titulo, explicacao, itens, total)
+            elif tipo == "pago_mes":
+                itens = listar_recebimentos_mes(cursor, mes_filtro)
+                total = sum(float(item.get("valor") or 0) for item in itens)
+                buffer = pdf_composicao_mensalidades(
+                    escola,
+                    mes_label,
+                    "Pago no mês",
+                    "Entram as baixas cuja data cai neste mês, mesmo que o vencimento seja de outro mês. "
+                    "No regime de caixa, esta lista é a base do imposto. Título sem baixa fica de fora.",
+                    itens,
+                    total,
+                )
+            elif tipo == "folha":
+                itens, totais = montar_folha_contratos(cursor, regime, mes_filtro)
+                buffer = pdf_folha_pagamento(escola, mes_label, regime, itens, totais)
+                nome_arquivo = f"folha_{mes_filtro}.pdf"
+            elif tipo in ("compras", "servicos"):
+                custos = listar_custos_do_mes(cursor, mes_filtro)
+                escolhidos = []
+                total = 0.0
+                for item in custos:
+                    porque, efeito = _porque_custo(item)
+                    if tipo == "servicos" and (item.get("tipo") or "").lower() != "servico":
+                        continue
+                    if tipo == "compras" and (item.get("tipo") or "").lower() == "servico":
+                        continue
+                    escolhidos.append({"descricao": item.get("descricao") or "Custo", "porque": porque, "valor": efeito})
+                    total += efeito
+                if tipo == "compras":
+                    buffer = pdf_composicao_custos(
+                        escola,
+                        mes_label,
+                        "Compras e custos fixos",
+                        "Entram aluguel, energia, material e parcelas que não são contratação de serviço. "
+                        "O valor do cartão é o que efetivamente sai no mês.",
+                        escolhidos,
+                        total,
+                    )
+                else:
+                    buffer = pdf_composicao_custos(
+                        escola,
+                        mes_label,
+                        "Contratação de serviços",
+                        "Entram as NFS-e e os serviços de terceiros. Se IRRF, PIS, COFINS, CSLL ou ISS "
+                        "não estavam na nota, eles somam ao valor do cartão.",
+                        escolhidos,
+                        total,
+                    )
+            elif tipo == "caixa":
+                cursor.execute(
+                    """
+                    SELECT COALESCE(SUM(CASE WHEN status = 'Pago' THEN valor::numeric ELSE 0 END), 0) AS recebido
+                    FROM financeiro_mensalidades
+                    WHERE TO_CHAR(data_vencimento, 'YYYY-MM') = %s
+                    """,
+                    (mes_filtro,),
+                )
+                recebido = float((cursor.fetchone() or {}).get("recebido") or 0)
+                _itens_folha, totais_folha = montar_folha_contratos(cursor, regime, mes_filtro)
+                folha = float(totais_folha.get("custo_escola") or 0)
+                custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
+                if regime == "simples_nacional":
+                    apuracao, _colabs = calcular_apuracao_simples(cursor, mes_filtro)
+                    tributos = float(apuracao.get("das") or 0)
+                elif regime == "lucro_real":
+                    tributos = 0.0
+                else:
+                    colaboradores, _folha = montar_folha_colaboradores(cursor)
+                    receita_mes = receita_do_mes(cursor, mes_filtro, regime_apuracao)
+                    receita_tri = sum(
+                        receita_sistema_mes(cursor, comp, regime_apuracao)
+                        for comp in meses_do_trimestre(mes_filtro)
+                    )
+                    tributos = float(apurar_lucro_presumido(receita_mes, colaboradores, receita_tri).get("tributos") or 0)
+                total = recebido - folha - tributos - custos["compras"] - custos["servicos"]
+                buffer = pdf_caixa_restante(
+                    escola,
+                    mes_label,
+                    [
+                        ("(+) Recebido nas mensalidades", recebido),
+                        ("(−) Folha e encargos", folha),
+                        ("(−) Tributos da empresa", tributos),
+                        ("(−) Compras e custos fixos", custos["compras"]),
+                        ("(−) Contratação de serviços", custos["servicos"]),
+                    ],
+                    total,
+                    regime_apuracao,
+                )
+            else:
+                buffer = pdf_regime_apuracao(escola, mes_label, regime_apuracao, regime)
+    finally:
+        conexao.close()
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=nome_arquivo,
+    )
+
+
 @app.route("/financeiro/custos/pdf")
 def relatorio_pdf_custos():
     if "usuario_id" not in session:
@@ -6452,11 +6693,13 @@ def relatorio_tributario():
 
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT nome_escola, regime_tributario FROM configuracoes WHERE id = 1;")
+            cursor.execute("SELECT nome_escola, regime_tributario, regime_apuracao FROM configuracoes WHERE id = 1;")
             config = cursor.fetchone() or {}
             regime = config.get("regime_tributario") or "lucro_presumido"
+            regime_apuracao = normalizar_regime_apuracao(config.get("regime_apuracao"))
             escola = config.get("nome_escola") or "Gestão Escolar"
             mes_label = nome_mes_extenso(mes_filtro)
+            titulos_base = _titulos_base_imposto(cursor, mes_filtro, regime_apuracao)
 
             if regime == "simples_nacional":
                 apuracao, colaboradores = calcular_apuracao_simples(cursor, mes_filtro)
@@ -6477,6 +6720,8 @@ def relatorio_tributario():
                         "compras": custos.get("compras"),
                         "servicos": custos.get("servicos"),
                     },
+                    titulos=titulos_base,
+                    regime_apuracao=regime_apuracao,
                 )
                 nome_arquivo = f"relatorio_simples_dasn_{mes_filtro}.pdf"
             else:
@@ -6493,7 +6738,7 @@ def relatorio_tributario():
                 )
                 resumo = cursor.fetchone() or {}
                 colaboradores, folha_mes = montar_folha_colaboradores(cursor)
-                receita_mes = receita_do_mes(cursor, mes_filtro)
+                receita_mes = receita_do_mes(cursor, mes_filtro, regime_apuracao)
                 pis_cofins = apurar_pis_cofins(receita_mes, regime)
                 totais = {
                     "recebido": float(resumo.get("recebido") or 0),
@@ -6511,12 +6756,17 @@ def relatorio_tributario():
                 totais["custos_servicos"] = resumo_custos["servicos"]
                 totais["custos"] = resumo_custos["custos"]
                 if regime == "lucro_presumido":
-                    apuracao_p = apurar_lucro_presumido(receita_mes, colaboradores)
+                    receita_tri = sum(
+                        receita_sistema_mes(cursor, comp, regime_apuracao)
+                        for comp in meses_do_trimestre(mes_filtro)
+                    )
+                    apuracao_p = apurar_lucro_presumido(receita_mes, colaboradores, receita_tri)
                     _itens_folha, totais_folha = montar_folha_contratos(cursor, regime, mes_filtro)
                     totais["tributos"] = apuracao_p["tributos"]
                     totais["folha_pagamento"] = totais_folha.get("custo_escola") or 0
                     buffer = pdf_lucro_presumido(
-                        escola, mes_label, regime, apuracao_p, totais, recebidos
+                        escola, mes_label, regime, apuracao_p, totais, recebidos,
+                        titulos=titulos_base, regime_apuracao=regime_apuracao,
                     )
                     nome_arquivo = f"relatorio_lucro_presumido_{mes_filtro}.pdf"
                 else:
@@ -6530,6 +6780,8 @@ def relatorio_tributario():
                         atrasados,
                         colaboradores,
                         pis_cofins,
+                        titulos=titulos_base,
+                        regime_apuracao=regime_apuracao,
                     )
                     nome_arquivo = f"relatorio_receitas_pagamentos_{mes_filtro}.pdf"
     finally:

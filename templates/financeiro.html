@@ -248,26 +248,26 @@
         {% endif %}
 
         <div class="resumo-grid fin-kpis">
-            <a href="{{ url_for('pagina_financeiro', status='Pago', mes=mes_atual, aba='receitas') }}" class="card-resumo recebido">
+            <a href="{{ url_for('relatorio_cartao_financeiro', tipo='recebido', mes=mes_atual) }}" class="card-resumo recebido">
                 <h4>Total Recebido</h4>
                 <div class="valor">R$ {{ (totais.recebido)|moeda }}</div>
-                <span class="hint">🔍 Filtrar Pagos</span>
+                <span class="hint">Abrir relatório</span>
             </a>
-            <a href="{{ url_for('pagina_financeiro', status='Pendente', mes=mes_atual, aba='receitas') }}" class="card-resumo pendente">
+            <a href="{{ url_for('relatorio_cartao_financeiro', tipo='pendente', mes=mes_atual) }}" class="card-resumo pendente">
                 <h4>Total Pendente</h4>
                 <div class="valor">R$ {{ (totais.pendente)|moeda }}</div>
-                <span class="hint">🔍 Filtrar Pendentes</span>
+                <span class="hint">Abrir relatório</span>
             </a>
-            <a href="{{ url_for('pagina_financeiro', status='Atrasado', mes=mes_atual, aba='receitas') }}" class="card-resumo atrasado">
+            <a href="{{ url_for('relatorio_cartao_financeiro', tipo='atrasado', mes=mes_atual) }}" class="card-resumo atrasado">
                 <h4>Total Atrasado</h4>
                 <div class="valor">R$ {{ (totais.atrasado)|moeda }}</div>
-                <span class="hint">🔍 Filtrar Atrasados</span>
+                <span class="hint">Abrir relatório</span>
             </a>
-            <div class="card-resumo folha" style="cursor: default;">
+            <a href="{{ url_for('relatorio_cartao_financeiro', tipo='folha', mes=mes_atual) }}" class="card-resumo folha">
                 <h4>Folha e encargos</h4>
                 <div class="valor">R$ {{ (totais.folha_pagamento)|moeda }}</div>
-                <span class="hint" style="color: #9b59b6;">Líquido R$ {{ (totais_folha.liquido)|moeda }} · encargos R$ {{ (totais_folha.encargos)|moeda }}</span>
-            </div>
+                <span class="hint" style="color: #9b59b6;">Líquido R$ {{ (totais_folha.liquido)|moeda }} · abrir relatório</span>
+            </a>
             <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
                 {% if regime_atual == 'simples_nacional' and apuracao_simples %}
                 <h4>DAS ({{ "%.2f"|format(apuracao_simples.aliquota_efetiva_pct) }}% · Anexo {{ apuracao_simples.anexo }})</h4>
@@ -287,21 +287,21 @@
                 <span class="hint" style="color: #e67e22;">Abrir relatório</span>
                 {% endif %}
             </a>
-            <a href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='custos') }}" class="card-resumo compras">
+            <a href="{{ url_for('relatorio_cartao_financeiro', tipo='compras', mes=mes_atual) }}" class="card-resumo compras">
                 <h4>Compras e custos fixos</h4>
                 <div class="valor">R$ {{ (totais.custos_compras or 0)|moeda }}</div>
-                <span class="hint">Aluguel, energia, material, parcelados</span>
+                <span class="hint">Abrir relatório</span>
             </a>
-            <a href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='custos') }}" class="card-resumo servicos">
+            <a href="{{ url_for('relatorio_cartao_financeiro', tipo='servicos', mes=mes_atual) }}" class="card-resumo servicos">
                 <h4>Contratação de serviços</h4>
                 <div class="valor">R$ {{ (totais.custos_servicos or 0)|moeda }}</div>
-                <span class="hint">NFS-e e impostos não retidos</span>
+                <span class="hint">Abrir relatório</span>
             </a>
-            <div class="card-resumo liquido" style="cursor: default;">
+            <a href="{{ url_for('relatorio_cartao_financeiro', tipo='caixa', mes=mes_atual) }}" class="card-resumo liquido">
                 <h4>Caixa restante</h4>
                 <div class="valor">R$ {{ (totais.liquido)|moeda }}</div>
-                <span class="hint" style="color: #1abc9c;">Recebido − folha − tributos − compras − serviços</span>
-            </div>
+                <span class="hint" style="color: #1abc9c;">Abrir relatório da conta</span>
+            </a>
         </div>
 
         <div class="fin-tabs">
@@ -544,49 +544,49 @@
             <summary>Apuração</summary>
             <div class="fin-bloco-body">
                 <div class="caixa-grade">
-                    <div class="card-resumo" style="cursor:default;">
+                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime', mes=mes_atual) }}" class="card-resumo">
                         <h4>{% if regime_apuracao == 'caixa' %}Regime de caixa{% else %}Regime de competência{% endif %}</h4>
                         <div class="valor" style="font-size:1.05rem;">{% if regime_apuracao == 'caixa' %}Pelo pagamento{% else %}Pelo vencimento{% endif %}</div>
-                        <span class="hint">{{ mes_label }}</span>
-                    </div>
-                    <div class="card-resumo recebido" style="cursor:default;">
+                        <span class="hint">Abrir relatório</span>
+                    </a>
+                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='pago_mes', mes=mes_atual) }}" class="card-resumo recebido">
                         <h4>Pago no mês</h4>
                         <div class="valor">R$ {{ (totais.recebido_caixa or 0)|moeda }}</div>
-                        <span class="hint">Baixas com data neste mês</span>
-                    </div>
-                    <div class="card-resumo liquido" style="cursor:default;">
+                        <span class="hint">Abrir relatório das baixas</span>
+                    </a>
+                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='recebido', mes=mes_atual) }}" class="card-resumo liquido">
                         <h4>Entrou na conta</h4>
                         <div class="valor">R$ {{ (totais.recebido)|moeda }}</div>
-                        <span class="hint">Mensalidades deste vencimento já quitadas</span>
-                    </div>
+                        <span class="hint">Abrir relatório</span>
+                    </a>
                     {% if regime_atual == 'simples_nacional' and apuracao_simples %}
-                    <div class="card-resumo tributos" style="cursor:default;">
+                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
                         <h4>Base do DAS</h4>
                         <div class="valor">R$ {{ (apuracao_simples.receita_mes)|moeda }}</div>
-                        <span class="hint">{% if regime_apuracao == 'caixa' %}Igual ao que foi pago no mês{% else %}Igual ao vencimento do mês{% endif %}</span>
-                    </div>
-                    <div class="card-resumo" style="cursor:default;">
+                        <span class="hint">{% if regime_apuracao == 'caixa' %}Baixas do mês · abrir relatório{% else %}Vencimento do mês · abrir relatório{% endif %}</span>
+                    </a>
+                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo">
                         <h4>DAS</h4>
                         <div class="valor">R$ {{ (apuracao_simples.das)|moeda }}</div>
-                        <span class="hint">{{ "%.2f"|format(apuracao_simples.aliquota_efetiva_pct) }}% · Anexo {{ apuracao_simples.anexo }}</span>
-                    </div>
+                        <span class="hint">{{ "%.2f"|format(apuracao_simples.aliquota_efetiva_pct) }}% · abrir relatório</span>
+                    </a>
                     {% elif regime_atual == 'lucro_presumido' and apuracao_presumido %}
-                    <div class="card-resumo tributos" style="cursor:default;">
+                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
                         <h4>Base do mês</h4>
                         <div class="valor">R$ {{ (apuracao_presumido.receita_mes)|moeda }}</div>
-                        <span class="hint">PIS R$ {{ (apuracao_presumido.pis)|moeda }} · COFINS R$ {{ (apuracao_presumido.cofins)|moeda }}</span>
-                    </div>
-                    <div class="card-resumo" style="cursor:default;">
+                        <span class="hint">Abrir relatório</span>
+                    </a>
+                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo">
                         <h4>IRPJ e CSLL</h4>
                         <div class="valor">R$ {{ ((apuracao_presumido.irpj or 0) + (apuracao_presumido.csll or 0))|moeda }}</div>
-                        <span class="hint">Trimestre R$ {{ (apuracao_presumido.receita_trimestre)|moeda }}</span>
-                    </div>
+                        <span class="hint">Abrir relatório</span>
+                    </a>
                     {% elif apuracao_pis_cofins %}
-                    <div class="card-resumo tributos" style="cursor:default;">
+                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
                         <h4>PIS + COFINS</h4>
                         <div class="valor">R$ {{ (apuracao_pis_cofins.total)|moeda }}</div>
-                        <span class="hint">Base R$ {{ (apuracao_pis_cofins.receita_mes)|moeda }}</span>
-                    </div>
+                        <span class="hint">Abrir relatório</span>
+                    </a>
                     {% endif %}
                 </div>
                 {% if regime_apuracao == 'caixa' %}

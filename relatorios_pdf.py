@@ -106,6 +106,59 @@ def _brl(valor):
     return br_money(valor)
 
 
+def _data_br(valor):
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%d/%m/%Y")
+    texto = str(valor or "").strip()
+    if len(texto) >= 10 and texto[4] == "-" and texto[7] == "-":
+        ano, mes, dia = texto[:10].split("-")
+        return f"{dia}/{mes}/{ano}"
+    return texto or "—"
+
+
+def _anexar_titulos_base(pdf, titulos, regime_apuracao, base_oficial=None):
+    if titulos is None:
+        return
+    pdf.secao("De onde veio a base do mês")
+    if (regime_apuracao or "") == "caixa":
+        pdf.paragrafo(
+            "Regime de caixa: entram as mensalidades cuja data da baixa cai neste mês. "
+            "O vencimento pode ser de outro mês. Título emitido e ainda sem baixa fica de fora."
+        )
+    else:
+        pdf.paragrafo(
+            "Regime de competência: entram as mensalidades com vencimento neste mês, pagas ou em aberto. "
+            "Canceladas ficam de fora."
+        )
+    linhas = []
+    total = 0.0
+    for item in titulos:
+        valor = float(item.get("valor") or 0)
+        total += valor
+        linhas.append([
+            (item.get("nome_completo") or "Aluno")[:18],
+            (item.get("descricao") or "—")[:22],
+            _data_br(item.get("data_vencimento")),
+            _data_br(item.get("data_pagamento")) if item.get("data_pagamento") else "—",
+            _brl(valor),
+        ])
+    if linhas:
+        pdf.tabela(
+            ["Aluno", "Descrição", "Vencimento", "Data da baixa", "Valor"],
+            linhas,
+            [40, 48, 32, 36, 34],
+        )
+    else:
+        pdf.paragrafo("Nenhuma mensalidade compõe a base deste mês.")
+    pdf.linha("Soma das mensalidades", _brl(total), negrito=True)
+    if base_oficial is not None and abs(float(base_oficial) - total) > 0.05:
+        pdf.paragrafo(
+            "A apuração usa "
+            + _brl(base_oficial)
+            + " porque esta competência tem lançamento manual ou de planilha, que substitui a soma automática."
+        )
+
+
 def _pagina_resultado(pdf, titulo, subtitulo, linhas, nota):
     pdf.titulo_cabecalho = titulo
     pdf.add_page()
@@ -117,7 +170,7 @@ def _pagina_resultado(pdf, titulo, subtitulo, linhas, nota):
         pdf.paragrafo(nota)
 
 
-def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, receitas_mes, dre=None):
+def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, receitas_mes, dre=None, titulos=None, regime_apuracao="competencia"):
     ap = apuracao or {}
     quadro = ap.get("quadro") or {}
     pdf = RelatorioPDF("Memória de cálculo — Simples Nacional")
@@ -175,6 +228,7 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
     pdf.linha("Alíquota efetiva", f"{float(ap.get('aliquota_efetiva_pct') or 0):.4f}%")
     pdf.paragrafo("DAS = receita bruta do mês × alíquota efetiva")
     pdf.linha("DAS", _brl(ap.get("das")), negrito=True)
+    _anexar_titulos_base(pdf, titulos, regime_apuracao or ap.get("regime_apuracao"), ap.get("receita_mes"))
     if dre:
         receita = float(dre.get("receita") or 0)
         das = float(dre.get("das") or 0)
@@ -196,24 +250,53 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
                 ("(−) Serviços contratados", servicos, False),
                 ("(=) Resultado do período", resultado, True),
             ],
-            "Demonstrativo interno da competência, no formato de uma DRE do Simples Nacional (DASN). "
-            "O DAS substitui PIS, COFINS, IRPJ, CSLL e ISS. Não substitui a declaração entregue à Receita.",
+            "DRE simplificada, sem plano de contas. O DAS substitui PIS, COFINS, IRPJ, CSLL e ISS. "
+            "Não substitui a declaração entregue à Receita.",
         )
     return _saida(pdf)
 
 
-def pdf_lucro_real(escola, mes_label, regime, totais, recebidos, pendentes, atrasados, folha, pis_cofins=None):
-    pdf = RelatorioPDF("Relatório Lucro Real")
+def pdf_lucro_real(escola, mes_label, regime, totais, recebidos, pendentes, atrasados, folha, pis_cofins=None, titulos=None, regime_apuracao="competencia"):
+    pdf = RelatorioPDF("Apuração — Lucro Real")
     pdf.add_page()
-    pdf.paragrafo(f"{escola} · {mes_label}")
-    pdf.linha("Recebido", _brl((totais or {}).get("recebido")))
-    pdf.linha("Folha", _brl((totais or {}).get("folha_pagamento")))
-    if pis_cofins:
-        pdf.linha("PIS+COFINS", _brl(pis_cofins.get("total")))
+    pdf.paragrafo(f"{escola} · {mes_label} · {nome_regime(regime)}")
+    ap = pis_cofins or {}
+    receita = float(ap.get("receita_mes") or 0)
+    pdf.paragrafo(
+        "PIS e COFINS não cumulativos incidem sobre a receita bruta do mês: "
+        "PIS 1,65% e COFINS 7,6%."
+    )
+    pdf.linha("Receita bruta do mês", _brl(receita))
+    pdf.linha("PIS 1,65%", _brl(ap.get("pis")))
+    pdf.linha("COFINS 7,6%", _brl(ap.get("cofins")))
+    pdf.linha("PIS + COFINS", _brl(ap.get("total")), negrito=True)
+    pdf.paragrafo(
+        f"Conta: {_brl(receita)} × 1,65% = {_brl(ap.get('pis'))}. "
+        f"{_brl(receita)} × 7,6% = {_brl(ap.get('cofins'))}."
+    )
+    _anexar_titulos_base(pdf, titulos, regime_apuracao, receita)
+    tot = totais or {}
+    receita_card = float(tot.get("recebido") or 0)
+    folha_valor = float(tot.get("folha_pagamento") or 0)
+    compras = float(tot.get("custos_compras") or 0)
+    servicos = float(tot.get("custos_servicos") or 0)
+    _pagina_resultado(
+        pdf,
+        "DRE simplificada — Lucro Real",
+        f"{escola} · {mes_label}",
+        [
+            ("(+) Recebido nas mensalidades do vencimento", receita_card, False),
+            ("(−) Folha e encargos", folha_valor, False),
+            ("(−) Compras e custos fixos", compras, False),
+            ("(−) Serviços contratados", servicos, False),
+            ("(=) Caixa restante do cartão", receita_card - folha_valor - compras - servicos, True),
+        ],
+        "DRE simplificada, sem plano de contas. O PIS e a COFINS estão na apuração e não entram nesta subtração do caixa.",
+    )
     return _saida(pdf)
 
 
-def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos):
+def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos, titulos=None, regime_apuracao="competencia"):
     ap = apuracao or {}
     tot = totais or {}
     pdf = RelatorioPDF("Apuração — Lucro Presumido")
@@ -229,6 +312,13 @@ def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos):
     if ap.get("aplica_adicional_irpj"):
         pdf.linha("Adicional de IRPJ (10%)", _brl(ap.get("irpj_adicional")))
     pdf.linha("Total de tributos", _brl(ap.get("tributos")), negrito=True)
+    pdf.paragrafo(
+        "PIS = receita × 0,65%. COFINS = receita × 3%. ISS estimado = receita × 5%. "
+        "IRPJ e CSLL usam 32% da receita de serviços educacionais: IRPJ 15% dessa base e CSLL 9%. "
+        "O adicional de 10% de IRPJ só entra se a base presumida do trimestre passar de R$ 60.000, "
+        "e o mês mostra um terço desse adicional."
+    )
+    _anexar_titulos_base(pdf, titulos, regime_apuracao, ap.get("receita_mes"))
 
     receita = float(ap.get("receita_mes") or 0)
     tributos = float(ap.get("tributos") or 0)
@@ -250,7 +340,7 @@ def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos):
             ("(−) Serviços contratados", servicos, False),
             ("(=) Resultado do período", resultado, True),
         ],
-        "DRE gerencial do mês. IRPJ e CSLL usam a presunção de 32% sobre a receita de serviços educacionais.",
+        "DRE simplificada, sem plano de contas. IRPJ e CSLL usam a presunção de 32% sobre a receita de serviços educacionais.",
     )
     return _saida(pdf)
 
@@ -386,6 +476,146 @@ def pdf_folha_pagamento(escola, mes_label, regime, itens, totais):
     if linhas:
         pdf.tabela(["Colaborador", "Contrato", "Bruto", "Líquido", "Custo"], linhas, [50, 38, 34, 34, 34])
     pdf.linha("Custo total da escola", _brl((totais or {}).get("custo_escola")), negrito=True)
+    pdf.paragrafo(
+        "O cartão Folha e encargos é a soma do custo da escola. "
+        "Esse custo junta o que se paga ao colaborador e os encargos da escola. "
+        "O líquido sozinho não é o valor do cartão."
+    )
+    for item in itens or []:
+        pdf.secao((item.get("nome_completo") or "Colaborador")[:80])
+        pdf.linha("Contrato", (item.get("rotulo_contrato") or item.get("tipo_contrato") or "—")[:40])
+        if item.get("observacao"):
+            pdf.paragrafo(item.get("observacao"))
+        for rotulo, chave in (
+            ("Salário ou valor das horas", "salario"),
+            ("DSR", "dsr"),
+            ("Hora extra 50%", "adicional_he_50"),
+            ("Hora extra 100%", "adicional_he_100"),
+            ("DSR sobre horas extras", "dsr_he"),
+            ("Bruto", "bruto"),
+            ("INSS do colaborador", "inss_funcionario"),
+            ("IRRF", "irrf"),
+            ("PIS retido", "pis"),
+            ("COFINS retido", "cofins"),
+            ("CSLL retido", "csll"),
+            ("ISS retido", "iss"),
+            ("Líquido", "liquido"),
+            ("FGTS", "fgts"),
+            ("Provisão de 13º", "provisao_13"),
+            ("Férias + 1/3", "ferias_terco"),
+            ("INSS patronal", "inss_patronal"),
+            ("RAT", "rat"),
+            ("Sistema S", "sistema_s"),
+            ("Encargos da escola", "encargos"),
+        ):
+            valor = float(item.get(chave) or 0)
+            if valor:
+                pdf.linha(rotulo, _brl(valor))
+        pdf.linha("Custo deste colaborador", _brl(item.get("custo_escola")), negrito=True)
+    pdf.linha("Soma do cartão", _brl((totais or {}).get("custo_escola")), negrito=True)
+    return _saida(pdf)
+
+
+def pdf_composicao_mensalidades(escola, mes_label, titulo, explicacao, itens, total):
+    pdf = RelatorioPDF(titulo)
+    pdf.add_page()
+    pdf.paragrafo(f"{escola} · {mes_label}")
+    pdf.paragrafo(explicacao)
+    linhas = []
+    for item in itens or []:
+        linhas.append([
+            (item.get("nome_completo") or "Aluno")[:18],
+            (item.get("descricao") or "—")[:20],
+            _data_br(item.get("data_vencimento")),
+            _data_br(item.get("data_pagamento")) if item.get("data_pagamento") else "—",
+            (item.get("forma_pagamento") or "—")[:12],
+            _brl(item.get("valor")),
+        ])
+    if linhas:
+        pdf.tabela(
+            ["Aluno", "Descrição", "Vencimento", "Data da baixa", "Forma", "Valor"],
+            linhas,
+            [36, 40, 28, 32, 26, 28],
+        )
+    else:
+        pdf.paragrafo("Nenhum lançamento compõe este valor.")
+    pdf.linha("Total do cartão", _brl(total), negrito=True)
+    pdf.paragrafo(f"{len(linhas)} lançamento(s). A soma destas linhas é o valor exibido no cartão.")
+    return _saida(pdf)
+
+
+def pdf_composicao_custos(escola, mes_label, titulo, explicacao, itens, total):
+    pdf = RelatorioPDF(titulo)
+    pdf.add_page()
+    pdf.paragrafo(f"{escola} · {mes_label}")
+    pdf.paragrafo(explicacao)
+    if not itens:
+        pdf.paragrafo("Nenhum lançamento compõe este valor.")
+    for item in itens or []:
+        pdf.linha((item.get("descricao") or "Custo")[:70], _brl(item.get("valor")))
+        if item.get("porque"):
+            pdf.set_font(pdf.fonte, "", 8)
+            pdf.set_text_color(100, 116, 139)
+            pdf.multi_cell(0, 4.5, str(item.get("porque"))[:240])
+            pdf.set_text_color(40, 40, 40)
+            pdf.ln(1)
+    pdf.linha("Total do cartão", _brl(total), negrito=True)
+    return _saida(pdf)
+
+
+def pdf_caixa_restante(escola, mes_label, partes, total, regime_apuracao):
+    pdf = RelatorioPDF("Caixa restante")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola} · {mes_label}")
+    pdf.paragrafo(
+        "Este número é a conta do cartão: recebido nas mensalidades do vencimento, "
+        "menos folha, tributos, compras e serviços. Não é uma DRE. "
+        "A DRE continua simplificada porque a escola não usa plano de contas."
+    )
+    if (regime_apuracao or "") == "caixa":
+        pdf.paragrafo(
+            "Os tributos desta conta seguem o regime de caixa: a base é a data da baixa. "
+            "O recebido do cartão continua sendo as mensalidades deste vencimento que já foram quitadas."
+        )
+    else:
+        pdf.paragrafo(
+            "Os tributos desta conta seguem o regime de competência: a base é o vencimento do mês."
+        )
+    for rotulo, valor in partes:
+        pdf.linha(rotulo, _brl(valor))
+    pdf.linha("(=) Caixa restante", _brl(total), negrito=True)
+    pdf.paragrafo("Cada parcela tem o relatório completo no cartão correspondente.")
+    return _saida(pdf)
+
+
+def pdf_regime_apuracao(escola, mes_label, regime_apuracao, regime_tributario):
+    pdf = RelatorioPDF("Regime de apuração")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola} · {mes_label} · {nome_regime(regime_tributario)}")
+    if (regime_apuracao or "") == "caixa":
+        pdf.secao("Regime de caixa")
+        pdf.paragrafo(
+            "A escola optou pelo regime de caixa. O imposto do mês usa a data da baixa: "
+            "o valor entra quando foi pago, não quando venceu."
+        )
+        pdf.paragrafo(
+            "O cartão Pago no mês lista essas baixas, mesmo que o vencimento seja de outro mês. "
+            "Mensalidade emitida e sem baixa não entra na base do imposto."
+        )
+        pdf.paragrafo(
+            "O cartão Total recebido é outra conta: mensalidades deste vencimento que já receberam baixa. "
+            "Ele alimenta o caixa restante. O imposto, no regime de caixa, usa o cartão Pago no mês."
+        )
+    else:
+        pdf.secao("Regime de competência")
+        pdf.paragrafo(
+            "A escola está no regime de competência. O imposto usa o vencimento da mensalidade, "
+            "tenha sido paga ou não."
+        )
+        pdf.paragrafo(
+            "A data da baixa registra quando o dinheiro entrou, mas não muda o mês do imposto "
+            "enquanto o regime continuar sendo o de competência."
+        )
     return _saida(pdf)
 
 
