@@ -118,7 +118,9 @@ def receita_sistema_mes(cursor, competencia, regime_apuracao="competencia"):
     if normalizar_regime_apuracao(regime_apuracao) == "caixa":
         cursor.execute(
             """
-            SELECT COALESCE(SUM(valor::numeric), 0) AS total
+            SELECT COALESCE(SUM(
+                valor::numeric + COALESCE(juros_valor, 0) + COALESCE(multa_valor, 0)
+            ), 0) AS total
             FROM financeiro_mensalidades
             WHERE LOWER(COALESCE(status, '')) = 'pago'
               AND data_pagamento IS NOT NULL
@@ -151,7 +153,7 @@ def resumo_emitido_e_caixa(cursor, competencia):
                 WHEN LOWER(COALESCE(status, '')) = 'pago'
                  AND data_pagamento IS NOT NULL
                  AND TO_CHAR(data_pagamento, 'YYYY-MM') = %s
-                THEN valor::numeric ELSE 0 END), 0) AS recebido_caixa,
+                THEN valor::numeric + COALESCE(juros_valor, 0) + COALESCE(multa_valor, 0) ELSE 0 END), 0) AS recebido_caixa,
             COALESCE(SUM(CASE
                 WHEN TO_CHAR(data_vencimento, 'YYYY-MM') = %s
                  AND LOWER(COALESCE(status, '')) NOT IN ('pago', 'cancelado', 'cancelada')
@@ -172,6 +174,7 @@ def listar_recebimentos_mes(cursor, competencia):
     cursor.execute(
         """
         SELECT f.data_pagamento, f.data_vencimento, f.descricao, f.forma_pagamento, f.valor,
+               f.parcela_contrato, f.juros_percentual, f.juros_valor, f.multa_valor,
                a.matricula, a.nome_completo
         FROM financeiro_mensalidades f
         LEFT JOIN alunos a ON a.id = f.aluno_id

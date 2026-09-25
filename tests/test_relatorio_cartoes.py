@@ -1,6 +1,7 @@
 import unittest
 from datetime import date
 
+from tributacao import acrescimos_recebimento
 from relatorios_pdf import (
     pdf_caixa_restante,
     pdf_composicao_custos,
@@ -9,6 +10,7 @@ from relatorios_pdf import (
     pdf_lucro_presumido,
     pdf_lucro_real,
     pdf_regime_apuracao,
+    pdf_regime_detalhado,
     pdf_simples_nacional,
 )
 
@@ -23,6 +25,47 @@ def _pdf(buffer):
 
 
 class RelatoriosDosCartoes(unittest.TestCase):
+    def test_juros_percentual_e_multa_fixa(self):
+        conta = acrescimos_recebimento(1000, 1.5, 20)
+        self.assertAlmostEqual(conta["juros_valor"], 15.0)
+        self.assertAlmostEqual(conta["multa_valor"], 20.0)
+        self.assertAlmostEqual(conta["total"], 1035.0)
+        fino = acrescimos_recebimento(1000, 0.33, 0)
+        self.assertAlmostEqual(fino["juros_valor"], 3.3)
+
+    def test_relatorio_de_caixa_separa_pago_pendente_e_atraso(self):
+        _pdf(pdf_regime_detalhado(
+            "Escola",
+            "Setembro/2026",
+            "caixa",
+            "lucro_presumido",
+            [{
+                "nome_completo": "Laura",
+                "descricao": "Mensalidade",
+                "parcela_contrato": 9,
+                "valor": 1500,
+                "juros_percentual": 1.5,
+                "juros_valor": 22.5,
+                "multa_valor": 10,
+                "data_vencimento": date(2026, 3, 10),
+                "data_pagamento": date(2026, 9, 4),
+                "forma_pagamento": "Pix",
+            }],
+            [{
+                "nome_completo": "Beatriz",
+                "descricao": "Mensalidade",
+                "parcela_contrato": 9,
+                "valor": 750,
+                "data_vencimento": date(2026, 9, 30),
+            }],
+            [{
+                "nome_completo": "Valentina",
+                "descricao": "Mensalidade",
+                "parcela_contrato": 8,
+                "valor": 950,
+                "data_vencimento": date(2026, 8, 1),
+            }],
+        ))
     def test_mensalidades_lista_cada_baixa(self):
         _pdf(pdf_composicao_mensalidades(
             "Escola",

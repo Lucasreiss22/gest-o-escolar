@@ -133,6 +133,9 @@ def garantir_plataforma():
                     data_vencimento DATE,
                     data_pagamento DATE,
                     forma_pagamento VARCHAR(40),
+                    juros_percentual NUMERIC(8,4) DEFAULT 0,
+                    juros_valor NUMERIC(12,2) DEFAULT 0,
+                    multa_valor NUMERIC(12,2) DEFAULT 0,
                     status VARCHAR(30) DEFAULT 'Pendente',
                     UNIQUE (escola_id, competencia)
                 );
@@ -153,6 +156,20 @@ def garantir_plataforma():
                 );
                 """
             )
+            for coluna, spec in (
+                ("juros_percentual", "NUMERIC(8,4) DEFAULT 0"),
+                ("juros_valor", "NUMERIC(12,2) DEFAULT 0"),
+                ("multa_valor", "NUMERIC(12,2) DEFAULT 0"),
+            ):
+                cursor.execute(
+                    """
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'plataforma_cobrancas' AND column_name = %s
+                    """,
+                    (coluna,),
+                )
+                if not cursor.fetchone():
+                    cursor.execute(f"ALTER TABLE plataforma_cobrancas ADD COLUMN {coluna} {spec}")
             for codigo, nome, descricao, telas in PACOTES_INICIAIS:
                 cursor.execute(
                     """
@@ -909,7 +926,7 @@ def editar_cobranca_plataforma(cobranca_id, valor, vencimento, descricao):
     return competencia
 
 
-def baixar_cobrancas_plataforma(ids, forma, data_pagamento):
+def baixar_cobrancas_plataforma(ids, forma, data_pagamento, juros_percentual=0, multa_valor=0):
     garantir_plataforma()
     ids = [int(item) for item in ids]
     if not ids:
@@ -917,6 +934,18 @@ def baixar_cobrancas_plataforma(ids, forma, data_pagamento):
     if isinstance(data_pagamento, str):
         data_pagamento = datetime.strptime(data_pagamento[:10], "%Y-%m-%d").date()
     forma = (forma or "Pix").strip() or "Pix"
+    try:
+        juros_percentual = float(juros_percentual or 0)
+    except (TypeError, ValueError):
+        juros_percentual = 0.0
+    try:
+        multa_valor = float(multa_valor or 0)
+    except (TypeError, ValueError):
+        multa_valor = 0.0
+    if juros_percentual < 0:
+        juros_percentual = 0.0
+    if multa_valor < 0:
+        multa_valor = 0.0
     conexao = obter_conexao(master=True)
     if not conexao:
         raise RuntimeError("Sem conexão com o banco da plataforma.")
@@ -925,10 +954,15 @@ def baixar_cobrancas_plataforma(ids, forma, data_pagamento):
             cursor.execute(
                 """
                 UPDATE plataforma_cobrancas
-                SET status = 'Pago', forma_pagamento = %s, data_pagamento = %s
+                SET status = 'Pago',
+                    forma_pagamento = %s,
+                    data_pagamento = %s,
+                    juros_percentual = %s,
+                    juros_valor = ROUND(COALESCE(valor, 0)::numeric * %s / 100.0, 2),
+                    multa_valor = %s
                 WHERE id = ANY(%s) AND COALESCE(status, '') <> 'Pago'
                 """,
-                (forma, data_pagamento, ids),
+                (forma, data_pagamento, juros_percentual, juros_percentual, multa_valor, ids),
             )
             baixadas = cursor.rowcount
         conexao.commit()
@@ -958,7 +992,10 @@ def tirar_baixa_cobrancas_plataforma(ids):
                         ELSE 'Pendente'
                     END,
                     forma_pagamento = NULL,
-                    data_pagamento = NULL
+                    data_pagamento = NULL,
+                    juros_percentual = 0,
+                    juros_valor = 0,
+                    multa_valor = 0
                 WHERE id = ANY(%s) AND status = 'Pago'
                 """,
                 (ids,),

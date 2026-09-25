@@ -673,6 +673,14 @@
                     <label for="dataLote">Data do pagamento</label>
                     <input id="dataLote" type="date" name="data_pagamento" form="formBaixaLote" value="{{ data_hoje }}">
                 </div>
+                <div>
+                    <label for="jurosLote">Juros (%)</label>
+                    <input id="jurosLote" type="text" name="juros_percentual" form="formBaixaLote" inputmode="decimal" placeholder="0,00" aria-label="Juros em porcentagem">
+                </div>
+                <div>
+                    <label for="multaLote">Multa (R$)</label>
+                    <input id="multaLote" type="text" name="multa_valor" form="formBaixaLote" inputmode="decimal" placeholder="0,00" aria-label="Multa em valor fixo">
+                </div>
                 <button type="button" class="btn btn-success" id="btnBaixaLote" disabled>Dar baixa nos selecionados</button>
                 <button type="button" class="btn btn-warning" id="btnTirarLote" disabled>Tirar baixa dos selecionados</button>
             </div>
@@ -748,6 +756,8 @@
                                 <option value="Transferência">Transferência</option>
                                 <option value="Cartão">Cartão</option>
                             </select>
+                            <input class="mini" type="text" name="juros_percentual" inputmode="decimal" placeholder="Juros %" aria-label="Juros em porcentagem" style="width:90px;">
+                            <input class="mini" type="text" name="multa_valor" inputmode="decimal" placeholder="Multa R$" aria-label="Multa em valor fixo" style="width:100px;">
                             <button class="btn-sm btn-verde" type="submit">Baixa</button>
                         </form>
                         {% else %}
@@ -829,6 +839,8 @@
                                             <option value="Boleto">Boleto</option>
                                             <option value="Transferência">Transferência</option>
                                         </select>
+                                        <input class="mini" type="text" name="juros_percentual" inputmode="decimal" placeholder="Juros %" aria-label="Juros em porcentagem" style="width:90px;">
+                                        <input class="mini" type="text" name="multa_valor" inputmode="decimal" placeholder="Multa R$" aria-label="Multa em valor fixo" style="width:100px;">
                                         <button class="btn-sm btn-verde" type="submit">Baixa</button>
                                     </form>
                                     {% else %}

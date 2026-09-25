@@ -258,6 +258,31 @@ IRPJ_ADICIONAL_ALIQUOTA = 0.10
 IRPJ_ADICIONAL_LIMITE_TRIMESTRE = 60_000.00
 
 
+def acrescimos_recebimento(valor, juros_percentual, multa_valor):
+    """Juros são percentuais sobre a mensalidade. A multa é um valor fixo."""
+    principal = round(float(valor or 0), 2)
+    try:
+        percentual = float(juros_percentual or 0)
+    except (TypeError, ValueError):
+        percentual = 0.0
+    try:
+        multa = float(multa_valor or 0)
+    except (TypeError, ValueError):
+        multa = 0.0
+    if percentual < 0:
+        percentual = 0.0
+    if multa < 0:
+        multa = 0.0
+    juros_valor = round(principal * percentual / 100.0, 2)
+    multa = round(multa, 2)
+    return {
+        "juros_percentual": round(percentual, 4),
+        "juros_valor": juros_valor,
+        "multa_valor": multa,
+        "total": round(principal + juros_valor + multa, 2),
+    }
+
+
 def apurar_lucro_presumido(receita_mes, itens_folha, receita_trimestre=None):
     """
     Tributos sobre o faturamento + encargos cheios da folha CLT.

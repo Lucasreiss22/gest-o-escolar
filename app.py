@@ -80,6 +80,7 @@ from relatorios_pdf import (
     pdf_composicao_custos,
     pdf_caixa_restante,
     pdf_regime_apuracao,
+    pdf_regime_detalhado,
 )
 from folha import (
     calcular_folha_pessoa,
@@ -277,6 +278,16 @@ def _log(mensagem):
         print(str(mensagem).encode("ascii", "replace").decode("ascii"))
     except Exception:
         pass
+
+
+def _acrescimos_form():
+    juros = _parse_moeda(request.form.get("juros_percentual"), 0.0)
+    multa = _parse_moeda(request.form.get("multa_valor"), 0.0)
+    if juros < 0:
+        juros = 0.0
+    if multa < 0:
+        multa = 0.0
+    return round(juros, 4), round(multa, 2)
 
 
 def _parse_moeda(bruto, padrao=0.0):
@@ -1703,6 +1714,54 @@ def _mensalidades_do_cartao(cursor, mes_filtro, status):
     return cursor.fetchall() or []
 
 
+def _listas_regime(cursor, mes_filtro):
+    cursor.execute(
+        """
+        SELECT a.nome_completo, f.descricao, f.parcela_contrato, f.valor,
+               COALESCE(f.juros_percentual, 0) AS juros_percentual,
+               COALESCE(f.juros_valor, 0) AS juros_valor,
+               COALESCE(f.multa_valor, 0) AS multa_valor,
+               f.data_vencimento, f.data_pagamento, f.forma_pagamento
+        FROM financeiro_mensalidades f
+        LEFT JOIN alunos a ON a.id = f.aluno_id
+        WHERE LOWER(COALESCE(f.status, '')) = 'pago'
+          AND f.data_pagamento IS NOT NULL
+          AND TO_CHAR(f.data_pagamento, 'YYYY-MM') = %s
+        ORDER BY f.data_pagamento, a.nome_completo
+        """,
+        (mes_filtro,),
+    )
+    recebidos = cursor.fetchall() or []
+    cursor.execute(
+        """
+        SELECT a.nome_completo, f.descricao, f.parcela_contrato, f.valor,
+               f.data_vencimento, f.data_pagamento, f.forma_pagamento
+        FROM financeiro_mensalidades f
+        LEFT JOIN alunos a ON a.id = f.aluno_id
+        WHERE TO_CHAR(f.data_vencimento, 'YYYY-MM') = %s
+          AND f.status = 'Pendente'
+        ORDER BY f.data_vencimento, a.nome_completo
+        """,
+        (mes_filtro,),
+    )
+    pendentes = cursor.fetchall() or []
+    cursor.execute(
+        """
+        SELECT a.nome_completo, f.descricao, f.parcela_contrato, f.valor,
+               f.data_vencimento, f.data_pagamento, f.forma_pagamento
+        FROM financeiro_mensalidades f
+        LEFT JOIN alunos a ON a.id = f.aluno_id
+        WHERE f.data_vencimento < CURRENT_DATE
+          AND TO_CHAR(f.data_vencimento, 'YYYY-MM') <= %s
+          AND LOWER(COALESCE(f.status, '')) NOT IN ('pago', 'cancelado', 'cancelada')
+        ORDER BY f.data_vencimento, a.nome_completo
+        """,
+        (mes_filtro,),
+    )
+    atrasados = cursor.fetchall() or []
+    return recebidos, pendentes, atrasados
+
+
 def _porque_custo(item):
     valor = float(item.get("valor") or 0)
     efeito, tipo = _efeito_caixa_custo(item)
@@ -2646,10 +2705,13 @@ def plataforma_escolas():
                 flash(f"Não foi possível salvar a assinatura: {e}", "danger")
         elif acao == "dar_baixa":
             try:
+                juros_percentual, multa_valor = _acrescimos_form()
                 qtd = baixar_cobrancas_plataforma(
                     [request.form.get("cobranca_id")],
                     request.form.get("forma_pagamento"),
                     request.form.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d"),
+                    juros_percentual,
+                    multa_valor,
                 )
                 flash("Baixa realizada." if qtd else "Essa assinatura já estava paga.", "success" if qtd else "warning")
             except Exception as e:
@@ -2657,10 +2719,13 @@ def plataforma_escolas():
         elif acao == "dar_baixa_lote":
             try:
                 ids = _ids_cobranca_form()
+                juros_percentual, multa_valor = _acrescimos_form()
                 qtd = baixar_cobrancas_plataforma(
                     ids,
                     request.form.get("forma_pagamento") or "Pix",
                     request.form.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d"),
+                    juros_percentual,
+                    multa_valor,
                 )
                 flash(f"Baixa registrada em {qtd} assinatura(s).", "success")
             except Exception as e:
@@ -5815,24 +5880,36 @@ def pagina_financeiro():
                         except ValueError:
                             flash("Informe a data da baixa. No regime de caixa, essa data define o mês do imposto.", "danger")
                         else:
+                            juros_percentual, multa_valor = _acrescimos_form()
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
-                                SET status = 'Pago', forma_pagamento = %s, data_pagamento = %s
+                                SET status = 'Pago',
+                                    forma_pagamento = %s,
+                                    data_pagamento = %s,
+                                    juros_percentual = %s,
+                                    juros_valor = ROUND(COALESCE(valor, 0)::numeric * %s / 100.0, 2),
+                                    multa_valor = %s
                                 WHERE id = %s;
                                 """,
                                 (
                                     request.form.get("forma_pagamento"),
                                     data_baixa,
+                                    juros_percentual,
+                                    juros_percentual,
+                                    multa_valor,
                                     request.form.get("cobranca_id"),
                                 ),
                             )
                             conexao.commit()
                             quando = data_baixa.strftime("%d/%m/%Y")
+                            acrescimo = ""
+                            if juros_percentual or multa_valor:
+                                acrescimo = " Juros e multa foram somados ao valor recebido."
                             if regime_apuracao_escola(cursor) == "caixa":
-                                flash(f"Baixa registrada em {quando}. O valor entra no regime de caixa deste mês.", "success")
+                                flash(f"Baixa registrada em {quando}. O valor entra no regime de caixa deste mês.{acrescimo}", "success")
                             else:
-                                flash(f"Baixa registrada em {quando}.", "success")
+                                flash(f"Baixa registrada em {quando}.{acrescimo}", "success")
 
                     elif acao == "dar_baixa_lote":
                         ids = []
@@ -5853,15 +5930,24 @@ def pagina_financeiro():
                         elif not data_baixa:
                             flash("Informe a data da baixa. No regime de caixa, essa data define o mês do imposto.", "danger")
                         else:
+                            juros_percentual, multa_valor = _acrescimos_form()
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
-                                SET status = 'Pago', forma_pagamento = %s, data_pagamento = %s
+                                SET status = 'Pago',
+                                    forma_pagamento = %s,
+                                    data_pagamento = %s,
+                                    juros_percentual = %s,
+                                    juros_valor = ROUND(COALESCE(valor, 0)::numeric * %s / 100.0, 2),
+                                    multa_valor = %s
                                 WHERE id = ANY(%s) AND COALESCE(status, '') <> 'Pago'
                                 """,
                                 (
                                     request.form.get("forma_pagamento") or "Dinheiro",
                                     data_baixa,
+                                    juros_percentual,
+                                    juros_percentual,
+                                    multa_valor,
                                     ids,
                                 ),
                             )
@@ -5893,7 +5979,10 @@ def pagina_financeiro():
                                         ELSE 'Pendente'
                                     END,
                                     forma_pagamento = NULL,
-                                    data_pagamento = NULL
+                                    data_pagamento = NULL,
+                                    juros_percentual = 0,
+                                    juros_valor = 0,
+                                    multa_valor = 0
                                 WHERE id = ANY(%s) AND status = 'Pago'
                                 """,
                                 (ids,),
@@ -6637,7 +6726,10 @@ def relatorio_cartao_financeiro(tipo):
                     regime_apuracao,
                 )
             else:
-                buffer = pdf_regime_apuracao(escola, mes_label, regime_apuracao, regime)
+                recebidos, pendentes, atrasados = _listas_regime(cursor, mes_filtro)
+                buffer = pdf_regime_detalhado(
+                    escola, mes_label, regime_apuracao, regime, recebidos, pendentes, atrasados
+                )
     finally:
         conexao.close()
     return send_file(

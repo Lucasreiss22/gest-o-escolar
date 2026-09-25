@@ -154,7 +154,7 @@
         .custo-total { background: #f8fafc; }
         .baixa-lote { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 0 0 12px; }
         .baixa-lote label { font-size: 0.78rem; color: #64748b; font-weight: 700; display: block; margin-bottom: 4px; }
-        .baixa-lote select, .baixa-lote input[type="date"] { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
+        .baixa-lote select, .baixa-lote input[type="date"], .baixa-lote input[type="text"] { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; width: 140px; }
         .aviso-caixa { background: #e0f2fe; color: #0c4a6e; border-radius: 10px; padding: 10px 12px; font-size: 0.84rem; line-height: 1.45; margin: 0 0 12px; }
         .tabela-cobrancas { min-width: 980px; }
         .tabela-cobrancas th, .tabela-cobrancas td { vertical-align: middle; padding: 10px 8px; }
@@ -168,6 +168,9 @@
         .tabela-cobrancas .baixa-linha { flex-wrap: nowrap; }
         .tabela-cobrancas td:nth-child(7) { min-width: 220px; }
         .tabela-cobrancas input[type="date"], .tabela-cobrancas select { padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem; background: #fff; color: #1e293b; }
+        .campo-mini { display: flex; flex-direction: column; gap: 2px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #64748b; }
+        .campo-mini input { width: 92px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem; background: #fff; color: #1e293b; text-transform: none; letter-spacing: 0; font-weight: 500; }
+        .caixa-unico { max-width: 280px; }
         .baixa-forma { align-self: center; font-size: 0.82rem; font-weight: 700; color: #334155; min-width: 88px; }
         .acoes-cobranca { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
         .btn-mini { padding: 6px 10px; font-size: 0.75rem; }
@@ -303,6 +306,11 @@
                 <span class="hint" style="color: #1abc9c;">Abrir relatório da conta</span>
             </a>
         </div>
+        <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime', mes=mes_atual) }}" class="card-resumo caixa-unico {% if regime_apuracao == 'caixa' %}recebido{% endif %}" style="margin-bottom:14px;">
+            <h4>{% if regime_apuracao == 'caixa' %}Regime de caixa{% else %}Regime de competência{% endif %}</h4>
+            <div class="valor" style="font-size:1.05rem;">{% if regime_apuracao == 'caixa' %}Pelo pagamento{% else %}Pelo vencimento{% endif %}</div>
+            <span class="hint">Abrir o que entrou, o que está pendente e o que atrasou</span>
+        </a>
 
         <div class="fin-tabs">
             <a class="{% if aba == 'resumo' %}ativa{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='resumo') }}">Resumo</a>
@@ -538,73 +546,6 @@
                 <div class="fin-linha"><span>(−) Contratação de serviços (NFS-e)</span><strong>R$ {{ (totais.custos_servicos or 0)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(=) Caixa restante</span><strong>R$ {{ (totais.liquido)|moeda }}</strong></div>
                 <p style="font-size: 0.78rem; color: #64748b; margin-top: 8px;">Folha e encargos não se misturam com compras nem com serviços prestados por terceiros.</p>
-            </div>
-        </details>
-        <details class="fin-bloco" open>
-            <summary>Apuração</summary>
-            <div class="fin-bloco-body">
-                <div class="caixa-grade">
-                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime', mes=mes_atual) }}" class="card-resumo">
-                        <h4>{% if regime_apuracao == 'caixa' %}Regime de caixa{% else %}Regime de competência{% endif %}</h4>
-                        <div class="valor" style="font-size:1.05rem;">{% if regime_apuracao == 'caixa' %}Pelo pagamento{% else %}Pelo vencimento{% endif %}</div>
-                        <span class="hint">Abrir relatório</span>
-                    </a>
-                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='pago_mes', mes=mes_atual) }}" class="card-resumo recebido">
-                        <h4>Pago no mês</h4>
-                        <div class="valor">R$ {{ (totais.recebido_caixa or 0)|moeda }}</div>
-                        <span class="hint">Abrir relatório das baixas</span>
-                    </a>
-                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='recebido', mes=mes_atual) }}" class="card-resumo liquido">
-                        <h4>Entrou na conta</h4>
-                        <div class="valor">R$ {{ (totais.recebido)|moeda }}</div>
-                        <span class="hint">Abrir relatório</span>
-                    </a>
-                    {% if regime_atual == 'simples_nacional' and apuracao_simples %}
-                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
-                        <h4>Base do DAS</h4>
-                        <div class="valor">R$ {{ (apuracao_simples.receita_mes)|moeda }}</div>
-                        <span class="hint">{% if regime_apuracao == 'caixa' %}Baixas do mês · abrir relatório{% else %}Vencimento do mês · abrir relatório{% endif %}</span>
-                    </a>
-                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo">
-                        <h4>DAS</h4>
-                        <div class="valor">R$ {{ (apuracao_simples.das)|moeda }}</div>
-                        <span class="hint">{{ "%.2f"|format(apuracao_simples.aliquota_efetiva_pct) }}% · abrir relatório</span>
-                    </a>
-                    {% elif regime_atual == 'lucro_presumido' and apuracao_presumido %}
-                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
-                        <h4>Base do mês</h4>
-                        <div class="valor">R$ {{ (apuracao_presumido.receita_mes)|moeda }}</div>
-                        <span class="hint">Abrir relatório</span>
-                    </a>
-                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo">
-                        <h4>IRPJ e CSLL</h4>
-                        <div class="valor">R$ {{ ((apuracao_presumido.irpj or 0) + (apuracao_presumido.csll or 0))|moeda }}</div>
-                        <span class="hint">Abrir relatório</span>
-                    </a>
-                    {% elif apuracao_pis_cofins %}
-                    <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo tributos">
-                        <h4>PIS + COFINS</h4>
-                        <div class="valor">R$ {{ (apuracao_pis_cofins.total)|moeda }}</div>
-                        <span class="hint">Abrir relatório</span>
-                    </a>
-                    {% endif %}
-                </div>
-                {% if regime_apuracao == 'caixa' %}
-                <div class="caixa-lista">
-                    <h3>Pagamentos deste mês</h3>
-                    <p class="hint" style="margin:0 0 4px;">Cada baixa abaixo entra no regime de caixa. O vencimento pode ser de outro mês.</p>
-                    {% if recebimentos_caixa %}
-                        {% for item in recebimentos_caixa %}
-                        <div class="caixa-item">
-                            <span>{{ item.data_pagamento.strftime('%d/%m/%Y') if item.data_pagamento else '—' }} · {{ item.nome_completo or 'Aluno' }}{% if item.descricao %} · {{ item.descricao }}{% endif %}</span>
-                            <strong>R$ {{ item.valor|moeda }}</strong>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                        <p class="hint">Nenhum pagamento com baixa em {{ mes_label }}.</p>
-                    {% endif %}
-                </div>
-                {% endif %}
             </div>
         </details>
         {% endif %}
@@ -1102,6 +1043,14 @@
                     <label for="dataLote">Data da baixa</label>
                     <input id="dataLote" type="date" name="data_pagamento" form="formBaixaLote" value="{{ data_hoje }}" required>
                 </div>
+                <div>
+                    <label for="jurosLote">Juros (%)</label>
+                    <input id="jurosLote" type="text" name="juros_percentual" form="formBaixaLote" inputmode="decimal" placeholder="0,00" aria-label="Juros em porcentagem">
+                </div>
+                <div>
+                    <label for="multaLote">Multa (R$)</label>
+                    <input id="multaLote" type="text" name="multa_valor" form="formBaixaLote" inputmode="decimal" placeholder="0,00" aria-label="Multa em valor fixo">
+                </div>
                 <button type="button" class="btn btn-success" id="btnBaixaLote" disabled>Dar baixa nos selecionados</button>
                 <button type="button" class="btn btn-warning" id="btnTirarLote" disabled>Tirar baixa dos selecionados</button>
             </div>
@@ -1170,6 +1119,12 @@
                             </label>
                             <label>Data da baixa
                                 <input type="date" name="data_pagamento" required value="{{ data_hoje }}" class="{% if regime_apuracao == 'caixa' %}data-baixa-caixa{% endif %}">
+                            </label>
+                            <label>Juros (%)
+                                <input type="text" name="juros_percentual" inputmode="decimal" placeholder="0,00" aria-label="Juros em porcentagem">
+                            </label>
+                            <label>Multa (R$)
+                                <input type="text" name="multa_valor" inputmode="decimal" placeholder="0,00" aria-label="Multa em valor fixo">
                             </label>
                             <button type="submit" class="btn btn-success btn-mini">Dar baixa</button>
                         </form>
@@ -1274,6 +1229,12 @@
                                 <td>
                                     <div class="acoes-cobranca">
                                         {% if item.status != 'Pago' %}
+                                        <label class="campo-mini">Juros %
+                                            <input type="text" name="juros_percentual" form="baixa-{{ item.id }}" inputmode="decimal" placeholder="0,00" aria-label="Juros em porcentagem">
+                                        </label>
+                                        <label class="campo-mini">Multa R$
+                                            <input type="text" name="multa_valor" form="baixa-{{ item.id }}" inputmode="decimal" placeholder="0,00" aria-label="Multa em valor fixo">
+                                        </label>
                                         <select name="forma_pagamento" form="baixa-{{ item.id }}" required aria-label="Forma de pagamento">
                                             <option value="Dinheiro">Dinheiro</option>
                                             <option value="Pix">Pix</option>

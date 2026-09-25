@@ -619,6 +619,122 @@ def pdf_regime_apuracao(escola, mes_label, regime_apuracao, regime_tributario):
     return _saida(pdf)
 
 
+def _rotulo_parcela(item):
+    nome = (item.get("nome_completo") or "Aluno").strip()
+    parcela = item.get("parcela_contrato")
+    if parcela:
+        nome = f"{nome} · parcela {parcela}"
+    descricao = (item.get("descricao") or "").strip()
+    if descricao:
+        nome = f"{nome} · {descricao}"
+    return nome[:90]
+
+
+def _total_recebido_item(item):
+    return (
+        float(item.get("valor") or 0)
+        + float(item.get("juros_valor") or 0)
+        + float(item.get("multa_valor") or 0)
+    )
+
+
+def pdf_regime_detalhado(escola, mes_label, regime_apuracao, regime_tributario, recebidos, pendentes, atrasados):
+    caixa = (regime_apuracao or "") == "caixa"
+    pdf = RelatorioPDF("Regime de caixa" if caixa else "Regime de competência")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola} · {mes_label} · {nome_regime(regime_tributario)}")
+    if caixa:
+        pdf.paragrafo(
+            "No regime de caixa, o imposto do mês usa o que foi recebido, não o que foi emitido. "
+            "Entra na base a mensalidade que teve baixa neste mês, mais os juros percentuais e a multa fixa "
+            "cobrados nessa baixa. O vencimento pode ser de outro mês. "
+            "Parcela emitida e ainda sem baixa, mesmo atrasada, fica fora da base até o pagamento."
+        )
+        pdf.paragrafo(
+            "No Simples Nacional, essa é a opção de apurar pelo recebimento. "
+            "No Lucro Presumido, PIS, COFINS, IRPJ e CSLL deste mês usam a mesma base recebida. "
+            "A DRE continua simplificada, sem plano de contas."
+        )
+    else:
+        pdf.paragrafo(
+            "No regime de competência, a mensalidade entra no imposto pelo vencimento, paga ou não. "
+            "A data da baixa não muda esse mês. Juros e multa só existem depois da baixa e aparecem "
+            "no lançamento pago, somados ao que entrou na conta."
+        )
+
+    pdf.secao("O que foi pago e entrou neste mês")
+    if caixa:
+        pdf.paragrafo("Cada linha abaixo teve baixa neste mês. Por isso entra na base do regime de caixa.")
+    else:
+        pdf.paragrafo("Baixas deste mês. No regime de competência, a mensalidade já entrou pelo vencimento.")
+    total_pago = 0.0
+    if not recebidos:
+        pdf.paragrafo("Nenhuma baixa neste mês.")
+    for item in recebidos or []:
+        entrou = _total_recebido_item(item)
+        total_pago += entrou
+        pdf.linha(_rotulo_parcela(item), _brl(entrou), negrito=True)
+        juros_pct = float(item.get("juros_percentual") or 0)
+        partes = [
+            f"Vencia em {_data_br(item.get('data_vencimento'))}",
+            f"baixa em {_data_br(item.get('data_pagamento'))}",
+            f"mensalidade {_brl(item.get('valor'))}",
+        ]
+        if juros_pct or float(item.get("juros_valor") or 0):
+            partes.append(f"juros {juros_pct:g}% = {_brl(item.get('juros_valor'))}")
+        if float(item.get("multa_valor") or 0):
+            partes.append(f"multa fixa {_brl(item.get('multa_valor'))}")
+        if item.get("forma_pagamento"):
+            partes.append(str(item.get("forma_pagamento")))
+        if caixa:
+            partes.append("entrou porque a baixa é deste mês")
+        pdf.paragrafo(". ".join(partes) + ".")
+    pdf.linha("Total que entrou no mês", _brl(total_pago), negrito=True)
+
+    pdf.secao("O que não foi pago")
+    pdf.paragrafo(
+        "Mensalidades com vencimento neste mês que ainda não venceram e não têm baixa. "
+        + ("No regime de caixa, ficam fora do imposto até o pagamento." if caixa else "No regime de competência, já entram pelo vencimento.")
+    )
+    total_pendente = 0.0
+    if not pendentes:
+        pdf.paragrafo("Nenhuma mensalidade pendente neste vencimento.")
+    for item in pendentes or []:
+        valor = float(item.get("valor") or 0)
+        total_pendente += valor
+        pdf.linha(_rotulo_parcela(item), _brl(valor), negrito=True)
+        pdf.paragrafo(
+            f"Vence em {_data_br(item.get('data_vencimento'))} e ainda não houve baixa. "
+            "Por isso não foi paga."
+        )
+    pdf.linha("Total pendente do vencimento", _brl(total_pendente), negrito=True)
+
+    pdf.secao("O que está em atraso, inclusive parcelas anteriores")
+    pdf.paragrafo(
+        "Parcelas com vencimento já passado e sem baixa, deste mês ou de meses anteriores. "
+        + (
+            "Continuam fora da base do regime de caixa. Entram só no mês em que a baixa for dada, com juros e multa se houver."
+            if caixa else
+            "No regime de competência, a parcela atrasada já entrou no mês do vencimento. Ela segue em aberto na cobrança."
+        )
+    )
+    total_atraso = 0.0
+    if not atrasados:
+        pdf.paragrafo("Nenhuma parcela em atraso.")
+    for item in atrasados or []:
+        valor = float(item.get("valor") or 0)
+        total_atraso += valor
+        pdf.linha(_rotulo_parcela(item), _brl(valor), negrito=True)
+        pdf.paragrafo(
+            f"Venceu em {_data_br(item.get('data_vencimento'))} e não há data de baixa. "
+            "O atraso é a falta de pagamento dessa parcela."
+        )
+    pdf.linha("Total em atraso", _brl(total_atraso), negrito=True)
+    if caixa:
+        pdf.linha("Base do imposto neste mês", _brl(total_pago), negrito=True)
+    return _saida(pdf)
+
+
 def pdf_contracheque(escola, mes_label, item):
     pdf = RelatorioPDF("Contra-cheque")
     pdf.add_page()
