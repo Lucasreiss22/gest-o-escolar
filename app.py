@@ -37,6 +37,8 @@ from alunos import (
     listar_alunos,
     atualizar_responsavel,
     deletar_responsavel,
+    buscar_cpf_repetido,
+    mensagem_cpf_repetido,
 )
 from simples_nacional import (
     montar_quadro_simples,
@@ -2912,6 +2914,13 @@ def gerenciar_usuarios():
                         if existente:
                             fid = existente["id"]
 
+                    repetido = buscar_cpf_repetido(cursor, cpf, ignorar_funcionario_id=fid or None)
+                    if repetido:
+                        conexao.rollback()
+                        flash(mensagem_cpf_repetido(*repetido), "danger")
+                        if fid:
+                            return redirect(url_for("gerenciar_usuarios", fid=fid))
+                        return redirect(url_for("gerenciar_usuarios"))
                     inicio_contrato = limpar_campo("data_inicio_contrato") or limpar_campo("data_contratacao") or datetime.now().strftime("%Y-%m-%d")
                     valores_folha = (
                         nome, cpf, nasc, cargo, telefone, email,
@@ -4038,9 +4047,11 @@ def pagina_alunos():
                 extra = " | ".join(erros[:8])
                 if len(erros) > 8:
                     extra += f" (+{len(erros) - 8})"
-                flash(f"{msg} Falhas: {extra}", "danger" if not ok else "success")
-            else:
-                flash(msg, "success" if ok else "danger")
+                flash(extra, "danger")
+            if ok:
+                flash(msg, "success")
+            elif not erros:
+                flash(msg, "danger")
             return redirect(url_for("pagina_alunos"))
 
         if acao == "cadastrar_aluno":
@@ -4162,6 +4173,8 @@ def pagina_alunos():
                             conexao_c.close()
                 else:
                     flash("Erro ao cadastrar aluno. Verifique os campos.", "danger")
+            except ValueError as e:
+                flash(str(e), "danger")
             except Exception as e:
                 flash(f"Erro de banco de dados: {e}", "danger")
 
@@ -4478,8 +4491,13 @@ def editar_aluno(aluno_id):
             status = "inativo" if status_bruto in ["inativo", "inactive", "false", "0", "off"] else "ativo"
             
             telefone_principal = limpar_campo("telefone_principal") or request.form.get("telefone_principal")
+            cpf_aluno = limpar_campo("cpf")
 
             with conexao.cursor() as cursor:
+                repetido = buscar_cpf_repetido(cursor, cpf_aluno, ignorar_aluno_id=aluno_id)
+                if repetido:
+                    flash(mensagem_cpf_repetido(*repetido), "danger")
+                    return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
                 cursor.execute("""
                     UPDATE alunos 
                     SET nome_completo = %s,
@@ -5774,31 +5792,36 @@ def pagina_financeiro():
                         salario = _float_form("salario")
                         valor_hora = _float_form("valor_hora")
                         horas_mes = _float_form("horas_mes")
-                        cursor.execute(
-                            """
-                            INSERT INTO funcionarios (
-                                nome_completo, cpf, data_nascimento, cargo, telefone, email, salario, ativo,
-                                tipo_contrato, valor_hora, horas_mes, reter_federal, reter_iss, aliquota_iss
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s)
-                            """,
-                            (
-                                limpar_campo("nome_completo"),
-                                limpar_campo("cpf") or f"TMP{datetime.now().strftime('%H%M%S')}",
-                                limpar_campo("data_nascimento") or "2000-01-01",
-                                _cargo_do_form() or "Auxiliar",
-                                limpar_campo("telefone") or "(00) 00000-0000",
-                                limpar_campo("email"),
-                                salario,
-                                request.form.get("tipo_contrato") or "clt_mensalista",
-                                valor_hora,
-                                horas_mes,
-                                request.form.get("reter_federal") == "1",
-                                request.form.get("reter_iss") == "1",
-                                float((request.form.get("aliquota_iss") or "5").replace(",", ".") or 5),
-                            ),
-                        )
-                        conexao.commit()
-                        flash("✅ Funcionário incluído na folha.", "success")
+                        cpf_func = limpar_campo("cpf") or f"TMP{datetime.now().strftime('%H%M%S')}"
+                        repetido = buscar_cpf_repetido(cursor, cpf_func)
+                        if repetido:
+                            flash(mensagem_cpf_repetido(*repetido), "danger")
+                        else:
+                            cursor.execute(
+                                """
+                                INSERT INTO funcionarios (
+                                    nome_completo, cpf, data_nascimento, cargo, telefone, email, salario, ativo,
+                                    tipo_contrato, valor_hora, horas_mes, reter_federal, reter_iss, aliquota_iss
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s)
+                                """,
+                                (
+                                    limpar_campo("nome_completo"),
+                                    cpf_func,
+                                    limpar_campo("data_nascimento") or "2000-01-01",
+                                    _cargo_do_form() or "Auxiliar",
+                                    limpar_campo("telefone") or "(00) 00000-0000",
+                                    limpar_campo("email"),
+                                    salario,
+                                    request.form.get("tipo_contrato") or "clt_mensalista",
+                                    valor_hora,
+                                    horas_mes,
+                                    request.form.get("reter_federal") == "1",
+                                    request.form.get("reter_iss") == "1",
+                                    float((request.form.get("aliquota_iss") or "5").replace(",", ".") or 5),
+                                ),
+                            )
+                            conexao.commit()
+                            flash("✅ Funcionário incluído na folha.", "success")
 
                     elif acao == "atualizar_contrato":
                         fid = request.form.get("funcionario_id")

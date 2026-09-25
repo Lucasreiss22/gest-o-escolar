@@ -82,6 +82,49 @@ def _so_digitos(valor):
     return re.sub(r"\D", "", str(valor or ""))
 
 
+def mensagem_cpf_repetido(tipo, nome):
+    papel = "aluno" if tipo == "aluno" else "professor"
+    nome = (nome or "").strip()
+    destino = f"o {papel} {nome}" if nome else f"outro {papel}"
+    return f"O CPF já foi cadastrado para {destino} e não pode ser cadastrado duas vezes."
+
+
+def buscar_cpf_repetido(cursor, cpf, ignorar_aluno_id=None, ignorar_funcionario_id=None):
+    """Procura o CPF em alunos e professores. Responsável e autorizado não entram."""
+    digitos = _so_digitos(cpf)
+    if not digitos:
+        return None
+    cursor.execute(
+        """
+        SELECT id, nome_completo
+        FROM alunos
+        WHERE regexp_replace(COALESCE(cpf, ''), '[^0-9]', '', 'g') = %s
+          AND (%s::int IS NULL OR id <> %s)
+        LIMIT 1
+        """,
+        (digitos, ignorar_aluno_id, ignorar_aluno_id),
+    )
+    row = cursor.fetchone()
+    if row:
+        nome = row["nome_completo"] if isinstance(row, dict) else row[1]
+        return ("aluno", nome)
+    cursor.execute(
+        """
+        SELECT id, nome_completo
+        FROM funcionarios
+        WHERE regexp_replace(COALESCE(cpf, ''), '[^0-9]', '', 'g') = %s
+          AND (%s::int IS NULL OR id <> %s)
+        LIMIT 1
+        """,
+        (digitos, ignorar_funcionario_id, ignorar_funcionario_id),
+    )
+    row = cursor.fetchone()
+    if row:
+        nome = row["nome_completo"] if isinstance(row, dict) else row[1]
+        return ("professor", nome)
+    return None
+
+
 def _mapa_turmas(cursor):
     cursor.execute("SELECT id, nome FROM turmas")
     mapa = {}
@@ -218,6 +261,9 @@ def _atualizar_aluno_planilha(cursor, aluno_id, dados_aluno, responsavel_1=None,
 
 
 def _inserir_aluno(cursor, dados_aluno: dict, responsavel_1: dict = None, responsavel_2: dict = None):
+    repetido = buscar_cpf_repetido(cursor, dados_aluno.get("cpf"))
+    if repetido:
+        raise ValueError(mensagem_cpf_repetido(*repetido))
     matricula = dados_aluno.get("matricula") or gerar_proxima_matricula(cursor)
     sexo = _sexo_normalizado(dados_aluno.get("sexo"))
     estado = (dados_aluno.get("estado") or "")[:2].upper() or None
@@ -469,10 +515,10 @@ def cadastrar_alunos_lote(itens):
     try:
         cursor = conexao.cursor(cursor_factory=RealDictCursor)
         mapa = _mapa_turmas(cursor)
-        cursor.execute("SELECT id, matricula, cpf FROM alunos WHERE COALESCE(cpf, '') <> ''")
+        cursor.execute("SELECT id, matricula, nome_completo, cpf FROM alunos WHERE COALESCE(cpf, '') <> ''")
         por_cpf = {}
         for row in cursor.fetchall() or []:
-            chave = _so_digitos(row["cpf"] if isinstance(row, dict) else row[2])
+            chave = _so_digitos(row["cpf"] if isinstance(row, dict) else row[3])
             if chave:
                 por_cpf[chave] = row
         novos = 0
@@ -491,12 +537,11 @@ def cadastrar_alunos_lote(itens):
             dados["_mapa_turmas"] = mapa
             try:
                 cursor.execute("SAVEPOINT aluno_lote")
-                existente = por_cpf.get(_so_digitos(dados.get("cpf")))
+                chave_cpf = _so_digitos(dados.get("cpf"))
+                existente = por_cpf.get(chave_cpf) if chave_cpf else None
                 if existente:
-                    aluno_id = existente["id"] if isinstance(existente, dict) else existente[0]
-                    matricula = existente["matricula"] if isinstance(existente, dict) else existente[1]
-                    faltando = _atualizar_aluno_planilha(cursor, aluno_id, dados, item.get("resp1"), item.get("resp2"))
-                    atualizado = True
+                    nome_existente = existente["nome_completo"] if isinstance(existente, dict) else existente[2]
+                    raise ValueError(mensagem_cpf_repetido("aluno", nome_existente))
                 else:
                     dados["matricula"] = matriculas[ponteiro]
                     ponteiro += 1
@@ -504,8 +549,13 @@ def cadastrar_alunos_lote(itens):
                     faltando = []
                     _, faltando = _ids_turmas(dados.get("turma_nome"), mapa)
                     atualizado = False
-                    if _so_digitos(dados.get("cpf")):
-                        por_cpf[_so_digitos(dados.get("cpf"))] = {"id": aluno_id, "matricula": matricula, "cpf": dados.get("cpf")}
+                    if chave_cpf:
+                        por_cpf[chave_cpf] = {
+                            "id": aluno_id,
+                            "matricula": matricula,
+                            "nome_completo": nome,
+                            "cpf": dados.get("cpf"),
+                        }
                 cursor.execute("RELEASE SAVEPOINT aluno_lote")
                 if faltando:
                     avisos.append(f"Linha {i} ({nome}): turma não encontrada ({', '.join(faltando)}).")
