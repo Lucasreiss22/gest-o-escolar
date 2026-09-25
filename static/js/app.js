@@ -378,8 +378,175 @@
         if (ph) ph.hidden = true;
     });
 
+    function limparRotulo(texto) {
+        return String(texto || "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
+    }
+
+    function rotuloCampo(campo) {
+        var aria = campo.getAttribute("aria-label");
+        if (aria) return limparRotulo(aria);
+        if (campo.id && window.CSS && CSS.escape) {
+            var porFor = document.querySelector('label[for="' + CSS.escape(campo.id) + '"]');
+            if (porFor) return limparRotulo(porFor.textContent);
+        }
+        var nodo = campo.parentElement;
+        for (var i = 0; i < 4 && nodo; i++) {
+            if (nodo.tagName === "LABEL") return limparRotulo(nodo.textContent);
+            var filhos = nodo.children || [];
+            for (var j = 0; j < filhos.length; j++) {
+                if (filhos[j].tagName === "LABEL") return limparRotulo(filhos[j].textContent);
+            }
+            nodo = nodo.parentElement;
+        }
+        var placeholder = campo.getAttribute("placeholder");
+        if (placeholder && placeholder !== "Digite o valor") return limparRotulo(placeholder);
+        var nome = (campo.getAttribute("name") || "campo").replace(/[_-]+/g, " ");
+        return nome.charAt(0).toUpperCase() + nome.slice(1);
+    }
+
+    function abaDoCampo(campo) {
+        var pane = campo.closest(".tab-pane");
+        if (!pane || !pane.id) return "";
+        var botao = document.querySelector('[data-bs-target="#' + pane.id + '"]');
+        if (!botao) return "";
+        return limparRotulo(botao.textContent).replace(/^\d+\.\s*/, "");
+    }
+
+    function descreverCampo(campo) {
+        var nome = rotuloCampo(campo);
+        var aba = abaDoCampo(campo);
+        return aba ? nome + " (aba " + aba + ")" : nome;
+    }
+
+    function mensagemCampo(campo) {
+        var nome = descreverCampo(campo);
+        if (campo._problema === "email") return "O campo " + nome + " não está em um formato válido.";
+        if (campo._problema === "curto") return "O campo " + nome + " está curto demais.";
+        return "Falta preencher o campo " + nome + ".";
+    }
+
+    function revelarCampo(campo) {
+        var pane = campo.closest(".tab-pane");
+        if (pane && pane.id && !pane.classList.contains("show")) {
+            var conteudo = pane.parentElement;
+            if (conteudo) {
+                conteudo.querySelectorAll(".tab-pane").forEach(function (item) {
+                    item.classList.remove("show", "active");
+                });
+            }
+            pane.classList.add("show", "active");
+            var botao = document.querySelector('[data-bs-target="#' + pane.id + '"]');
+            if (botao) {
+                var lista = botao.closest(".nav");
+                if (lista) {
+                    lista.querySelectorAll(".nav-link").forEach(function (item) {
+                        item.classList.remove("active");
+                        item.setAttribute("aria-selected", "false");
+                    });
+                }
+                botao.classList.add("active");
+                botao.setAttribute("aria-selected", "true");
+            }
+        }
+        var detalhes = campo.closest("details");
+        if (detalhes) detalhes.open = true;
+    }
+
+    function problemaCampo(campo, radios) {
+        if (!campo || campo.disabled || campo.type === "hidden" || campo.type === "button" || campo.type === "submit") return "";
+        if (campo.type === "radio") {
+            if (radios[campo.name]) return "";
+            radios[campo.name] = true;
+            if (!campo.required) return "";
+            var marcado = campo.form && campo.form.querySelector('input[type="radio"][name="' + campo.name + '"]:checked');
+            return marcado ? "" : "vazio";
+        }
+        var vazio = campo.type === "checkbox" ? !campo.checked
+            : campo.type === "file" ? !(campo.files && campo.files.length)
+            : String(campo.value || "").trim() === "";
+        if (campo.required && vazio) return "vazio";
+        if (!vazio && campo.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(campo.value).trim())) return "email";
+        if (!vazio && campo.minLength > 0 && String(campo.value).length < campo.minLength) return "curto";
+        return "";
+    }
+
+    function camposInvalidos(form) {
+        var lista = [];
+        var radios = {};
+        form.querySelectorAll("input, select, textarea").forEach(function (campo) {
+            var tipo = problemaCampo(campo, radios);
+            if (!tipo) return;
+            campo._problema = tipo;
+            lista.push(campo);
+        });
+        return lista;
+    }
+
+    function mostrarAviso(form, campos) {
+        var box = form.querySelector(".aviso-campos");
+        if (!box) {
+            box = document.createElement("div");
+            box.className = "aviso-campos";
+            box.setAttribute("role", "alert");
+            form.insertBefore(box, form.firstChild);
+        }
+        var itens = campos.map(function (campo) {
+            return "<li>" + mensagemCampo(campo).replace(/[&<>]/g, function (ch) {
+                return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch];
+            }) + "</li>";
+        });
+        box.innerHTML = "<strong>Revise o cadastro.</strong><ul>" + itens.join("") + "</ul>";
+        box.hidden = false;
+        if (box.scrollIntoView) box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+
+    function avisarCampos(form) {
+        var faltando = camposInvalidos(form);
+        form.querySelectorAll(".campo-faltando").forEach(function (item) {
+            item.classList.remove("campo-faltando");
+        });
+        if (!faltando.length) {
+            var aviso = form.querySelector(".aviso-campos");
+            if (aviso) aviso.hidden = true;
+            return true;
+        }
+        faltando.forEach(function (item) { item.classList.add("campo-faltando"); });
+        mostrarAviso(form, faltando);
+        revelarCampo(faltando[0]);
+        if (faltando[0].focus) faltando[0].focus();
+        return false;
+    }
+
+    function prepararFormularios() {
+        document.querySelectorAll("form").forEach(function (form) {
+            form.setAttribute("novalidate", "novalidate");
+        });
+    }
+
+    document.addEventListener("submit", function (event) {
+        var form = event.target;
+        if (!form || form.tagName !== "FORM") return;
+        if (!avisarCampos(form)) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }, true);
+
+    document.addEventListener("input", function (event) {
+        var campo = event.target;
+        if (campo && campo.setCustomValidity) campo.setCustomValidity("");
+        if (campo && campo.classList) campo.classList.remove("campo-faltando");
+    }, true);
+
+    document.addEventListener("change", function (event) {
+        var campo = event.target;
+        if (campo && campo.setCustomValidity) campo.setCustomValidity("");
+        if (campo && campo.classList) campo.classList.remove("campo-faltando");
+    }, true);
+
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", function () {
+            prepararFormularios();
             aplicarCamposContrato();
             aplicarCamposCusto();
             ligarTodosCep();
@@ -387,6 +554,7 @@
             ligarHoraPickers();
         });
     } else {
+        prepararFormularios();
         aplicarCamposContrato();
         aplicarCamposCusto();
         ligarTodosCep();

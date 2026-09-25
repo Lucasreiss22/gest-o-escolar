@@ -357,6 +357,24 @@ input, select, textarea, button {
 .pdf-bar .btn { width: 100%; }
 .pdf-bar-hint { font-size: 0.78rem; color: #64748b; margin: 8px 0 0; line-height: 1.4; }
 
+.aviso-campos {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 0 0 14px;
+    font-size: 0.92rem;
+    line-height: 1.45;
+}
+.aviso-campos strong { display: block; margin-bottom: 6px; }
+.aviso-campos ul { margin: 0; padding-left: 18px; }
+.aviso-campos li { margin: 2px 0; }
+.campo-faltando {
+    border-color: #dc2626 !important;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+}
+
 .list-card {
     background: #fff;
     border: 1px solid #e2e8f0;
