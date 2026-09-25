@@ -155,6 +155,22 @@
         .baixa-lote { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 0 0 12px; }
         .baixa-lote label { font-size: 0.78rem; color: #64748b; font-weight: 700; display: block; margin-bottom: 4px; }
         .baixa-lote select, .baixa-lote input[type="date"] { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
+        .aviso-caixa { background: #e0f2fe; color: #0c4a6e; border-radius: 10px; padding: 10px 12px; font-size: 0.84rem; line-height: 1.45; margin: 0 0 12px; }
+        .tabela-cobrancas { min-width: 980px; }
+        .tabela-cobrancas th, .tabela-cobrancas td { vertical-align: middle; padding: 10px 8px; }
+        .cobranca-nome { display: block; font-size: 0.88rem; }
+        .cobranca-turma { display: block; margin-top: 2px; color: #64748b; font-size: 0.75rem; font-weight: 500; }
+        .baixa-linha { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+        .baixa-linha label { display: flex; flex-direction: column; gap: 3px; min-width: 132px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #64748b; }
+        .baixa-linha select, .baixa-linha input[type="date"] { padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem; background: #fff; color: #1e293b; }
+        .baixa-linha input.data-baixa-caixa, .tabela-cobrancas input.data-baixa-caixa { border-color: #0284c7; box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15); }
+        .tabela-cobrancas form { margin: 0; }
+        .tabela-cobrancas .baixa-linha { flex-wrap: nowrap; }
+        .tabela-cobrancas td:nth-child(7) { min-width: 220px; }
+        .tabela-cobrancas input[type="date"], .tabela-cobrancas select { padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem; background: #fff; color: #1e293b; }
+        .baixa-forma { align-self: center; font-size: 0.82rem; font-weight: 700; color: #334155; min-width: 88px; }
+        .acoes-cobranca { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .btn-mini { padding: 6px 10px; font-size: 0.75rem; }
         button.card-resumo { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
         .calc-link { font-size: 0.72rem; color: #3498db; margin-top: 5px; display: block; font-weight: 600; }
         button.card-resumo:hover { box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12); }
@@ -1056,6 +1072,9 @@
                 Cobranças de {{ mes_label }}
                 {% if status %}<span style="font-size: 0.85rem; color: #3498db; font-weight: normal;">({{ status }})</span>{% endif %}
                 </h3>
+            {% if regime_apuracao == 'caixa' %}
+            <p class="aviso-caixa">No regime de caixa, a data da baixa é o dia em que o valor entrou. O imposto usa esse mês, e não o vencimento.</p>
+            {% endif %}
 
             <form id="formBaixaLote" action="{{ url_for('pagina_financeiro') }}" method="POST">
                 <input type="hidden" name="acao" id="acaoBaixaLote" value="dar_baixa_lote">
@@ -1080,8 +1099,8 @@
                     </select>
                 </div>
                 <div>
-                    <label for="dataLote">Data do pagamento</label>
-                    <input id="dataLote" type="date" name="data_pagamento" form="formBaixaLote" value="{{ data_hoje }}">
+                    <label for="dataLote">Data da baixa</label>
+                    <input id="dataLote" type="date" name="data_pagamento" form="formBaixaLote" value="{{ data_hoje }}" required>
                 </div>
                 <button type="button" class="btn btn-success" id="btnBaixaLote" disabled>Dar baixa nos selecionados</button>
                 <button type="button" class="btn btn-warning" id="btnTirarLote" disabled>Tirar baixa dos selecionados</button>
@@ -1119,80 +1138,81 @@
                 {% if lancamentos %}
                     {% for item in lancamentos %}
                     {% set st = 'pago' if item.status == 'Pago' else ('pendente' if item.status == 'Pendente' else 'atrasado') %}
+                    {% set venc_iso = item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' %}
+                    {% set pag_iso = item.data_pagamento.strftime('%Y-%m-%d') if item.data_pagamento else '' %}
                     <div class="fin-item st-{{ st }}">
                         <div class="fin-item-top">
                             <label style="display:flex;align-items:center;gap:8px;">
                                 <input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote">
-                                <strong>{{ item.nome_completo or 'Aluno não vinculado' }}{% if item.turma_nome %} turma: {{ item.turma_nome }}{% endif %}</strong>
+                                <strong>{{ item.nome_completo or 'Aluno não vinculado' }}{% if item.turma_nome %} · {{ item.turma_nome }}{% endif %}</strong>
                             </label>
                             <strong>R$ {{ (item.valor|float if item.valor else 0)|moeda }}</strong>
-                    </div>
+                        </div>
                         <div class="fin-item-meta">
-                            {{ item.descricao or '-' }} · vence
-                            {{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}
-                            ·
-                            <span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span>
-                            </div>
-                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="fin-item-meta" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
-                            <input type="hidden" name="acao" value="editar_cobranca">
+                            {{ item.descricao or '-' }} · vence {{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}
+                            · <span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span>
+                        </div>
+                        {% if item.status != 'Pago' %}
+                        <form class="baixa-linha" action="{{ url_for('pagina_financeiro') }}" method="POST">
+                            <input type="hidden" name="acao" value="dar_baixa">
                             <input type="hidden" name="cobranca_id" value="{{ item.id }}">
                             <input type="hidden" name="aba" value="receitas">
                             <input type="hidden" name="mes" value="{{ mes_atual }}">
-                            <input name="descricao" value="{{ item.descricao or '' }}" style="flex:1;min-width:140px;padding:6px;border:1px solid #ccc;border-radius:4px;" placeholder="Descrição">
-                            <input name="valor" data-moeda placeholder="Valor" value="{{ item.valor|moeda_campo }}" style="width:110px;padding:6px;border:1px solid #ccc;border-radius:4px;">
-                            <label style="font-size:0.72rem;color:#64748b;">Vencimento
-                                <input type="date" name="data_vencimento" aria-label="Vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="display:block;padding:6px;border:1px solid #ccc;border-radius:4px;">
-                            </label>
-                            <label style="font-size:0.72rem;color:#64748b;">Pagamento
-                                <input type="date" name="data_pagamento" aria-label="Data de pagamento" value="{{ item.data_pagamento.strftime('%Y-%m-%d') if item.data_pagamento else '' }}" style="display:block;padding:6px;border:1px solid #ccc;border-radius:4px;">
-                            </label>
-                            <select name="status" style="padding:6px;border:1px solid #ccc;border-radius:4px;">
-                                <option value="Pendente" {% if item.status == 'Pendente' %}selected{% endif %}>Pendente</option>
-                                <option value="Atrasado" {% if item.status == 'Atrasado' %}selected{% endif %}>Atrasado</option>
-                                <option value="Pago" {% if item.status == 'Pago' %}selected{% endif %}>Pago</option>
-                            </select>
-                            <button type="submit" class="btn btn-secondary" style="padding:6px 10px;font-size:0.8rem;">Salvar</button>
-                        </form>
-                        <div class="fin-item-acoes">
-                            {% if item.status != 'Pago' %}
-                            <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center; flex: 1;">
-                                <input type="hidden" name="acao" value="dar_baixa">
-                                <input type="hidden" name="cobranca_id" value="{{ item.id }}">
-                                <input type="hidden" name="data_pagamento" value="{{ data_hoje }}">
-                                <input type="hidden" name="aba" value="receitas">
-                                <input type="hidden" name="mes" value="{{ mes_atual }}">
-                                <select name="forma_pagamento" style="padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.8rem; flex:1;" required>
+                            <label>Forma
+                                <select name="forma_pagamento" required>
                                     <option value="Dinheiro">Dinheiro</option>
                                     <option value="Pix">Pix</option>
-                                    <option value="Cartão de Crédito">Cartão</option>
+                                    <option value="Cartão de Crédito">Cartão de crédito</option>
+                                    <option value="Cartão de Débito">Cartão de débito</option>
                                     <option value="Boleto">Boleto</option>
-                                    <option value="Transferência">TED</option>
-                        </select>
-                                <button type="submit" class="btn btn-success" style="padding: 6px 10px; font-size: 0.8rem;">Baixa</button>
-                            </form>
-                            {% else %}
+                                    <option value="Transferência">Transferência</option>
+                                </select>
+                            </label>
+                            <label>Data da baixa
+                                <input type="date" name="data_pagamento" required value="{{ data_hoje }}" class="{% if regime_apuracao == 'caixa' %}data-baixa-caixa{% endif %}">
+                            </label>
+                            <button type="submit" class="btn btn-success btn-mini">Dar baixa</button>
+                        </form>
+                        {% else %}
+                        <form class="baixa-linha" action="{{ url_for('pagina_financeiro') }}" method="POST">
+                            <input type="hidden" name="acao" value="alterar_data_pagamento">
+                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                            <input type="hidden" name="aba" value="receitas">
+                            <input type="hidden" name="mes" value="{{ mes_atual }}">
+                            <span class="baixa-forma">{{ item.forma_pagamento or 'Dinheiro' }}</span>
+                            <label>Data da baixa
+                                <input type="date" name="data_pagamento" required value="{{ pag_iso }}" class="{% if regime_apuracao == 'caixa' %}data-baixa-caixa{% endif %}">
+                            </label>
+                            <button type="submit" class="btn btn-secondary btn-mini">Salvar data</button>
+                        </form>
+                        {% endif %}
+                        <div class="acoes-cobranca" style="margin-top:8px;">
+                            {% if item.status == 'Pago' %}
                             <form action="{{ url_for('pagina_financeiro') }}" method="POST" onsubmit="return confirm('Tirar a baixa desta mensalidade?');">
                                 <input type="hidden" name="acao" value="tirar_baixa">
                                 <input type="hidden" name="cobranca_id" value="{{ item.id }}">
                                 <input type="hidden" name="aba" value="receitas">
                                 <input type="hidden" name="mes" value="{{ mes_atual }}">
                                 {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
-                                <button type="submit" class="btn btn-warning" style="padding: 6px 10px; font-size: 0.8rem;">Tirar baixa</button>
+                                <button type="submit" class="btn btn-warning btn-mini">Tirar baixa</button>
                             </form>
                             {% endif %}
+                            <button type="button" class="btn btn-secondary btn-mini js-editar-cobranca"
+                                data-id="{{ item.id }}"
+                                data-descricao="{{ item.descricao or '' }}"
+                                data-valor="{{ item.valor|moeda_campo }}"
+                                data-vencimento="{{ venc_iso }}"
+                                data-status="{{ item.status or 'Pendente' }}"
+                                data-pagamento="{{ pag_iso }}">Editar</button>
+                            <a class="btn btn-info btn-mini" href="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}">PDF</a>
+                            <form action="{{ url_for('cobranca_email', cobranca_id=item.id) }}" method="POST">
+                                <button type="submit" class="btn btn-primary btn-mini" onclick="return confirm('Enviar o PDF desta mensalidade por e-mail ao responsável?');">E-mail</button>
+                            </form>
                             {% if pode_excluir('financeiro') %}
                             <form action="{{ url_for('excluir_financeiro', id=item.id) }}" method="POST">
-                                <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
+                                <button type="submit" class="btn btn-danger btn-mini" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
                             </form>
                             {% endif %}
-                            <a class="btn btn-info" href="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}">PDF</a>
-                            <form action="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}" method="POST" style="display:inline;">
-                                <input type="hidden" name="enviar" value="1">
-                                <button class="btn btn-primary" type="submit">E-mail</button>
-                            </form>
-                            <form action="{{ url_for('cobranca_email', cobranca_id=item.id) }}" method="POST">
-                                <button type="submit" class="btn btn-primary" onclick="return confirm('Enviar o PDF desta mensalidade por e-mail ao responsável?');">E-mail</button>
-                            </form>
                         </div>
                     </div>
                     {% endfor %}
@@ -1202,7 +1222,7 @@
             </div>
 
             <div class="table-responsive fin-desktop-table">
-                <table>
+                <table class="tabela-cobrancas">
                     <thead>
                         <tr>
                             <th style="width:36px;"></th>
@@ -1211,7 +1231,7 @@
                             <th>Valor</th>
                             <th>Vencimento</th>
                             <th>Status</th>
-                            <th>Forma / Pagamento</th>
+                            <th>Data da baixa</th>
                             <th>Ações</th>
                         </tr>
                     </thead>
@@ -1219,78 +1239,77 @@
                         {% if lancamentos %}
                             {% for item in lancamentos %}
                             {% set st = 'pago' if item.status == 'Pago' else ('pendente' if item.status == 'Pendente' else 'atrasado') %}
+                            {% set venc_iso = item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' %}
+                            {% set pag_iso = item.data_pagamento.strftime('%Y-%m-%d') if item.data_pagamento else '' %}
                             <tr class="st-{{ st }}">
                                 <td><input class="js-cobranca" type="checkbox" name="cobranca_id" value="{{ item.id }}" form="formBaixaLote" aria-label="Selecionar {{ item.nome_completo or 'cobrança' }}"></td>
-                                <td><strong>{{ item.nome_completo or 'Aluno não vinculado' }}{% if item.turma_nome %} turma: {{ item.turma_nome }}{% endif %}</strong></td>
+                                <td>
+                                    <strong class="cobranca-nome">{{ item.nome_completo or 'Aluno não vinculado' }}</strong>
+                                    {% if item.turma_nome %}<span class="cobranca-turma">{{ item.turma_nome }}</span>{% endif %}
+                                </td>
                                 <td>{{ item.descricao or '-' }}</td>
                                 <td>R$ {{ (item.valor|float if item.valor else 0)|moeda }}</td>
+                                <td>{{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}</td>
+                                <td><span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span></td>
                                 <td>
-                                    <div style="display:flex;gap:4px;align-items:center;">
-                                        <input type="date" name="data_vencimento" form="edit-{{ item.id }}" required aria-label="Data de vencimento" value="{{ item.data_vencimento.strftime('%Y-%m-%d') if item.data_vencimento else '' }}" style="padding:4px 6px;border:1px solid #94a3b8;border-radius:4px;font-size:0.75rem;">
-                                        <button type="submit" class="btn btn-secondary" form="edit-{{ item.id }}" style="padding:5px 8px;font-size:0.75rem;">Salvar</button>
-                                    </div>
-                                </td>
-                                <td>
-                                    <span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span>
-                                </td>
-                                <td>
-                                    {% if item.status == 'Pago' %}
-                                        <div style="font-size:0.75rem;color:#475569;margin-bottom:4px;">{{ item.forma_pagamento or 'Dinheiro' }}</div>
+                                    {% if item.status != 'Pago' %}
+                                    <form id="baixa-{{ item.id }}" action="{{ url_for('pagina_financeiro') }}" method="POST">
+                                        <input type="hidden" name="acao" value="dar_baixa">
+                                        <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                        <input type="hidden" name="aba" value="receitas">
+                                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                        <input type="date" name="data_pagamento" required value="{{ data_hoje }}" aria-label="Data da baixa de {{ item.nome_completo or 'cobrança' }}" class="{% if regime_apuracao == 'caixa' %}data-baixa-caixa{% endif %}">
+                                    </form>
+                                    {% else %}
+                                    <form id="datapag-{{ item.id }}" class="baixa-linha" action="{{ url_for('pagina_financeiro') }}" method="POST">
+                                        <input type="hidden" name="acao" value="alterar_data_pagamento">
+                                        <input type="hidden" name="cobranca_id" value="{{ item.id }}">
+                                        <input type="hidden" name="aba" value="receitas">
+                                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                        <input type="date" name="data_pagamento" required value="{{ pag_iso }}" aria-label="Data da baixa de {{ item.nome_completo or 'cobrança' }}" class="{% if regime_apuracao == 'caixa' %}data-baixa-caixa{% endif %}">
+                                        <button type="submit" class="btn btn-secondary btn-mini">Salvar</button>
+                                    </form>
                                     {% endif %}
-                                    <input type="date" name="data_pagamento" form="edit-{{ item.id }}" title="Data de pagamento" aria-label="Data de pagamento" value="{{ item.data_pagamento.strftime('%Y-%m-%d') if item.data_pagamento else '' }}" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
                                 </td>
                                 <td>
-                                    <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
-                                        <form id="edit-{{ item.id }}" action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center; flex-wrap: wrap;">
-                                            <input type="hidden" name="acao" value="editar_cobranca">
-                                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
-                                            <input type="hidden" name="aba" value="receitas">
-                                            <input type="hidden" name="mes" value="{{ mes_atual }}">
-                                            <input name="descricao" value="{{ item.descricao or '' }}" style="width:120px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
-                                            <input name="valor" data-moeda placeholder="Valor" value="{{ item.valor|moeda_campo }}" style="width:96px;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
-                                            <select name="status" style="padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.75rem;">
-                                                <option value="Pendente" {% if item.status == 'Pendente' %}selected{% endif %}>Pendente</option>
-                                                <option value="Atrasado" {% if item.status == 'Atrasado' %}selected{% endif %}>Atrasado</option>
-                                                <option value="Pago" {% if item.status == 'Pago' %}selected{% endif %}>Pago</option>
-                                            </select>
-                                            <button type="submit" class="btn btn-secondary" style="padding:5px 10px;font-size:0.75rem;">Salvar</button>
-                                        </form>
+                                    <div class="acoes-cobranca">
                                         {% if item.status != 'Pago' %}
-                                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:flex; gap: 5px; align-items: center;">
-                                            <input type="hidden" name="acao" value="dar_baixa">
-                                            <input type="hidden" name="cobranca_id" value="{{ item.id }}">
-                                            <input type="hidden" name="data_pagamento" value="{{ data_hoje }}">
-                                            <input type="hidden" name="aba" value="receitas">
-                                            <input type="hidden" name="mes" value="{{ mes_atual }}">
-                                            <select name="forma_pagamento" style="padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.75rem;" required>
-                                                <option value="Dinheiro">Dinheiro</option>
-                                                <option value="Pix">Pix</option>
-                                                <option value="Cartão de Crédito">Cartão de Crédito</option>
-                                                <option value="Cartão de Débito">Cartão de Débito</option>
-                                                <option value="Boleto">Boleto</option>
-                                                <option value="Transferência">Transferência</option>
-                                            </select>
-                                            <button type="submit" class="btn btn-success" style="padding: 5px 10px; font-size: 0.75rem;">Dar Baixa</button>
-                                        </form>
+                                        <select name="forma_pagamento" form="baixa-{{ item.id }}" required aria-label="Forma de pagamento">
+                                            <option value="Dinheiro">Dinheiro</option>
+                                            <option value="Pix">Pix</option>
+                                            <option value="Cartão de Crédito">Cartão de crédito</option>
+                                            <option value="Cartão de Débito">Cartão de débito</option>
+                                            <option value="Boleto">Boleto</option>
+                                            <option value="Transferência">Transferência</option>
+                                        </select>
+                                        <button type="submit" class="btn btn-success btn-mini" form="baixa-{{ item.id }}">Dar baixa</button>
                                         {% else %}
-                                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" style="display:inline;" onsubmit="return confirm('Tirar a baixa desta mensalidade?');">
+                                        <span class="baixa-forma">{{ item.forma_pagamento or 'Dinheiro' }}</span>
+                                        <form action="{{ url_for('pagina_financeiro') }}" method="POST" onsubmit="return confirm('Tirar a baixa desta mensalidade?');">
                                             <input type="hidden" name="acao" value="tirar_baixa">
                                             <input type="hidden" name="cobranca_id" value="{{ item.id }}">
                                             <input type="hidden" name="aba" value="receitas">
                                             <input type="hidden" name="mes" value="{{ mes_atual }}">
                                             {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
-                                            <button type="submit" class="btn btn-warning" style="padding: 5px 10px; font-size: 0.75rem;">Tirar baixa</button>
+                                            <button type="submit" class="btn btn-warning btn-mini">Tirar baixa</button>
                                         </form>
                                         {% endif %}
+                                        <button type="button" class="btn btn-secondary btn-mini js-editar-cobranca"
+                                            data-id="{{ item.id }}"
+                                            data-descricao="{{ item.descricao or '' }}"
+                                            data-valor="{{ item.valor|moeda_campo }}"
+                                            data-vencimento="{{ venc_iso }}"
+                                            data-status="{{ item.status or 'Pendente' }}"
+                                            data-pagamento="{{ pag_iso }}">Editar</button>
+                                        <a class="btn btn-info btn-mini" href="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}">PDF</a>
+                                        <form action="{{ url_for('cobranca_email', cobranca_id=item.id) }}" method="POST">
+                                            <button type="submit" class="btn btn-primary btn-mini" onclick="return confirm('Enviar o PDF desta mensalidade por e-mail ao responsável?');">E-mail</button>
+                                        </form>
                                         {% if pode_excluir('financeiro') %}
-                                        <form action="{{ url_for('excluir_financeiro', id=item.id) }}" method="POST" style="display:inline;">
-                                            <button type="submit" class="btn btn-danger" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
+                                        <form action="{{ url_for('excluir_financeiro', id=item.id) }}" method="POST">
+                                            <button type="submit" class="btn btn-danger btn-mini" onclick="return confirm('Deseja excluir esta cobrança?');">Excluir</button>
                                         </form>
                                         {% endif %}
-                                        <a class="btn btn-info" href="{{ url_for('cobranca_pdf', cobranca_id=item.id) }}" style="padding:5px 10px; font-size:0.75rem;">PDF</a>
-                                        <form action="{{ url_for('cobranca_email', cobranca_id=item.id) }}" method="POST" style="display:inline;">
-                                            <button type="submit" class="btn btn-primary" style="padding:5px 10px; font-size:0.75rem;" onclick="return confirm('Enviar o PDF desta mensalidade por e-mail ao responsável?');">E-mail</button>
-                                        </form>
                                     </div>
                                 </td>
                             </tr>
@@ -1303,6 +1322,37 @@
                     </tbody>
                 </table>
             </div>
+            <dialog id="dlgEditarCobranca" class="calc-painel">
+                <form action="{{ url_for('pagina_financeiro') }}" method="POST">
+                    <div class="calc-head">
+                        <h3>Editar mensalidade</h3>
+                        <button type="button" class="btn" id="fecharEditarCobranca">Fechar</button>
+                    </div>
+                    <div class="calc-body">
+                        <input type="hidden" name="acao" value="editar_cobranca">
+                        <input type="hidden" name="cobranca_id" id="editId">
+                        <input type="hidden" name="aba" value="receitas">
+                        <input type="hidden" name="mes" value="{{ mes_atual }}">
+                        <input type="hidden" name="status" id="editStatus">
+                        <input type="hidden" name="data_pagamento" id="editPagamento">
+                        <div class="form-grid">
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label for="editDescricao">Descrição</label>
+                                <input id="editDescricao" name="descricao" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="editValor">Valor</label>
+                                <input id="editValor" name="valor" data-moeda required>
+                            </div>
+                            <div class="form-group">
+                                <label for="editVencimento">Vencimento</label>
+                                <input id="editVencimento" type="date" name="data_vencimento" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="margin-top:12px;">Salvar</button>
+                    </div>
+                </form>
+            </dialog>
         </div>
         <script>
         document.addEventListener("DOMContentLoaded", function () {
@@ -1315,6 +1365,21 @@
                     if (data) inicioCobranca.value = data;
                 });
             }
+            var dlgEdit = document.getElementById("dlgEditarCobranca");
+            document.querySelectorAll(".js-editar-cobranca").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    if (!dlgEdit) return;
+                    document.getElementById("editId").value = btn.getAttribute("data-id") || "";
+                    document.getElementById("editDescricao").value = btn.getAttribute("data-descricao") || "";
+                    document.getElementById("editValor").value = btn.getAttribute("data-valor") || "";
+                    document.getElementById("editVencimento").value = btn.getAttribute("data-vencimento") || "";
+                    document.getElementById("editStatus").value = btn.getAttribute("data-status") || "Pendente";
+                    document.getElementById("editPagamento").value = btn.getAttribute("data-pagamento") || "";
+                    if (dlgEdit.showModal) dlgEdit.showModal();
+                });
+            });
+            var fecharEdit = document.getElementById("fecharEditarCobranca");
+            if (fecharEdit && dlgEdit) fecharEdit.addEventListener("click", function () { dlgEdit.close(); });
             var form = document.getElementById("formBaixaLote");
             var acao = document.getElementById("acaoBaixaLote");
             var dlg = document.getElementById("dlgBaixaLote");
@@ -1353,10 +1418,21 @@
             function abrir(tipo) {
                 var n = marcados().length;
                 if (!n) return;
+                var campoData = document.getElementById("dataLote");
+                if (tipo === "dar_baixa_lote" && (!campoData || !campoData.value)) {
+                    window.alert("Informe a data da baixa.");
+                    if (campoData) campoData.focus();
+                    return;
+                }
                 acao.value = tipo;
+                var quando = "";
+                if (campoData && campoData.value) {
+                    var partes = campoData.value.split("-");
+                    if (partes.length === 3) quando = partes[2] + "/" + partes[1] + "/" + partes[0];
+                }
                 document.getElementById("dlgBaixaTitulo").textContent = tipo === "dar_baixa_lote" ? "Confirmar baixa" : "Confirmar retirada da baixa";
                 document.getElementById("dlgBaixaTexto").textContent = tipo === "dar_baixa_lote"
-                    ? "Dar baixa em " + n + " mensalidade(s) selecionada(s)?"
+                    ? "Dar baixa em " + n + " mensalidade(s) na data " + quando + "?"
                     : "Tirar a baixa de " + n + " mensalidade(s) selecionada(s)?";
                 if (dlg.showModal) dlg.showModal();
             }

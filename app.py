@@ -5723,25 +5723,43 @@ def pagina_financeiro():
                             )
                             conexao.commit()
                             if cursor.rowcount:
-                                flash("Data de pagamento atualizada.", "success")
+                                quando = data_pag[:10]
+                                try:
+                                    quando = datetime.strptime(quando, "%Y-%m-%d").strftime("%d/%m/%Y")
+                                except ValueError:
+                                    pass
+                                if regime_apuracao_escola(cursor) == "caixa":
+                                    flash(f"Data da baixa atualizada para {quando}. O valor entra no regime de caixa deste mês.", "success")
+                                else:
+                                    flash(f"Data da baixa atualizada para {quando}.", "success")
                             else:
                                 flash("Só é possível alterar a data de uma mensalidade paga.", "danger")
 
                     elif acao == "dar_baixa":
-                        cursor.execute(
-                            """
-                            UPDATE financeiro_mensalidades
-                            SET status = 'Pago', forma_pagamento = %s, data_pagamento = %s
-                            WHERE id = %s;
-                            """,
-                            (
-                                request.form.get("forma_pagamento"),
-                                request.form.get("data_pagamento"),
-                                request.form.get("cobranca_id"),
-                            ),
-                        )
-                        conexao.commit()
-                        flash("Baixa realizada com sucesso.", "success")
+                        data_pag = (request.form.get("data_pagamento") or "").strip()[:10]
+                        try:
+                            data_baixa = datetime.strptime(data_pag, "%Y-%m-%d").date()
+                        except ValueError:
+                            flash("Informe a data da baixa. No regime de caixa, essa data define o mês do imposto.", "danger")
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE financeiro_mensalidades
+                                SET status = 'Pago', forma_pagamento = %s, data_pagamento = %s
+                                WHERE id = %s;
+                                """,
+                                (
+                                    request.form.get("forma_pagamento"),
+                                    data_baixa,
+                                    request.form.get("cobranca_id"),
+                                ),
+                            )
+                            conexao.commit()
+                            quando = data_baixa.strftime("%d/%m/%Y")
+                            if regime_apuracao_escola(cursor) == "caixa":
+                                flash(f"Baixa registrada em {quando}. O valor entra no regime de caixa deste mês.", "success")
+                            else:
+                                flash(f"Baixa registrada em {quando}.", "success")
 
                     elif acao == "dar_baixa_lote":
                         ids = []
@@ -5752,8 +5770,15 @@ def pagina_financeiro():
                                 continue
                             if cobranca_id not in ids:
                                 ids.append(cobranca_id)
+                        data_pag = (request.form.get("data_pagamento") or "").strip()[:10]
+                        try:
+                            data_baixa = datetime.strptime(data_pag, "%Y-%m-%d").date()
+                        except ValueError:
+                            data_baixa = None
                         if not ids:
                             flash("Selecione ao menos uma mensalidade para dar baixa.", "danger")
+                        elif not data_baixa:
+                            flash("Informe a data da baixa. No regime de caixa, essa data define o mês do imposto.", "danger")
                         else:
                             cursor.execute(
                                 """
@@ -5763,12 +5788,17 @@ def pagina_financeiro():
                                 """,
                                 (
                                     request.form.get("forma_pagamento") or "Dinheiro",
-                                    request.form.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d"),
+                                    data_baixa,
                                     ids,
                                 ),
                             )
                             conexao.commit()
-                            flash(f"Baixa registrada em {cursor.rowcount} mensalidade(s).", "success")
+                            qtd_baixa = cursor.rowcount
+                            quando = data_baixa.strftime("%d/%m/%Y")
+                            if regime_apuracao_escola(cursor) == "caixa":
+                                flash(f"Baixa registrada em {qtd_baixa} mensalidade(s), em {quando}. O valor entra no regime de caixa deste mês.", "success")
+                            else:
+                                flash(f"Baixa registrada em {qtd_baixa} mensalidade(s), em {quando}.", "success")
 
                     elif acao in ("tirar_baixa", "tirar_baixa_lote"):
                         ids = []
