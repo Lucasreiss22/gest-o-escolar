@@ -36,7 +36,7 @@ class RelatoriosDosCartoes(unittest.TestCase):
         self.assertAlmostEqual(fino["juros_valor"], 3.3)
 
     def test_relatorio_de_caixa_separa_pago_pendente_e_atraso(self):
-        _pdf(pdf_regime_detalhado(
+        argumentos = (
             "Escola",
             "Setembro/2026",
             "caixa",
@@ -79,8 +79,9 @@ class RelatoriosDosCartoes(unittest.TestCase):
                 "data_vencimento": date(2026, 8, 1),
                 "status": "Atrasado",
             }],
-            mes_filtro="2026-09",
-        ))
+        )
+        for parte in ("pago", "nao_pago"):
+            _pdf(pdf_regime_detalhado(*argumentos, mes_filtro="2026-09", parte=parte))
 
     def test_rotulo_longo_nao_estoura_a_linha(self):
         pdf = RelatorioPDF("Regime de caixa")

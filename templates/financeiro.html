@@ -176,9 +176,12 @@
         .caixa-faixa { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 18px; }
         .caixa-faixa-titulo { min-width: 0; }
         .caixa-faixa-titulo h4 { margin-bottom: 2px; }
-        .caixa-faixa-nums { display: flex; gap: 28px; flex-shrink: 0; }
+        .caixa-faixa-nums { display: flex; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
+        .caixa-faixa-nums a { display: block; text-decoration: none; color: inherit; padding: 8px 12px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; min-width: 140px; }
+        .caixa-faixa-nums a:hover { border-color: #93c5fd; background: #eff6ff; }
         .caixa-faixa-nums span { display: block; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #64748b; }
         .caixa-faixa-nums strong { display: block; margin-top: 2px; font-size: 1.2rem; color: #1e293b; white-space: nowrap; }
+        .caixa-faixa-nums .pdf { display: block; margin-top: 4px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0; text-transform: none; color: #3498db; }
         .baixa-forma { align-self: center; font-size: 0.82rem; font-weight: 700; color: #334155; min-width: 88px; }
         .acoes-cobranca { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
         .btn-mini { padding: 6px 10px; font-size: 0.75rem; }
@@ -313,22 +316,24 @@
                 <div class="valor">R$ {{ (totais.liquido)|moeda }}</div>
                 <span class="hint" style="color: #1abc9c;">Abrir relatório da conta</span>
             </a>
-            <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime', mes=mes_atual) }}" class="card-resumo caixa-faixa {% if regime_apuracao == 'caixa' %}recebido{% endif %}">
+            <div class="card-resumo caixa-faixa {% if regime_apuracao == 'caixa' %}recebido{% endif %}">
                 <div class="caixa-faixa-titulo">
                     <h4>{% if regime_apuracao == 'caixa' %}Regime de caixa{% else %}Regime de competência{% endif %}</h4>
                     <span class="hint">{% if regime_apuracao == 'caixa' %}O não pago deste mês ficou fora da apuração{% else %}A apuração usa o vencimento, pago ou não{% endif %}</span>
                 </div>
                 <div class="caixa-faixa-nums">
-                    <div>
+                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime_pago', mes=mes_atual) }}">
                         <span>Pago no mês</span>
                         <strong>R$ {{ (totais.recebido_caixa or 0)|moeda }}</strong>
-                    </div>
-                    <div>
+                        <span class="pdf">PDF do que foi pago</span>
+                    </a>
+                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime_nao_pago', mes=mes_atual) }}">
                         <span>Não pago no mês</span>
                         <strong>R$ {{ (totais.inadimplente or 0)|moeda }}</strong>
-                    </div>
+                        <span class="pdf">PDF do que não foi pago</span>
+                    </a>
                 </div>
-            </a>
+            </div>
         </div>
 
         <div class="fin-tabs">

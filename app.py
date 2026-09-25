@@ -6577,7 +6577,7 @@ def relatorio_cartao_financeiro(tipo):
     mes_filtro = request.args.get("mes", "").strip() or datetime.now().strftime("%Y-%m")
     tipos = {
         "recebido", "pendente", "atrasado", "folha", "compras", "servicos",
-        "caixa", "pago_mes", "regime",
+        "caixa", "pago_mes", "regime", "regime_pago", "regime_nao_pago",
     }
     if tipo not in tipos:
         flash("Esse relatório não existe.", "danger")
@@ -6728,9 +6728,10 @@ def relatorio_cartao_financeiro(tipo):
                 )
             else:
                 recebidos, pendentes, atrasados = _listas_regime(cursor, mes_filtro)
+                parte = {"regime_pago": "pago", "regime_nao_pago": "nao_pago"}.get(tipo, "")
                 buffer = pdf_regime_detalhado(
                     escola, mes_label, regime_apuracao, regime, recebidos, pendentes, atrasados,
-                    mes_filtro=mes_filtro,
+                    mes_filtro=mes_filtro, parte=parte,
                 )
     finally:
         conexao.close()

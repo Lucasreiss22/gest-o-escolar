@@ -816,15 +816,21 @@ def _ficha_pago(pdf, item, caixa):
 
 def pdf_regime_detalhado(
     escola, mes_label, regime_apuracao, regime_tributario,
-    recebidos, pendentes, atrasados, mes_filtro="",
+    recebidos, pendentes, atrasados, mes_filtro="", parte="",
 ):
     caixa = (regime_apuracao or "") == "caixa"
+    parte = (parte or "").strip()
     nao_pagos, anteriores = _separar_nao_pagos(pendentes, atrasados, mes_filtro)
     total_pago = sum(_total_recebido_item(item) for item in (recebidos or []))
     total_nao_pago = sum(float(item.get("valor") or 0) for item in nao_pagos)
     total_anteriores = sum(float(item.get("valor") or 0) for item in anteriores)
+    titulo = "Regime de caixa" if caixa else "Regime de competência"
+    if parte == "pago":
+        titulo += " — pagos"
+    elif parte == "nao_pago":
+        titulo += " — não pagos"
 
-    pdf = RelatorioPDF("Regime de caixa" if caixa else "Regime de competência")
+    pdf = RelatorioPDF(titulo)
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label} · {nome_regime(regime_tributario)}")
     _total_destaque(pdf, "Total pago no mês", _brl(total_pago))
@@ -844,59 +850,69 @@ def pdf_regime_detalhado(
         )
     if anteriores:
         pdf.linha("Parcelas anteriores sem baixa", _brl(total_anteriores), negrito=True)
-        pdf.paragrafo("Elas também estão sem pagamento e aparecem na folha de quem não pagou.")
-    pdf.paragrafo("A folha seguinte lista os alunos sem baixa. A outra folha lista os alunos que pagaram neste mês.")
-
-    pdf.add_page()
-    _titulo_folha(pdf, "Não pagos neste mês")
-    if caixa:
-        pdf.paragrafo(
-            "Estes alunos vencem neste mês e não tiveram baixa. "
-            "O valor não entrou na apuração do regime de caixa. "
-            "Em cada mensalidade está a apuração de juros e de multa."
-        )
+        if parte == "pago":
+            pdf.paragrafo("O detalhe dessas parcelas está no PDF de quem não pagou.")
+        else:
+            pdf.paragrafo("Elas aparecem nas folhas de quem não pagou.")
+    if parte == "pago":
+        pdf.paragrafo("A folha seguinte lista só os alunos que tiveram baixa neste mês.")
+    elif parte == "nao_pago":
+        pdf.paragrafo("A folha seguinte lista só os alunos que ficaram sem baixa.")
     else:
-        pdf.paragrafo(
-            "Estes alunos vencem neste mês e não tiveram baixa. "
-            "Em cada mensalidade está a apuração de juros e de multa."
-        )
-    if not nao_pagos:
-        pdf.paragrafo("Nenhuma mensalidade deste mês ficou sem baixa.")
-    for item in nao_pagos:
-        _ficha_nao_pago(pdf, item, caixa)
-    if nao_pagos:
-        pdf.linha("Total não pago no mês", _brl(total_nao_pago), negrito=True, tamanho=12)
+        pdf.paragrafo("A folha seguinte lista os alunos sem baixa. A outra folha lista os alunos que pagaram neste mês.")
 
-    if anteriores:
-        pdf.ln(2)
-        pdf.secao("Parcelas anteriores ainda sem baixa")
+    if parte != "pago":
+        pdf.add_page()
+        _titulo_folha(pdf, "Não pagos neste mês")
+        if caixa:
+            pdf.paragrafo(
+                "Estes alunos vencem neste mês e não tiveram baixa. "
+                "O valor não entrou na apuração do regime de caixa. "
+                "Em cada mensalidade está a apuração de juros e de multa."
+            )
+        else:
+            pdf.paragrafo(
+                "Estes alunos vencem neste mês e não tiveram baixa. "
+                "Em cada mensalidade está a apuração de juros e de multa."
+            )
+        if not nao_pagos:
+            pdf.paragrafo("Nenhuma mensalidade deste mês ficou sem baixa.")
+        for item in nao_pagos:
+            _ficha_nao_pago(pdf, item, caixa)
+        if nao_pagos:
+            pdf.linha("Total não pago no mês", _brl(total_nao_pago), negrito=True, tamanho=12)
+
+        if anteriores:
+            pdf.ln(2)
+            pdf.secao("Parcelas anteriores ainda sem baixa")
+            pdf.paragrafo(
+                "Venceram antes deste mês e continuam sem pagamento. "
+                + (
+                    "Ficam fora da apuração até a baixa, com juros e multa se forem lançados nesse dia."
+                    if caixa else
+                    "No regime de competência, já entraram no mês do vencimento."
+                )
+            )
+            for item in anteriores:
+                _ficha_nao_pago(pdf, item, caixa)
+            pdf.linha("Total de parcelas anteriores", _brl(total_anteriores), negrito=True, tamanho=12)
+
+    if parte != "nao_pago":
+        pdf.add_page()
+        _titulo_folha(pdf, "Pagos neste mês")
         pdf.paragrafo(
-            "Venceram antes deste mês e continuam sem pagamento. "
+            "Estes alunos tiveram baixa neste mês. "
             + (
-                "Ficam fora da apuração até a baixa, com juros e multa se forem lançados nesse dia."
+                "O total de cada um, com juros e multa, entrou na apuração do regime de caixa."
                 if caixa else
-                "No regime de competência, já entraram no mês do vencimento."
+                "A data da baixa mostra quando o dinheiro entrou. No regime de competência, o imposto segue o vencimento."
             )
         )
-        for item in anteriores:
-            _ficha_nao_pago(pdf, item, caixa)
-        pdf.linha("Total de parcelas anteriores", _brl(total_anteriores), negrito=True, tamanho=12)
-
-    pdf.add_page()
-    _titulo_folha(pdf, "Pagos neste mês")
-    pdf.paragrafo(
-        "Estes alunos tiveram baixa neste mês. "
-        + (
-            "O total de cada um, com juros e multa, entrou na apuração do regime de caixa."
-            if caixa else
-            "A data da baixa mostra quando o dinheiro entrou. No regime de competência, o imposto segue o vencimento."
-        )
-    )
-    if not recebidos:
-        pdf.paragrafo("Nenhuma baixa neste mês.")
-    for item in recebidos or []:
-        _ficha_pago(pdf, item, caixa)
-    pdf.linha("Total pago no mês", _brl(total_pago), negrito=True, tamanho=12)
+        if not recebidos:
+            pdf.paragrafo("Nenhuma baixa neste mês.")
+        for item in recebidos or []:
+            _ficha_pago(pdf, item, caixa)
+        pdf.linha("Total pago no mês", _brl(total_pago), negrito=True, tamanho=12)
     return _saida(pdf)
 
 
