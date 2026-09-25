@@ -47,6 +47,9 @@ from simples_nacional import (
     gravar_importacao,
     carregar_sistema,
     janela_competencias,
+    receita_sistema_mes,
+    resumo_emitido_e_caixa,
+    listar_recebimentos_mes,
     folha_sistema_mes,
     _linhas_arquivo,
     parse_moeda_livre,
@@ -56,6 +59,8 @@ from tributacao import (
     apurar_simples,
     apurar_pis_cofins,
     apurar_lucro_presumido,
+    meses_do_trimestre,
+    normalizar_regime_apuracao,
     folha_mensal_fator_r,
     janela_12_meses_anteriores,
     parse_mes,
@@ -1643,16 +1648,19 @@ def receita_por_periodo(cursor, inicio, fim_exclusivo):
     return float(cursor.fetchone()["total"] or 0)
 
 
-def receita_do_mes(cursor, mes_filtro):
-    cursor.execute(
-        """
-        SELECT COALESCE(SUM(valor::numeric), 0) AS total
-        FROM financeiro_mensalidades
-        WHERE TO_CHAR(data_vencimento, 'YYYY-MM') = %s;
-        """,
-        (mes_filtro,),
-    )
-    return float(cursor.fetchone()["total"] or 0)
+def regime_apuracao_escola(cursor):
+    try:
+        cursor.execute("SELECT regime_apuracao FROM configuracoes WHERE id = 1")
+        row = cursor.fetchone() or {}
+        return normalizar_regime_apuracao(row.get("regime_apuracao"))
+    except Exception:
+        return "competencia"
+
+
+def receita_do_mes(cursor, mes_filtro, regime_apuracao=None):
+    if regime_apuracao is None:
+        regime_apuracao = regime_apuracao_escola(cursor)
+    return receita_sistema_mes(cursor, mes_filtro, regime_apuracao)
 
 
 def listar_lancamentos_mes(cursor, mes_filtro, status=None):
@@ -1673,7 +1681,8 @@ def listar_lancamentos_mes(cursor, mes_filtro, status=None):
 
 
 def calcular_apuracao_simples(cursor, mes_filtro):
-    quadro = montar_quadro_simples(cursor, mes_filtro)
+    regime = regime_apuracao_escola(cursor)
+    quadro = montar_quadro_simples(cursor, mes_filtro, regime)
     n_meses = quadro["meses_validos"] or 1
     colaboradores, _folha_mes = montar_folha_colaboradores(cursor)
     apuracao = apurar_simples(quadro["rbt12"], quadro["fs12"], n_meses, quadro["receita_mes"])
@@ -1683,6 +1692,7 @@ def calcular_apuracao_simples(cursor, mes_filtro):
     apuracao["fim_janela"] = fim_janela
     apuracao["inicio_escola"] = quadro.get("primeira")
     apuracao["quadro"] = quadro
+    apuracao["regime_apuracao"] = regime
     return apuracao, colaboradores
 
 
@@ -5962,7 +5972,7 @@ def pagina_financeiro():
                                 flash(str(e), "danger")
 
                     elif acao == "simples_carregar_sistema":
-                        qtd = carregar_sistema(cursor, mes_redir)
+                        qtd = carregar_sistema(cursor, mes_redir, regime_apuracao_escola(cursor))
                         conexao.commit()
                         flash(f"Carregadas {qtd} competência(s) a partir das mensalidades e da folha.", "success")
 
@@ -6019,7 +6029,12 @@ def pagina_financeiro():
         "custos": 0.0,
         "custos_compras": 0.0,
         "custos_servicos": 0.0,
+        "emitido": 0.0,
+        "recebido_caixa": 0.0,
+        "inadimplente": 0.0,
     }
+    regime_apuracao = "competencia"
+    recebimentos_caixa = []
     totais_folha = {"bruto": 0.0, "liquido": 0.0, "encargos": 0.0, "custo_escola": 0.0, "inss_patronal": 0.0, "fgts": 0.0}
     apuracao_simples = None
     apuracao_pis_cofins = None
@@ -6044,12 +6059,13 @@ def pagina_financeiro():
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                 # BUSCA O REGIME TRIBUTÁRIO CONFIGURADO NO BANCO[cite: 5]
-                cursor.execute("SELECT nome_escola, regime_tributario, email_contato FROM configuracoes WHERE id = 1;")
+                cursor.execute("SELECT nome_escola, regime_tributario, regime_apuracao, email_contato FROM configuracoes WHERE id = 1;")
                 config_regime = cursor.fetchone()
                 nome_escola = "Gestão Escolar"
                 if config_regime:
                     if config_regime.get("regime_tributario"):
                         regime_tributario = config_regime["regime_tributario"]
+                    regime_apuracao = normalizar_regime_apuracao(config_regime.get("regime_apuracao"))
                     if config_regime.get("nome_escola"):
                         nome_escola = config_regime["nome_escola"]
 
@@ -6096,6 +6112,12 @@ def pagina_financeiro():
                     totais["qtd_pago"] = int(resumo_mensalidades["qtd_pago"] or 0)
                     totais["qtd_pendente"] = int(resumo_mensalidades["qtd_pendente"] or 0)
                     totais["qtd_atrasado"] = int(resumo_mensalidades["qtd_atrasado"] or 0)
+                visao_fiscal = resumo_emitido_e_caixa(cursor, mes_filtro)
+                totais["emitido"] = visao_fiscal["emitido"]
+                totais["recebido_caixa"] = visao_fiscal["recebido_caixa"]
+                totais["inadimplente"] = visao_fiscal["inadimplente"]
+                if regime_apuracao == "caixa":
+                    recebimentos_caixa = listar_recebimentos_mes(cursor, mes_filtro)
 
                 # 3. Folha de pagamento por tipo de contrato
                 professores_detalhes, totais_folha = montar_folha_contratos(cursor, regime_tributario, mes_filtro)
@@ -6110,7 +6132,7 @@ def pagina_financeiro():
                 apuracao_simples = None
                 apuracao_pis_cofins = None
                 apuracao_presumido = None
-                receita_mes_bruta = receita_do_mes(cursor, mes_filtro)
+                receita_mes_bruta = receita_do_mes(cursor, mes_filtro, regime_apuracao)
 
                 if regime_tributario == "simples_nacional":
                     apuracao_simples, _colabs_fator_r = calcular_apuracao_simples(cursor, mes_filtro)
@@ -6125,7 +6147,13 @@ def pagina_financeiro():
                     totais["liquido"] = totais["recebido"] - totais["folha_pagamento"] - totais["custos"]
                 else:
                     colaboradores_folha, _folha_cheia = montar_folha_colaboradores(cursor)
-                    apuracao_presumido = apurar_lucro_presumido(receita_mes_bruta, colaboradores_folha)
+                    receita_tri = sum(
+                        receita_sistema_mes(cursor, comp, regime_apuracao)
+                        for comp in meses_do_trimestre(mes_filtro)
+                    )
+                    apuracao_presumido = apurar_lucro_presumido(
+                        receita_mes_bruta, colaboradores_folha, receita_tri
+                    )
                     totais["tributos"] = apuracao_presumido["tributos"]
                     totais["receita_bruta_mes"] = receita_mes_bruta
                     totais["liquido"] = totais["recebido"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
@@ -6208,7 +6236,7 @@ def pagina_financeiro():
                 except Exception:
                     pass
                 if aba == "simples" and quadro_simples is None:
-                    quadro_simples = montar_quadro_simples(cursor, mes_filtro)
+                    quadro_simples = montar_quadro_simples(cursor, mes_filtro, regime_apuracao)
                     if apuracao_simples is None:
                         apuracao_simples, _colabs_fator_r = calcular_apuracao_simples(cursor, mes_filtro)
         finally:
@@ -6240,6 +6268,8 @@ def pagina_financeiro():
         busca=busca,
         status=status_filtro,
         regime_atual=regime_tributario,
+        regime_apuracao=regime_apuracao,
+        recebimentos_caixa=recebimentos_caixa,
         mes_atual=mes_filtro,
         data_hoje=datetime.now().strftime('%Y-%m-%d'),
         apuracao_simples=apuracao_simples,
@@ -6801,22 +6831,27 @@ def pagina_configuracoes():
             ano_letivo = request.form.get("ano_letivo")
             email_contato = request.form.get("email_contato")
             regime_tributario = request.form.get("regime_tributario")
+            regime_apuracao = normalizar_regime_apuracao(request.form.get("regime_apuracao"))
             if conexao:
                 try:
                     with conexao.cursor() as cursor:
                         cursor.execute(
+                            "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS regime_apuracao VARCHAR(20) DEFAULT 'competencia'"
+                        )
+                        cursor.execute(
                             """
                             INSERT INTO configuracoes (
-                                id, nome_escola, ano_letivo, email_contato, regime_tributario
+                                id, nome_escola, ano_letivo, email_contato, regime_tributario, regime_apuracao
                             )
-                            VALUES (1, %s, %s, %s, %s)
+                            VALUES (1, %s, %s, %s, %s, %s)
                             ON CONFLICT (id) DO UPDATE
                             SET nome_escola = EXCLUDED.nome_escola,
                                 ano_letivo = EXCLUDED.ano_letivo,
                                 email_contato = EXCLUDED.email_contato,
-                                regime_tributario = EXCLUDED.regime_tributario;
+                                regime_tributario = EXCLUDED.regime_tributario,
+                                regime_apuracao = EXCLUDED.regime_apuracao;
                             """,
-                            (nome_escola, ano_letivo, email_contato, regime_tributario),
+                            (nome_escola, ano_letivo, email_contato, regime_tributario, regime_apuracao),
                         )
                         conexao.commit()
                         session["escola_email_contato"] = (email_contato or "").strip()

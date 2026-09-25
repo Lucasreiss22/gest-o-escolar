@@ -835,6 +835,7 @@ def garantir_tabelas_folha():
                 ("financeiro_mensalidades", "valor", "NUMERIC(12,2) DEFAULT 0"),
                 ("financeiro_mensalidades", "data_vencimento", "DATE"),
                 ("financeiro_mensalidades", "status", "VARCHAR(30) DEFAULT 'Pendente'"),
+                ("configuracoes", "regime_apuracao", "VARCHAR(20) DEFAULT 'competencia'"),
                 ("configuracoes", "smtp_host", "VARCHAR(120)"),
                 ("configuracoes", "smtp_port", "INT DEFAULT 587"),
                 ("configuracoes", "smtp_user", "VARCHAR(150)"),

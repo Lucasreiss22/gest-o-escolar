@@ -4,7 +4,7 @@ import csv
 import io
 import re
 
-from tributacao import parse_mes
+from tributacao import normalizar_regime_apuracao, parse_mes
 
 
 MESES_PT = {
@@ -86,26 +86,103 @@ def upsert_competencia(cursor, competencia, receita=None, folha=None, origem="ma
     )
 
 
-def primeira_competencia_sistema(cursor):
+_ORIGENS_CONGELADAS = {"manual", "planilha", "pgdas"}
+
+
+def primeira_competencia_sistema(cursor, regime_apuracao="competencia"):
     cursor.execute("SELECT MIN(competencia) AS c FROM simples_competencias")
     row = cursor.fetchone() or {}
     if row.get("c"):
         return row["c"]
-    cursor.execute("SELECT MIN(TO_CHAR(data_vencimento, 'YYYY-MM')) AS c FROM financeiro_mensalidades")
+    if normalizar_regime_apuracao(regime_apuracao) == "caixa":
+        cursor.execute(
+            """
+            SELECT MIN(TO_CHAR(data_pagamento, 'YYYY-MM')) AS c
+            FROM financeiro_mensalidades
+            WHERE LOWER(COALESCE(status, '')) = 'pago' AND data_pagamento IS NOT NULL
+            """
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT MIN(TO_CHAR(data_vencimento, 'YYYY-MM')) AS c
+            FROM financeiro_mensalidades
+            WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelado', 'cancelada')
+            """
+        )
     row = cursor.fetchone() or {}
     return row.get("c")
 
 
-def receita_sistema_mes(cursor, competencia):
+def receita_sistema_mes(cursor, competencia, regime_apuracao="competencia"):
+    if normalizar_regime_apuracao(regime_apuracao) == "caixa":
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(valor::numeric), 0) AS total
+            FROM financeiro_mensalidades
+            WHERE LOWER(COALESCE(status, '')) = 'pago'
+              AND data_pagamento IS NOT NULL
+              AND TO_CHAR(data_pagamento, 'YYYY-MM') = %s
+            """,
+            (competencia,),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(valor::numeric), 0) AS total
+            FROM financeiro_mensalidades
+            WHERE TO_CHAR(data_vencimento, 'YYYY-MM') = %s
+              AND LOWER(COALESCE(status, '')) NOT IN ('cancelado', 'cancelada')
+            """,
+            (competencia,),
+        )
+    return float((cursor.fetchone() or {}).get("total") or 0)
+
+
+def resumo_emitido_e_caixa(cursor, competencia):
     cursor.execute(
         """
-        SELECT COALESCE(SUM(valor::numeric), 0) AS total
+        SELECT
+            COALESCE(SUM(CASE
+                WHEN TO_CHAR(data_vencimento, 'YYYY-MM') = %s
+                 AND LOWER(COALESCE(status, '')) NOT IN ('cancelado', 'cancelada')
+                THEN valor::numeric ELSE 0 END), 0) AS emitido,
+            COALESCE(SUM(CASE
+                WHEN LOWER(COALESCE(status, '')) = 'pago'
+                 AND data_pagamento IS NOT NULL
+                 AND TO_CHAR(data_pagamento, 'YYYY-MM') = %s
+                THEN valor::numeric ELSE 0 END), 0) AS recebido_caixa,
+            COALESCE(SUM(CASE
+                WHEN TO_CHAR(data_vencimento, 'YYYY-MM') = %s
+                 AND LOWER(COALESCE(status, '')) NOT IN ('pago', 'cancelado', 'cancelada')
+                THEN valor::numeric ELSE 0 END), 0) AS inadimplente
         FROM financeiro_mensalidades
-        WHERE TO_CHAR(data_vencimento, 'YYYY-MM') = %s
+        """,
+        (competencia, competencia, competencia),
+    )
+    row = cursor.fetchone() or {}
+    return {
+        "emitido": float(row.get("emitido") or 0),
+        "recebido_caixa": float(row.get("recebido_caixa") or 0),
+        "inadimplente": float(row.get("inadimplente") or 0),
+    }
+
+
+def listar_recebimentos_mes(cursor, competencia):
+    cursor.execute(
+        """
+        SELECT f.data_pagamento, f.data_vencimento, f.descricao, f.forma_pagamento, f.valor,
+               a.matricula, a.nome_completo
+        FROM financeiro_mensalidades f
+        LEFT JOIN alunos a ON a.id = f.aluno_id
+        WHERE LOWER(COALESCE(f.status, '')) = 'pago'
+          AND f.data_pagamento IS NOT NULL
+          AND TO_CHAR(f.data_pagamento, 'YYYY-MM') = %s
+        ORDER BY f.data_pagamento, a.nome_completo
         """,
         (competencia,),
     )
-    return float((cursor.fetchone() or {}).get("total") or 0)
+    return cursor.fetchall() or []
 
 
 def folha_sistema_mes(cursor, competencia):
@@ -131,9 +208,16 @@ def mapa_competencias(cursor):
     return {row["competencia"]: dict(row) for row in (cursor.fetchall() or [])}
 
 
-def montar_quadro_simples(cursor, mes_apuracao):
+def _receita_da_linha(cursor, comp, gravado, regime_apuracao):
+    if gravado and (gravado.get("origem") or "") in _ORIGENS_CONGELADAS:
+        return float(gravado.get("receita_bruta") or 0)
+    return receita_sistema_mes(cursor, comp, regime_apuracao)
+
+
+def montar_quadro_simples(cursor, mes_apuracao, regime_apuracao="competencia"):
+    regime_apuracao = normalizar_regime_apuracao(regime_apuracao)
     janela = janela_competencias(mes_apuracao)
-    primeira = primeira_competencia_sistema(cursor)
+    primeira = primeira_competencia_sistema(cursor, regime_apuracao)
     gravados = mapa_competencias(cursor)
     linhas = []
     rbt12 = 0.0
@@ -142,7 +226,7 @@ def montar_quadro_simples(cursor, mes_apuracao):
     for comp in janela:
         fora_primeira = bool(primeira and comp < primeira)
         gravado = gravados.get(comp) or {}
-        rec = float(gravado.get("receita_bruta") or 0) if gravado else receita_sistema_mes(cursor, comp)
+        rec = _receita_da_linha(cursor, comp, gravado, regime_apuracao)
         folha = float(gravado.get("folha_encargos") or 0) if gravado else folha_sistema_mes(cursor, comp)
         entra = not fora_primeira
         if entra:
@@ -161,7 +245,7 @@ def montar_quadro_simples(cursor, mes_apuracao):
             }
         )
     gravado_mes = gravados.get(mes_apuracao) or {}
-    receita_mes = float(gravado_mes.get("receita_bruta") or 0) or receita_sistema_mes(cursor, mes_apuracao)
+    receita_mes = _receita_da_linha(cursor, mes_apuracao, gravado_mes, regime_apuracao)
     folha_mes = float(gravado_mes.get("folha_encargos") or 0) or folha_sistema_mes(cursor, mes_apuracao)
     linha_apuracao = {
         "competencia": mes_apuracao,
@@ -183,6 +267,7 @@ def montar_quadro_simples(cursor, mes_apuracao):
         "receita_mes": receita_mes,
         "folha_mes": folha_mes,
         "mes_apuracao": mes_apuracao,
+        "regime_apuracao": regime_apuracao,
     }
 
 
@@ -198,11 +283,11 @@ def _rotulo_comp(comp):
         return comp
 
 
-def carregar_sistema(cursor, mes_apuracao):
+def carregar_sistema(cursor, mes_apuracao, regime_apuracao="competencia"):
     comps = janela_competencias(mes_apuracao) + [mes_apuracao]
     qtd = 0
     for comp in comps:
-        rec = receita_sistema_mes(cursor, comp)
+        rec = receita_sistema_mes(cursor, comp, regime_apuracao)
         folha = folha_sistema_mes(cursor, comp)
         if rec or folha:
             upsert_competencia(cursor, comp, rec, folha, "sistema", "Carga do sistema (mensalidades e folha)")

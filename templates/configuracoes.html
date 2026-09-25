@@ -67,6 +67,17 @@
                             <option value="lucro_real" {% if config.regime_tributario == "lucro_real" %}selected{% endif %}>Lucro Real</option>
                         </select>
                     </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label for="regime_apuracao">Regime de apuração dos impostos</label>
+                        <select id="regime_apuracao" name="regime_apuracao" required>
+                            <option value="competencia" {% if config.regime_apuracao != "caixa" %}selected{% endif %}>Regime de competência (pela emissão / vencimento)</option>
+                            <option value="caixa" {% if config.regime_apuracao == "caixa" %}selected{% endif %}>Regime de caixa (pelo recebimento)</option>
+                        </select>
+                        <small style="color:#64748b;line-height:1.4;">No regime de caixa, o tributo incide só sobre mensalidades e taxas quitadas no mês.</small>
+                        <div id="alertaRegimeCaixa" style="margin-top:10px;padding:12px 14px;border-radius:8px;background:#e0f2fe;color:#0c4a6e;{% if config.regime_apuracao != 'caixa' %}display:none;{% endif %}">
+                            A opção pelo regime de caixa na Receita é anual e vale o ano inteiro. O sistema precisa ficar igual ao que foi declarado no Portal do Simples Nacional ou na ECF.
+                        </div>
+                    </div>
                 </div>
                 <h3 class="card-title" style="margin-top:18px;">Como o e-mail sai</h3>
                 <p style="font-size:0.85rem;color:#64748b;margin-bottom:12px;line-height:1.45;">
@@ -158,6 +169,16 @@
         </div>
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    (function () {
+        var campo = document.getElementById("regime_apuracao");
+        var aviso = document.getElementById("alertaRegimeCaixa");
+        if (!campo || !aviso) return;
+        campo.addEventListener("change", function () {
+            aviso.style.display = campo.value === "caixa" ? "block" : "none";
+        });
+    })();
+    </script>
     <script>
     (function () {
         var bruto = document.getElementById("padroesAcesso");

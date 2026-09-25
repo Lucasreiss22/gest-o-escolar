@@ -32,6 +32,51 @@ LIMITE_SIMPLES = 4_800_000.00
 FATOR_R_MINIMO = 0.28
 
 
+def normalizar_regime_apuracao(valor):
+    texto = str(valor or "").strip().lower()
+    if texto in ("caixa", "regime_de_caixa"):
+        return "caixa"
+    return "competencia"
+
+
+def competencia_do_titulo(data_vencimento, data_pagamento, status, regime_apuracao):
+    """Mês em que o título entra na base do imposto. No caixa, só o mês do pagamento."""
+    regime = normalizar_regime_apuracao(regime_apuracao)
+    situacao = str(status or "").strip().lower()
+    if situacao in ("cancelado", "cancelada"):
+        return None
+    if regime == "caixa":
+        if situacao != "pago" or not data_pagamento:
+            return None
+        if isinstance(data_pagamento, datetime):
+            data_pagamento = data_pagamento.date()
+        return f"{data_pagamento.year:04d}-{data_pagamento.month:02d}"
+    if not data_vencimento:
+        return None
+    if isinstance(data_vencimento, datetime):
+        data_vencimento = data_vencimento.date()
+    return f"{data_vencimento.year:04d}-{data_vencimento.month:02d}"
+
+
+def base_do_mes(titulos, mes, regime_apuracao):
+    total = 0.0
+    for titulo in titulos or []:
+        if competencia_do_titulo(
+            titulo.get("data_vencimento"),
+            titulo.get("data_pagamento"),
+            titulo.get("status"),
+            regime_apuracao,
+        ) == mes:
+            total += float(titulo.get("valor") or 0)
+    return total
+
+
+def meses_do_trimestre(mes_str):
+    ano, mes = parse_mes(mes_str)
+    inicio = ((mes - 1) // 3) * 3 + 1
+    return [f"{ano}-{numero:02d}" for numero in range(inicio, inicio + 3)]
+
+
 def parse_mes(mes_str):
     ano, mes = mes_str.split("-")
     return int(ano), int(mes)
@@ -213,7 +258,7 @@ IRPJ_ADICIONAL_ALIQUOTA = 0.10
 IRPJ_ADICIONAL_LIMITE_TRIMESTRE = 60_000.00
 
 
-def apurar_lucro_presumido(receita_mes, itens_folha):
+def apurar_lucro_presumido(receita_mes, itens_folha, receita_trimestre=None):
     """
     Tributos sobre o faturamento + encargos cheios da folha CLT.
     Base de IRPJ/CSLL: 32% da receita bruta (serviços educacionais).
@@ -227,10 +272,12 @@ def apurar_lucro_presumido(receita_mes, itens_folha):
     base_presumida = receita * PRESUNCAO_SERVICOS
     csll = base_presumida * CSLL_ALIQUOTA
     irpj = base_presumida * IRPJ_ALIQUOTA
-    base_trimestral = base_presumida * 3.0
-    irpj_adicional = 0.0
+    receita_tri = float(receita * 3.0 if receita_trimestre is None else receita_trimestre)
+    base_trimestral = receita_tri * PRESUNCAO_SERVICOS
+    irpj_adicional_trimestre = 0.0
     if base_trimestral > IRPJ_ADICIONAL_LIMITE_TRIMESTRE:
-        irpj_adicional = ((base_trimestral - IRPJ_ADICIONAL_LIMITE_TRIMESTRE) * IRPJ_ADICIONAL_ALIQUOTA) / 3.0
+        irpj_adicional_trimestre = (base_trimestral - IRPJ_ADICIONAL_LIMITE_TRIMESTRE) * IRPJ_ADICIONAL_ALIQUOTA
+    irpj_adicional = irpj_adicional_trimestre / 3.0
 
     tributos = pis + cofins + iss + csll + irpj + irpj_adicional
     folha = [dict(item) for item in (itens_folha or [])]
@@ -247,8 +294,11 @@ def apurar_lucro_presumido(receita_mes, itens_folha):
         "base_presumida": base_presumida,
         "csll": csll,
         "irpj": irpj,
+        "receita_trimestre": receita_tri,
+        "base_presumida_trimestre": base_trimestral,
         "irpj_adicional": irpj_adicional,
-        "aplica_adicional_irpj": irpj_adicional > 0,
+        "irpj_adicional_trimestre": irpj_adicional_trimestre,
+        "aplica_adicional_irpj": irpj_adicional_trimestre > 0,
         "tributos": tributos,
         "folha": folha,
         "salario_bruto": salario_bruto,

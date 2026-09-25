@@ -209,6 +209,9 @@
                 {% if regime_atual == 'simples_nacional' %}Simples Nacional
                 {% elif regime_atual == 'lucro_real' %}Lucro Real
                 {% else %}Lucro Presumido{% endif %}
+                ·
+                {% if regime_apuracao == 'caixa' %}Regime de caixa (por pagamento)
+                {% else %}Regime de competência (por vencimento){% endif %}
             </div>
         </div>
 
@@ -222,6 +225,57 @@
         {% if not smtp_ok %}
         <div class="alert alert-danger">
             O envio de e-mail do sistema ainda não está pronto. Isso se configura no administrador da plataforma (BREVO_API_KEY), não na senha SMTP da escola.
+        </div>
+        {% endif %}
+
+        <div class="resumo-grid fin-kpis">
+            <div class="card-resumo" style="cursor:default;">
+                <h4>Emitido no mês</h4>
+                <div class="valor">R$ {{ (totais.emitido or 0)|moeda }}</div>
+                <span class="hint">Vencimento em {{ mes_label }}</span>
+            </div>
+            <div class="card-resumo recebido" style="cursor:default;">
+                <h4>Recebido no mês</h4>
+                <div class="valor">R$ {{ (totais.recebido_caixa or 0)|moeda }}</div>
+                <span class="hint">{% if regime_apuracao == 'caixa' %}Base do imposto neste mês{% else %}Pagamentos com baixa neste mês{% endif %}</span>
+            </div>
+            <div class="card-resumo atrasado" style="cursor:default;">
+                <h4>Inadimplência do mês</h4>
+                <div class="valor">R$ {{ (totais.inadimplente or 0)|moeda }}</div>
+                <span class="hint">{% if regime_apuracao == 'caixa' %}Emitido e ainda não pago: fora do imposto agora{% else %}Ainda não quitado neste vencimento{% endif %}</span>
+            </div>
+        </div>
+
+        {% if regime_apuracao == 'caixa' and recebimentos_caixa and aba in ('resumo', 'simples') %}
+        <div class="card-box">
+            <h3 style="margin-top:0;">Recebimentos que entram no imposto de {{ mes_label }}</h3>
+            <p class="hint">Só a baixa deste mês. Mensalidade emitida antes e paga agora entra aqui, não no mês do vencimento.</p>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Data da baixa</th>
+                            <th>Aluno</th>
+                            <th>Título</th>
+                            <th>Vencimento</th>
+                            <th>Forma</th>
+                            <th>Valor pago</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in recebimentos_caixa %}
+                        <tr>
+                            <td>{{ item.data_pagamento.strftime('%d/%m/%Y') if item.data_pagamento else '—' }}</td>
+                            <td>{{ item.nome_completo or '—' }}{% if item.matricula %} · {{ item.matricula }}{% endif %}</td>
+                            <td>{{ item.descricao or 'Mensalidade' }}</td>
+                            <td>{{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '—' }}</td>
+                            <td>{{ item.forma_pagamento or '—' }}</td>
+                            <td>R$ {{ item.valor|moeda }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
         {% endif %}
 
@@ -294,8 +348,13 @@
         <div class="card-box">
             <h3 style="margin-top:0;">RBT12 e Fator R</h3>
             <p class="simples-hint">
-                A RBT12 soma a receita bruta dos <strong>12 meses anteriores</strong> ao mês de apuração ({{ mes_label }}).
+                {% if regime_apuracao == 'caixa' %}
+                No regime de caixa, a RBT12 soma o que foi <strong>recebido</strong> nos 12 meses anteriores a {{ mes_label }}.
+                Mensalidade emitida e não paga não entra. O mês vigente é a base do DAS, só com as baixas dele.
+                {% else %}
+                A RBT12 soma a receita bruta dos <strong>12 meses anteriores</strong> ao mês de apuração ({{ mes_label }}), pelo vencimento.
                 O mês vigente não entra nessa soma — ele é a base do DAS.
+                {% endif %}
                 Quando o primeiro mês de apuração do sistema sai da janela da PGDAS, ele deixa de contar sozinho.
                 {% if quadro_simples and quadro_simples.primeira %}Primeiro mês lançado no sistema: <strong>{{ quadro_simples.primeira }}</strong>.{% endif %}
             </p>
@@ -509,10 +568,11 @@
                     <div class="fin-linha"><span>FS12</span><strong>R$ {{ (apuracao_simples.fs12)|moeda }}</strong></div>
                     <div class="fin-linha"><span>Fator R</span><strong>{{ "%.2f"|format(apuracao_simples.fator_r_pct) }}% · Anexo {{ apuracao_simples.anexo }}</strong></div>
                     <div class="fin-linha"><span>Alíquota efetiva</span><strong>{{ "%.4f"|format(apuracao_simples.aliquota_efetiva_pct) }}%</strong></div>
-                    <div class="fin-linha"><span>Receita bruta do mês</span><strong>R$ {{ (apuracao_simples.receita_mes)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>{% if regime_apuracao == 'caixa' %}Recebido no mês (base do DAS){% else %}Receita bruta do mês{% endif %}</span><strong>R$ {{ (apuracao_simples.receita_mes)|moeda }}</strong></div>
                     <div class="fin-linha"><span>DAS</span><strong>R$ {{ (apuracao_simples.das)|moeda }}</strong></div>
                 {% elif regime_atual == 'lucro_presumido' and apuracao_presumido %}
-                    <div class="fin-linha"><span>Faturamento bruto do mês</span><strong>R$ {{ (apuracao_presumido.receita_mes)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>{% if regime_apuracao == 'caixa' %}Recebido no mês{% else %}Faturamento bruto do mês{% endif %}</span><strong>R$ {{ (apuracao_presumido.receita_mes)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Receita do trimestre</span><strong>R$ {{ (apuracao_presumido.receita_trimestre)|moeda }}</strong></div>
                     <div class="fin-linha"><span>PIS (0,65%)</span><strong>R$ {{ (apuracao_presumido.pis)|moeda }}</strong></div>
                     <div class="fin-linha"><span>COFINS (3%)</span><strong>R$ {{ (apuracao_presumido.cofins)|moeda }}</strong></div>
                     <div class="fin-linha"><span>ISS estimado (5%)</span><strong>R$ {{ (apuracao_presumido.iss)|moeda }}</strong></div>
@@ -520,7 +580,8 @@
                     <div class="fin-linha"><span>CSLL (9% da base)</span><strong>R$ {{ (apuracao_presumido.csll)|moeda }}</strong></div>
                     <div class="fin-linha"><span>IRPJ (15% da base)</span><strong>R$ {{ (apuracao_presumido.irpj)|moeda }}</strong></div>
                     {% if apuracao_presumido.aplica_adicional_irpj %}
-                    <div class="fin-linha"><span>Adicional IRPJ (10%)</span><strong>R$ {{ (apuracao_presumido.irpj_adicional)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Adicional de IRPJ no trimestre (10% acima de R$ 60.000)</span><strong>R$ {{ (apuracao_presumido.irpj_adicional_trimestre)|moeda }}</strong></div>
+                    <p style="font-size: 0.78rem; color: #64748b; margin-top: 8px;">O subtotal do mês inclui um terço desse adicional. PIS e COFINS seguem o mês.</p>
                     {% endif %}
                     <div class="fin-linha"><span>Subtotal de tributos da empresa</span><strong>R$ {{ (apuracao_presumido.tributos)|moeda }}</strong></div>
                     <p style="font-size: 0.78rem; color: #64748b; margin-top: 8px;">Este bloco mostra só impostos sobre o faturamento. Folha, compras e serviços entram no caixa abaixo.</p>
