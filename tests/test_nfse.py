@@ -75,7 +75,12 @@ class NfseRegrasTeste(unittest.TestCase):
 
     def test_payload_leva_reforma_e_a_nota_substituida(self):
         payload = montar_payload(
-            {"cnpj": "12.345.678/0001-90", "inscricao_municipal": "123", "codigo_opcao_simples_nacional": "3"},
+            {
+                "cnpj": "12.345.678/0001-90",
+                "inscricao_municipal": "123",
+                "codigo_municipio": "3305802",
+                "codigo_opcao_simples_nacional": "3",
+            },
             {
                 "documento": "12345678901",
                 "razao_social": "Responsável",
@@ -100,6 +105,7 @@ class NfseRegrasTeste(unittest.TestCase):
             data_emissao=datetime(2026, 9, 25, 10, 0),
         )
         self.assertEqual(payload["prestador"]["cnpj"], "12345678000190")
+        self.assertEqual(payload["prestador"]["codigo_municipio"], "3305802")
         self.assertEqual(payload["tomador"]["cpf"], "12345678901")
         self.assertEqual(payload["tomador"]["endereco"]["uf"], "RJ")
         self.assertEqual(payload["servico"]["tpRetPISCOFINS"], 3)

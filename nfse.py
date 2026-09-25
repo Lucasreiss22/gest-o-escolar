@@ -248,6 +248,7 @@ def montar_payload(prestador, tomador, servico, substituida=None, data_emissao=N
         "prestador": {
             "cnpj": apenas_digitos(prestador.get("cnpj")),
             "inscricao_municipal": (prestador.get("inscricao_municipal") or "").strip(),
+            "codigo_municipio": apenas_digitos(prestador.get("codigo_municipio")),
             "codigo_opcao_simples_nacional": str(prestador.get("codigo_opcao_simples_nacional") or "1"),
         },
         "tomador": {
@@ -618,6 +619,7 @@ def _prestador_de(cfg):
     return {
         "cnpj": cfg.get("nfse_cnpj") or cfg.get("cnpj"),
         "inscricao_municipal": cfg.get("nfse_inscricao_municipal") or cfg.get("inscricao_municipal"),
+        "codigo_municipio": cfg.get("nfse_codigo_municipio") or cfg.get("codigo_municipio"),
         "codigo_opcao_simples_nacional": opcao_simples(
             cfg.get("regime_tributario"),
             cfg.get("nfse_opcao_simples") or cfg.get("opcao_simples"),
