@@ -3,6 +3,7 @@ from datetime import datetime
 
 from nfse import (
     competencia_fiscal,
+    interpretar_resposta,
     montar_payload,
     pode_emitir_mensalidade,
     substituicao_retroativa,
@@ -105,6 +106,18 @@ class NfseRegrasTeste(unittest.TestCase):
         self.assertEqual(payload["nfse_substituida"]["numero"], "99")
         self.assertEqual(payload["numero_nfse_substituida"], "99")
         self.assertEqual(payload["nfse_substituida"]["chave"], "CH")
+
+    def test_resposta_guarda_xml_e_danfse(self):
+        lido = interpretar_resposta(200, {
+            "status": "autorizado",
+            "numero": "15",
+            "caminho_xml_nota_fiscal": "/arquivos/nota.xml",
+            "caminho_danfe": "/arquivos/danfse.pdf",
+            "url": "https://prefeitura.exemplo/nota",
+        })
+        self.assertEqual(lido["status"], "FATURADA")
+        self.assertEqual(lido["xml_caminho"], "/arquivos/nota.xml")
+        self.assertEqual(lido["url_pdf"], "/arquivos/danfse.pdf")
 
 
 class NfsePermissaoTeste(unittest.TestCase):

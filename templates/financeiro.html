@@ -1033,6 +1033,12 @@
             </div>
         </details>
 
+        {% if pode_alterar('nfse') %}
+        {% with alunos_nfse=alunos, aluno_id=nfse_aluno, destino='financeiro', destino_rota='pagina_financeiro', mes=mes_atual, status=status %}
+        {% include '_nfse_emitir.html' %}
+        {% endwith %}
+        {% endif %}
+
         <!-- Tabela de Lançamentos -->
         <div class="card-box" style="margin-top: 12px;">
             <h3 style="font-size: 1.05rem; color: #2c3e50; margin-bottom: 12px;">

@@ -61,8 +61,11 @@ from nfse import (
     cancelar_nota,
     consultar_nota,
     emitir_cobranca_plataforma,
+    documento_da_nota,
     emitir_mensalidade,
     faturamento_das_notas,
+    listar_alunos_nfse,
+    listar_mensalidades_emissao,
     ler_config_plataforma_tela,
     listar_cobrancas_plataforma,
     listar_notas_escola,
@@ -6335,6 +6338,8 @@ def pagina_financeiro():
     quadro_simples = None
     nome_escola = "Gestão Escolar"
 
+    nfse_aluno = request.args.get("nfse_aluno", type=int)
+    mensalidades_nfse = []
     busca = request.args.get("busca", "").strip()
     status_filtro = request.args.get("status", "").strip()
     aba = request.args.get("aba") or "resumo"
@@ -6534,6 +6539,8 @@ def pagina_financeiro():
                         apuracao_simples, _colabs_fator_r = calcular_apuracao_simples(cursor, mes_filtro)
                 try:
                     anexar_ultima_nota(cursor, lancamentos)
+                    if nfse_aluno:
+                        mensalidades_nfse = listar_mensalidades_emissao(cursor, nfse_aluno)
                 except Exception:
                     conexao.rollback()
         finally:
@@ -6580,6 +6587,8 @@ def pagina_financeiro():
         colab_id=colab_id,
         colaboradores_busca=colaboradores_busca,
         colaborador_sel=colaborador_sel,
+        nfse_aluno=nfse_aluno,
+        mensalidades_nfse=mensalidades_nfse,
     )
 
 @app.route("/financeiro/excluir/<int:id>", methods=["POST"])
@@ -7628,11 +7637,18 @@ def _redirecionar_nfse():
     if destino == "aluno" and aluno_id:
         return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
     if destino == "financeiro":
-        return redirect(url_for("pagina_financeiro", aba="receitas", mes=request.form.get("mes") or ""))
+        extra = {"aba": "receitas"}
+        if request.form.get("mes"):
+            extra["mes"] = request.form.get("mes")
+        if aluno_id:
+            extra["nfse_aluno"] = aluno_id
+        return redirect(url_for("pagina_financeiro", **extra))
     params = {}
     status_nota = (request.form.get("status_nota") or "").strip()
     if status_nota:
         params["status"] = status_nota
+    if request.form.get("mes"):
+        params["mes"] = request.form.get("mes")
     if aluno_id:
         params["aluno"] = aluno_id
     return redirect(url_for("pagina_notas_fiscais", **params))
@@ -7667,10 +7683,14 @@ def pagina_notas_fiscais():
     mes = (request.args.get("mes") or datetime.now().strftime("%Y-%m"))[:7]
     grupos = []
     faturado = 0
+    alunos_nfse = []
+    mensalidades_nfse = []
     conexao = obter_conexao()
     if conexao:
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                alunos_nfse = listar_alunos_nfse(cursor)
+                mensalidades_nfse = listar_mensalidades_emissao(cursor, aluno)
                 grupos = listar_notas_escola(cursor, status or None, aluno)
                 faturado = faturamento_das_notas(cursor, mes)
         except Exception as e:
@@ -7684,6 +7704,8 @@ def pagina_notas_fiscais():
         aluno_id=aluno,
         mes=mes,
         faturado=faturado,
+        alunos_nfse=alunos_nfse,
+        mensalidades_nfse=mensalidades_nfse,
     )
 
 
@@ -7748,6 +7770,42 @@ def nfse_lote():
     if erros:
         flash(" ; ".join(erros[:5]), "danger")
     return _redirecionar_nfse()
+
+
+def _arquivo_nfse(nota_id, tipo):
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(request.referrer or url_for("pagina_notas_fiscais"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            conteudo, mime, nome = documento_da_nota(cursor, nota_id, tipo)
+        disposicao = "attachment" if tipo == "xml" else "inline"
+        return Response(
+            conteudo,
+            mimetype=mime,
+            headers={"Content-Disposition": f'{disposicao}; filename="{nome}"'},
+        )
+    except Exception as e:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        flash(str(e), "danger")
+        return redirect(request.referrer or url_for("pagina_notas_fiscais"))
+    finally:
+        conexao.close()
+
+
+@app.route("/notas-fiscais/<int:nota_id>/xml")
+def nfse_xml(nota_id):
+    return _arquivo_nfse(nota_id, "xml")
+
+
+@app.route("/notas-fiscais/<int:nota_id>/danfse")
+def nfse_danfse(nota_id):
+    return _arquivo_nfse(nota_id, "danfse")
 
 
 if __name__ == "__main__":

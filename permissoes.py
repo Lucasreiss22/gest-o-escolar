@@ -70,6 +70,8 @@ ENDPOINTS = {
     "nfse_substituir": "nfse",
     "nfse_consultar": "nfse",
     "nfse_lote": "nfse",
+    "nfse_xml": "nfse",
+    "nfse_danfse": "nfse",
 }
 
 
@@ -174,6 +176,8 @@ _TELA_EXTRA = {
     "nfse_substituir": "financeiro",
     "nfse_consultar": "financeiro",
     "nfse_lote": "financeiro",
+    "nfse_xml": "financeiro",
+    "nfse_danfse": "financeiro",
 }
 
 _POST_SO_LEITURA = {"pdf_contracheque_rota", "relatorio_pdf_consulta", "relatorio_tributario", "relatorio_pdf_custos"}

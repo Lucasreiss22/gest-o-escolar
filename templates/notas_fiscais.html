@@ -45,10 +45,14 @@
     {% include '_nav.html' %}
     <div class="content">
         <h2>Notas fiscais</h2>
-        <p class="hint">Notas de serviço por aluno. Faturada está válida. Cancelada saiu da base. Substituída aponta a nota nova, e a substituta aponta a nota original. Se a troca acontecer em mês posterior, o valor continua no mês da nota original.</p>
+        <p class="hint">Escolha o aluno e a mensalidade para emitir. A lista abaixo mostra o que já saiu: faturada está válida, cancelada saiu da base, e a substituída aponta a nota nova. O XML e a DANFSe ficam na nota autorizada. Se a troca acontecer em mês posterior, o valor continua no mês da nota original.</p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+
+        {% with destino='notas', destino_rota='pagina_notas_fiscais' %}
+        {% include '_nfse_emitir.html' %}
         {% endwith %}
 
         <div class="card-box">
@@ -136,12 +140,14 @@
                                         <button class="btn btn-warning" type="submit">Substituir</button>
                                     </form>
                                     {% endif %}
-                                    {% if nota.url_pdf %}
-                                    <a class="btn btn-primary" href="{{ nota.url_pdf }}" target="_blank" rel="noopener">Abrir nota</a>
+                                    {% if nota.status in ['FATURADA', 'CANCELADA', 'SUBSTITUIDA'] %}
+                                    <a class="btn btn-primary" href="{{ url_for('nfse_xml', nota_id=nota.id) }}">XML</a>
+                                    <a class="btn btn-primary" href="{{ url_for('nfse_danfse', nota_id=nota.id) }}" target="_blank" rel="noopener">DANFSe</a>
                                     {% endif %}
                                 </div>
-                                {% elif nota.url_pdf %}
-                                <a class="btn btn-primary" href="{{ nota.url_pdf }}" target="_blank" rel="noopener">Abrir nota</a>
+                                {% elif nota.status in ['FATURADA', 'CANCELADA', 'SUBSTITUIDA'] %}
+                                <a class="btn btn-primary" href="{{ url_for('nfse_xml', nota_id=nota.id) }}">XML</a>
+                                <a class="btn btn-primary" href="{{ url_for('nfse_danfse', nota_id=nota.id) }}" target="_blank" rel="noopener">DANFSe</a>
                                 {% endif %}
                             </td>
                         </tr>

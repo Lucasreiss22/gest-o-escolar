@@ -38,6 +38,10 @@
             <button type="submit" class="btn btn-sm btn-outline-secondary btn-mini">Atualizar NFS-e</button>
         </form>
         {% endif %}
+        {% if nota and nota.status in ['FATURADA', 'CANCELADA', 'SUBSTITUIDA'] %}
+        <a class="btn btn-sm btn-outline-primary btn-mini" href="{{ url_for('nfse_xml', nota_id=nota.id) }}">XML</a>
+        <a class="btn btn-sm btn-outline-primary btn-mini" href="{{ url_for('nfse_danfse', nota_id=nota.id) }}" target="_blank" rel="noopener">DANFSe</a>
+        {% endif %}
         {% if nota and nota.status == 'FATURADA' %}
         <form method="POST" action="{{ url_for('nfse_cancelar') }}" class="nfse-form-linha">
             <input type="hidden" name="nota_id" value="{{ nota.id }}">

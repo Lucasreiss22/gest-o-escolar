@@ -1,0 +1,59 @@
+{% if pode_alterar('nfse') %}
+<div class="card-box nfse-emitir">
+    <h3>Emitir NFS-e</h3>
+    <p class="hint">Escolha o aluno e a mensalidade. Depois da autorização, a nota libera o XML e a DANFSe. Salvar o token em Configurações não emite a nota.</p>
+    <form method="GET" action="{{ url_for(destino_rota) }}" class="nfse-emitir-linha">
+        {% if destino == 'financeiro' %}
+        <input type="hidden" name="aba" value="receitas">
+        <input type="hidden" name="mes" value="{{ mes or '' }}">
+        {% else %}
+        <input type="hidden" name="mes" value="{{ mes or '' }}">
+        {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+        {% endif %}
+        <label>Aluno
+            <select name="{{ 'nfse_aluno' if destino == 'financeiro' else 'aluno' }}" onchange="this.form.submit()" required>
+                <option value="">Selecione o aluno</option>
+                {% for aluno in alunos_nfse %}
+                <option value="{{ aluno.id }}" {% if aluno_id and aluno.id == aluno_id %}selected{% endif %}>
+                    {{ aluno.nome_completo }}{% if aluno.matricula %} · {{ aluno.matricula }}{% endif %}{% if aluno.turma_nome %} · {{ aluno.turma_nome }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+    </form>
+    {% if aluno_id %}
+        {% if mensalidades_nfse %}
+        <form method="POST" action="{{ url_for('nfse_emitir') }}" class="nfse-emitir-linha">
+            <input type="hidden" name="voltar" value="{{ destino }}">
+            <input type="hidden" name="aluno_id" value="{{ aluno_id }}">
+            {% if mes %}<input type="hidden" name="mes" value="{{ mes }}">{% endif %}
+            {% if status %}<input type="hidden" name="status_nota" value="{{ status }}">{% endif %}
+            <label>Mensalidade
+                <select name="mensalidade_id" required>
+                    <option value="">Selecione a mensalidade</option>
+                    {% for item in mensalidades_nfse %}
+                    <option value="{{ item.id }}" {% if item.nota_status in ['FATURADA', 'PENDENTE'] %}disabled{% endif %}>
+                        {{ item.descricao or 'Mensalidade' }}
+                        · vence {{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '—' }}
+                        · R$ {{ (item.valor or 0)|moeda }}
+                        · {{ item.status or 'Pendente' }}
+                        {% if item.nota_status %}· nota {{ item.nota_status }}{% if item.numero_nfse %} nº {{ item.numero_nfse }}{% endif %}{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button class="btn btn-primary" type="submit">Emitir NFS-e</button>
+        </form>
+        <p class="hint">Mensalidade que já está faturada ou pendente não entra de novo. Cancele ou substitua essa nota na lista.</p>
+        {% else %}
+        <p class="hint">Este aluno ainda não tem mensalidade para emitir.</p>
+        {% endif %}
+    {% endif %}
+</div>
+<style>
+    .nfse-emitir h3 { margin: 0 0 8px; color: #1e293b; font-size: 1.05rem; }
+    .nfse-emitir-linha { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 12px; }
+    .nfse-emitir-linha label { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; font-weight: 600; color: #334155; min-width: 240px; flex: 1; }
+    .nfse-emitir-linha select { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: .9rem; font-weight: 500; }
+</style>
+{% endif %}

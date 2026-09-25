@@ -264,6 +264,12 @@ def url_base(ambiente):
     return URLS["producao" if (ambiente or "") == "producao" else "homologacao"]
 
 
+def _host_focus(ambiente):
+    if (ambiente or "") == "producao":
+        return "https://api.focusnfe.com.br"
+    return "https://homologacao.focusnfe.com.br"
+
+
 def _mensagem_focus(corpo):
     if not isinstance(corpo, dict):
         return str(corpo or "")[:500]
@@ -293,8 +299,17 @@ def interpretar_resposta(codigo, corpo):
         "numero_nfse": str(dados.get("numero") or dados.get("numero_nfse") or "")[:40],
         "codigo_verificacao": str(dados.get("codigo_verificacao") or "")[:80],
         "chave": str(dados.get("chave_nfe") or dados.get("chave_nfse") or dados.get("chave") or "")[:80],
-        "url_pdf": str(dados.get("url") or dados.get("url_danfse") or "")[:500],
-        "xml_caminho": str(dados.get("caminho_xml_nota_fiscal") or "")[:500],
+        "url_pdf": str(
+            dados.get("caminho_danfe")
+            or dados.get("url_danfse")
+            or dados.get("url")
+            or ""
+        )[:500],
+        "xml_caminho": str(
+            dados.get("caminho_xml_nota_fiscal")
+            or dados.get("caminho_xml")
+            or ""
+        )[:500],
         "mensagem": "" if status in {STATUS_FATURADA, STATUS_CANCELADA, STATUS_PENDENTE} else _mensagem_focus(dados),
     }
 
@@ -695,8 +710,11 @@ def emitir_mensalidade(cursor, mensalidade_id, cliente=None):
     if lido["status"] == STATUS_ERRO:
         raise ValueError(lido["mensagem"] or "A Focus recusou a NFS-e.")
     if lido["status"] == STATUS_PENDENTE:
-        return "NFS-e enviada e ainda pendente de autorização. Atualize o status em alguns instantes."
-    return f"NFS-e faturada{(' nº ' + lido['numero_nfse']) if lido.get('numero_nfse') else ''}."
+        return "NFS-e enviada e ainda pendente de autorização. Atualize o status para baixar o XML e a DANFSe."
+    return (
+        f"NFS-e faturada{(' nº ' + lido['numero_nfse']) if lido.get('numero_nfse') else ''}. "
+        "O XML e a DANFSe estão na nota."
+    )
 
 
 def consultar_nota(cursor, nota_id, tabela, cliente=None):
@@ -959,6 +977,83 @@ def faturamento_das_notas(cursor, competencia):
     cursor.execute("SELECT * FROM notas_fiscais")
     notas = [dict(item) for item in cursor.fetchall() or []]
     return valor_na_competencia(notas, competencia)
+
+
+def listar_alunos_nfse(cursor):
+    cursor.execute(
+        """
+        SELECT id, nome_completo, matricula
+        FROM alunos
+        ORDER BY nome_completo
+        """
+    )
+    return cursor.fetchall() or []
+
+
+def listar_mensalidades_emissao(cursor, aluno_id):
+    if not aluno_id:
+        return []
+    garantir_tabela_escola(cursor)
+    cursor.execute(
+        """
+        SELECT f.id, f.descricao, f.valor, f.data_vencimento, f.data_pagamento, f.status,
+               n.id AS nota_id, n.status AS nota_status, n.numero_nfse
+        FROM financeiro_mensalidades f
+        LEFT JOIN LATERAL (
+            SELECT id, status, numero_nfse
+            FROM notas_fiscais
+            WHERE mensalidade_id = f.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) n ON TRUE
+        WHERE f.aluno_id = %s
+        ORDER BY f.data_vencimento DESC
+        """,
+        (aluno_id,),
+    )
+    return cursor.fetchall() or []
+
+
+def _baixar_focus(token, ambiente, caminho):
+    import requests
+
+    if not caminho:
+        raise ValueError("A Focus ainda não devolveu este arquivo. Atualize o status da nota.")
+    texto = str(caminho)
+    if texto.startswith("http://") or texto.startswith("https://"):
+        url = texto
+    else:
+        url = _host_focus(ambiente) + (texto if texto.startswith("/") else "/" + texto)
+    resposta = requests.get(url, auth=((token or "").strip(), ""), timeout=40)
+    if resposta.status_code >= 400 and texto.startswith("http"):
+        resposta = requests.get(url, timeout=40)
+    if resposta.status_code >= 400 or not resposta.content:
+        raise ValueError("A Focus não entregou o arquivo desta nota.")
+    mime = (resposta.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    return resposta.content, mime
+
+
+def documento_da_nota(cursor, nota_id, tipo):
+    cursor.execute("SELECT * FROM notas_fiscais WHERE id = %s", (nota_id,))
+    nota = cursor.fetchone()
+    if not nota:
+        raise ValueError("Nota fiscal não encontrada.")
+    if nota.get("status") not in {STATUS_FATURADA, STATUS_CANCELADA, STATUS_SUBSTITUIDA}:
+        raise ValueError("O XML e a DANFSe ficam disponíveis depois que a nota é autorizada.")
+    campo = "xml_caminho" if tipo == "xml" else "url_pdf"
+    if not nota.get(campo):
+        consultar_nota(cursor, nota_id, "notas_fiscais")
+        cursor.execute("SELECT * FROM notas_fiscais WHERE id = %s", (nota_id,))
+        nota = cursor.fetchone()
+    cfg = _cfg_escola(cursor)
+    token = _exigir_credencial(cfg)
+    conteudo, mime = _baixar_focus(token, cfg.get("nfse_ambiente"), nota.get(campo))
+    numero = nota.get("numero_nfse") or nota_id
+    if tipo == "xml":
+        return conteudo, "application/xml", f"nfse_{numero}.xml"
+    if "html" in mime or conteudo[:80].lstrip().lower().startswith(b"<!doctype") or conteudo[:20].lstrip().startswith(b"<"):
+        return conteudo, "text/html", f"danfse_{numero}.html"
+    return conteudo, "application/pdf", f"danfse_{numero}.pdf"
 
 
 def salvar_config_escola(cursor, form, arquivo):
