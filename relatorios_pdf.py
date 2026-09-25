@@ -67,19 +67,46 @@ class RelatorioPDF(FPDF):
         self.multi_cell(0, 5.4, texto)
         self.ln(1)
 
+    def _coube(self, texto, largura):
+        texto = "" if texto is None else str(texto)
+        limite = max(float(largura) - 1.6, 4)
+        if self.get_string_width(texto) <= limite:
+            return texto
+        while texto and self.get_string_width(texto + "…") > limite:
+            texto = texto[:-1]
+        return (texto + "…") if texto else ""
+
     def linha(self, rotulo, valor, negrito=False):
         self.set_font(self.fonte, "B" if negrito else "", 10)
-        self.cell(95, 6, rotulo)
-        self.cell(0, 6, str(valor), new_x="LMARGIN", new_y="NEXT")
+        rotulo = "" if rotulo is None else str(rotulo)
+        valor = "" if valor is None else str(valor)
+        if self.get_y() > 272:
+            self.add_page()
+        largura = self.epw
+        largura_valor = min(70, max(32, self.get_string_width(valor) + 3))
+        largura_rotulo = largura - largura_valor
+        cabe = (
+            self.get_string_width(rotulo) <= largura_rotulo - 1
+            and self.get_string_width(valor) <= largura_valor - 1
+        )
+        if cabe:
+            self.cell(largura_rotulo, 6, rotulo)
+            self.cell(largura_valor, 6, valor, align="R", new_x="LMARGIN", new_y="NEXT")
+            return
+        if rotulo:
+            self.multi_cell(largura, 5.4, rotulo)
+        if valor:
+            self.set_font(self.fonte, "B", 10)
+            self.multi_cell(largura, 5.4, valor, align="R")
 
     def tabela(self, cabecalhos, linhas, larguras=None):
         if not larguras:
-            larguras = [190 / len(cabecalhos)] * len(cabecalhos)
+            larguras = [self.epw / len(cabecalhos)] * len(cabecalhos)
         self.set_font(self.fonte, "B", 8)
         self.set_fill_color(30, 58, 95)
         self.set_text_color(255, 255, 255)
         for i, titulo in enumerate(cabecalhos):
-            self.cell(larguras[i], 7, titulo, border=1, fill=True)
+            self.cell(larguras[i], 7, self._coube(titulo, larguras[i]), border=1, fill=True)
         self.ln()
         self.set_text_color(40, 40, 40)
         self.set_font(self.fonte, "", 8)
@@ -87,9 +114,10 @@ class RelatorioPDF(FPDF):
         for linha in linhas:
             if self.get_y() > 270:
                 self.add_page()
+                self.set_font(self.fonte, "", 8)
             self.set_fill_color(243, 246, 251)
             for i, celula in enumerate(linha):
-                self.cell(larguras[i], 6, str(celula)[:40], border=1, fill=fill)
+                self.cell(larguras[i], 6, self._coube(celula, larguras[i]), border=1, fill=fill)
             self.ln()
             fill = not fill
         self.ln(2)
