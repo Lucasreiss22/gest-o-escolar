@@ -1715,13 +1715,16 @@ def _mensalidades_do_cartao(cursor, mes_filtro, status):
 
 
 def _listas_regime(cursor, mes_filtro):
+    colunas = """
+        a.nome_completo, a.matricula, f.descricao, f.parcela_contrato, f.valor,
+        COALESCE(f.juros_percentual, 0) AS juros_percentual,
+        COALESCE(f.juros_valor, 0) AS juros_valor,
+        COALESCE(f.multa_valor, 0) AS multa_valor,
+        f.data_vencimento, f.data_pagamento, f.forma_pagamento, f.status
+    """
     cursor.execute(
-        """
-        SELECT a.nome_completo, f.descricao, f.parcela_contrato, f.valor,
-               COALESCE(f.juros_percentual, 0) AS juros_percentual,
-               COALESCE(f.juros_valor, 0) AS juros_valor,
-               COALESCE(f.multa_valor, 0) AS multa_valor,
-               f.data_vencimento, f.data_pagamento, f.forma_pagamento
+        f"""
+        SELECT {colunas}
         FROM financeiro_mensalidades f
         LEFT JOIN alunos a ON a.id = f.aluno_id
         WHERE LOWER(COALESCE(f.status, '')) = 'pago'
@@ -1733,9 +1736,8 @@ def _listas_regime(cursor, mes_filtro):
     )
     recebidos = cursor.fetchall() or []
     cursor.execute(
-        """
-        SELECT a.nome_completo, f.descricao, f.parcela_contrato, f.valor,
-               f.data_vencimento, f.data_pagamento, f.forma_pagamento
+        f"""
+        SELECT {colunas}
         FROM financeiro_mensalidades f
         LEFT JOIN alunos a ON a.id = f.aluno_id
         WHERE TO_CHAR(f.data_vencimento, 'YYYY-MM') = %s
@@ -1746,9 +1748,8 @@ def _listas_regime(cursor, mes_filtro):
     )
     pendentes = cursor.fetchall() or []
     cursor.execute(
-        """
-        SELECT a.nome_completo, f.descricao, f.parcela_contrato, f.valor,
-               f.data_vencimento, f.data_pagamento, f.forma_pagamento
+        f"""
+        SELECT {colunas}
         FROM financeiro_mensalidades f
         LEFT JOIN alunos a ON a.id = f.aluno_id
         WHERE f.data_vencimento < CURRENT_DATE
@@ -6728,7 +6729,8 @@ def relatorio_cartao_financeiro(tipo):
             else:
                 recebidos, pendentes, atrasados = _listas_regime(cursor, mes_filtro)
                 buffer = pdf_regime_detalhado(
-                    escola, mes_label, regime_apuracao, regime, recebidos, pendentes, atrasados
+                    escola, mes_label, regime_apuracao, regime, recebidos, pendentes, atrasados,
+                    mes_filtro=mes_filtro,
                 )
     finally:
         conexao.close()

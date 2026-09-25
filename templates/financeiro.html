@@ -125,7 +125,9 @@
             .card-resumo h4 { font-size: 0.68rem; }
             .header-flex h2 { display: none; }
             .fin-desktop-table { display: none; }
-            .caixa-faixa { align-items: flex-start; }
+            .caixa-faixa { flex-direction: column; align-items: stretch; }
+            .caixa-faixa-nums { justify-content: space-between; gap: 12px; }
+            .caixa-faixa-nums strong { font-size: 1.05rem; }
             .fin-mobile-list { display: block; }
             .grid-acoes-geracao { gap: 12px; }
         }
@@ -171,9 +173,12 @@
         .tabela-cobrancas input[type="date"], .tabela-cobrancas select { padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem; background: #fff; color: #1e293b; }
         .campo-mini { display: flex; flex-direction: column; gap: 2px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #64748b; }
         .campo-mini input { width: 92px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem; background: #fff; color: #1e293b; text-transform: none; letter-spacing: 0; font-weight: 500; }
-        .caixa-faixa { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-        .caixa-faixa .valor { font-size: 1.05rem; white-space: nowrap; }
-        .caixa-faixa h4 { margin-bottom: 2px; }
+        .caixa-faixa { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 18px; }
+        .caixa-faixa-titulo { min-width: 0; }
+        .caixa-faixa-titulo h4 { margin-bottom: 2px; }
+        .caixa-faixa-nums { display: flex; gap: 28px; flex-shrink: 0; }
+        .caixa-faixa-nums span { display: block; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #64748b; }
+        .caixa-faixa-nums strong { display: block; margin-top: 2px; font-size: 1.2rem; color: #1e293b; white-space: nowrap; }
         .baixa-forma { align-self: center; font-size: 0.82rem; font-weight: 700; color: #334155; min-width: 88px; }
         .acoes-cobranca { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
         .btn-mini { padding: 6px 10px; font-size: 0.75rem; }
@@ -309,11 +314,20 @@
                 <span class="hint" style="color: #1abc9c;">Abrir relatório da conta</span>
             </a>
             <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime', mes=mes_atual) }}" class="card-resumo caixa-faixa {% if regime_apuracao == 'caixa' %}recebido{% endif %}">
-                <div>
+                <div class="caixa-faixa-titulo">
                     <h4>{% if regime_apuracao == 'caixa' %}Regime de caixa{% else %}Regime de competência{% endif %}</h4>
-                    <span class="hint">Abrir o que entrou, o que está pendente e o que atrasou</span>
+                    <span class="hint">{% if regime_apuracao == 'caixa' %}O não pago deste mês ficou fora da apuração{% else %}A apuração usa o vencimento, pago ou não{% endif %}</span>
                 </div>
-                <div class="valor">{% if regime_apuracao == 'caixa' %}Pelo pagamento{% else %}Pelo vencimento{% endif %}</div>
+                <div class="caixa-faixa-nums">
+                    <div>
+                        <span>Pago no mês</span>
+                        <strong>R$ {{ (totais.recebido_caixa or 0)|moeda }}</strong>
+                    </div>
+                    <div>
+                        <span>Não pago no mês</span>
+                        <strong>R$ {{ (totais.inadimplente or 0)|moeda }}</strong>
+                    </div>
+                </div>
             </a>
         </div>
 

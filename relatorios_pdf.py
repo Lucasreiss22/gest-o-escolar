@@ -63,9 +63,9 @@ class RelatorioPDF(FPDF):
         self.cell(0, 8, texto, new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(40, 40, 40)
 
-    def paragrafo(self, texto):
+    def paragrafo(self, texto, tamanho=10):
         self.set_x(self.l_margin)
-        self.set_font(self.fonte, "", 10)
+        self.set_font(self.fonte, "", tamanho)
         self.multi_cell(
             0, 5.4, "" if texto is None else str(texto),
             align="L", new_x="LMARGIN", new_y="NEXT", wrapmode="CHAR",
@@ -81,8 +81,8 @@ class RelatorioPDF(FPDF):
             texto = texto[:-1]
         return (texto + "…") if texto else ""
 
-    def linha(self, rotulo, valor, negrito=False):
-        self.set_font(self.fonte, "B" if negrito else "", 10)
+    def linha(self, rotulo, valor, negrito=False, tamanho=10):
+        self.set_font(self.fonte, "B" if negrito else "", tamanho)
         rotulo = "" if rotulo is None else str(rotulo)
         valor = "" if valor is None else str(valor)
         self.set_x(self.l_margin)
@@ -111,7 +111,7 @@ class RelatorioPDF(FPDF):
             )
         if valor:
             self.set_x(self.l_margin)
-            self.set_font(self.fonte, "B", 10)
+            self.set_font(self.fonte, "B", tamanho)
             self.multi_cell(
                 0, 5.4, valor,
                 align="R", new_x="LMARGIN", new_y="NEXT", wrapmode="CHAR",
@@ -671,17 +671,6 @@ def pdf_regime_apuracao(escola, mes_label, regime_apuracao, regime_tributario):
     return _saida(pdf)
 
 
-def _rotulo_parcela(item):
-    nome = (item.get("nome_completo") or "Aluno").strip()
-    parcela = item.get("parcela_contrato")
-    if parcela:
-        nome = f"{nome} · parcela {parcela}"
-    descricao = (item.get("descricao") or "").strip()
-    if descricao:
-        nome = f"{nome} · {descricao}"
-    return nome[:90]
-
-
 def _total_recebido_item(item):
     return (
         float(item.get("valor") or 0)
@@ -690,100 +679,224 @@ def _total_recebido_item(item):
     )
 
 
-def pdf_regime_detalhado(escola, mes_label, regime_apuracao, regime_tributario, recebidos, pendentes, atrasados):
+def _mes_vencimento(item):
+    valor = item.get("data_vencimento")
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%Y-%m")
+    texto = str(valor or "")
+    if len(texto) >= 7 and texto[4] == "-":
+        return texto[:7]
+    return ""
+
+
+def _separar_nao_pagos(pendentes, atrasados, mes_filtro):
+    do_mes = list(pendentes or [])
+    anteriores = []
+    for item in atrasados or []:
+        if mes_filtro and _mes_vencimento(item) == mes_filtro:
+            do_mes.append(item)
+        else:
+            anteriores.append(item)
+    return do_mes, anteriores
+
+
+def _titulo_folha(pdf, texto):
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font(pdf.fonte, "B", 14)
+    pdf.set_text_color(30, 58, 95)
+    pdf.multi_cell(0, 8, texto, align="L", new_x="LMARGIN", new_y="NEXT", wrapmode="CHAR")
+    pdf.set_text_color(40, 40, 40)
+    pdf.ln(1)
+
+
+def _total_destaque(pdf, rotulo, valor):
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font(pdf.fonte, "B", 12)
+    pdf.set_text_color(30, 58, 95)
+    pdf.cell(pdf.epw * 0.62, 10, rotulo)
+    pdf.set_font(pdf.fonte, "B", 14)
+    pdf.cell(pdf.epw * 0.38, 10, valor, align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(40, 40, 40)
+
+
+def _nome_aluno(pdf, item, tamanho, fundo):
+    if pdf.get_y() > 215:
+        pdf.add_page()
+    pdf.set_x(pdf.l_margin)
+    pdf.set_fill_color(*fundo)
+    pdf.set_font(pdf.fonte, "B", tamanho)
+    pdf.set_text_color(30, 58, 95)
+    pdf.multi_cell(
+        0, 8, item.get("nome_completo") or "Aluno",
+        align="L", fill=True, new_x="LMARGIN", new_y="NEXT", wrapmode="CHAR",
+    )
+    pdf.set_text_color(40, 40, 40)
+    pdf.ln(1)
+
+
+def _ficha_nao_pago(pdf, item, caixa, tamanho=10):
+    _nome_aluno(pdf, item, 12, (254, 242, 242))
+    parcela = item.get("parcela_contrato")
+    juros_pct = float(item.get("juros_percentual") or 0)
+    juros_valor = float(item.get("juros_valor") or 0)
+    multa_valor = float(item.get("multa_valor") or 0)
+    pdf.linha("Matrícula", item.get("matricula") or "—", tamanho=tamanho)
+    if parcela:
+        pdf.linha("Parcela", str(parcela), tamanho=tamanho)
+    pdf.linha("Descrição", (item.get("descricao") or "Mensalidade").strip(), tamanho=tamanho)
+    pdf.linha("Vencimento", _data_br(item.get("data_vencimento")), tamanho=tamanho)
+    pdf.linha("Situação", item.get("status") or "Sem baixa", tamanho=tamanho)
+    pdf.linha("Mensalidade", _brl(item.get("valor")), negrito=True, tamanho=tamanho)
+    if juros_pct or juros_valor:
+        pdf.linha("Juros", f"{juros_pct:g}% = {_brl(juros_valor)}", tamanho=tamanho)
+        pdf.paragrafo(
+            "Há juros lançados nesta parcela, mas sem baixa eles não entram na apuração.",
+            tamanho=tamanho,
+        )
+    else:
+        pdf.linha("Juros", "R$ 0,00", tamanho=tamanho)
+        pdf.paragrafo(
+            "Sem baixa: juros não foram lançados nesta mensalidade e não entram na apuração.",
+            tamanho=tamanho,
+        )
+    if multa_valor:
+        pdf.linha("Multa", _brl(multa_valor), tamanho=tamanho)
+        pdf.paragrafo(
+            "Há multa lançada nesta parcela, mas sem baixa ela não entra na apuração.",
+            tamanho=tamanho,
+        )
+    else:
+        pdf.linha("Multa", "R$ 0,00", tamanho=tamanho)
+        pdf.paragrafo(
+            "Sem baixa: multa não foi lançada nesta mensalidade e não entra na apuração.",
+            tamanho=tamanho,
+        )
+    if caixa:
+        pdf.linha("Apuração", "Fora da base do regime de caixa", negrito=True, tamanho=tamanho)
+    else:
+        pdf.linha("Apuração", "Entra pelo vencimento, mesmo sem baixa", negrito=True, tamanho=tamanho)
+    pdf.ln(3)
+
+
+def _ficha_pago(pdf, item, caixa):
+    entrou = _total_recebido_item(item)
+    _nome_aluno(pdf, item, 14, (236, 253, 243))
+    parcela = item.get("parcela_contrato")
+    juros_pct = float(item.get("juros_percentual") or 0)
+    juros_valor = float(item.get("juros_valor") or 0)
+    multa_valor = float(item.get("multa_valor") or 0)
+    pdf.linha("Matrícula", item.get("matricula") or "—", tamanho=11)
+    if parcela:
+        pdf.linha("Parcela", str(parcela), tamanho=11)
+    pdf.linha("Descrição", (item.get("descricao") or "Mensalidade").strip(), tamanho=11)
+    pdf.linha("Vencimento", _data_br(item.get("data_vencimento")), tamanho=11)
+    pdf.linha("Data da baixa", _data_br(item.get("data_pagamento")), tamanho=11)
+    if item.get("forma_pagamento"):
+        pdf.linha("Forma", str(item.get("forma_pagamento")), tamanho=11)
+    pdf.linha("Mensalidade", _brl(item.get("valor")), tamanho=11)
+    if juros_pct or juros_valor:
+        pdf.linha("Juros", f"{juros_pct:g}% = {_brl(juros_valor)}", tamanho=11)
+        pdf.paragrafo("Este juros entrou na base porque a baixa é deste mês.", tamanho=11)
+    else:
+        pdf.linha("Juros", "R$ 0,00", tamanho=11)
+        pdf.paragrafo("Não houve juros nesta baixa.", tamanho=11)
+    if multa_valor:
+        pdf.linha("Multa", _brl(multa_valor), tamanho=11)
+        pdf.paragrafo("Esta multa entrou na base porque a baixa é deste mês.", tamanho=11)
+    else:
+        pdf.linha("Multa", "R$ 0,00", tamanho=11)
+        pdf.paragrafo("Não houve multa nesta baixa.", tamanho=11)
+    pdf.linha("Total que entrou", _brl(entrou), negrito=True, tamanho=12)
+    if caixa:
+        pdf.linha("Apuração", "Entrou na base do regime de caixa", negrito=True, tamanho=11)
+    else:
+        pdf.linha("Apuração", "A competência usa o vencimento, não esta baixa", negrito=True, tamanho=11)
+    pdf.ln(4)
+
+
+def pdf_regime_detalhado(
+    escola, mes_label, regime_apuracao, regime_tributario,
+    recebidos, pendentes, atrasados, mes_filtro="",
+):
     caixa = (regime_apuracao or "") == "caixa"
+    nao_pagos, anteriores = _separar_nao_pagos(pendentes, atrasados, mes_filtro)
+    total_pago = sum(_total_recebido_item(item) for item in (recebidos or []))
+    total_nao_pago = sum(float(item.get("valor") or 0) for item in nao_pagos)
+    total_anteriores = sum(float(item.get("valor") or 0) for item in anteriores)
+
     pdf = RelatorioPDF("Regime de caixa" if caixa else "Regime de competência")
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label} · {nome_regime(regime_tributario)}")
+    _total_destaque(pdf, "Total pago no mês", _brl(total_pago))
+    _total_destaque(pdf, "Total não pago no mês", _brl(total_nao_pago))
+    pdf.ln(2)
     if caixa:
         pdf.paragrafo(
-            "No regime de caixa, o imposto do mês usa o que foi recebido, não o que foi emitido. "
-            "Entra na base a mensalidade que teve baixa neste mês, mais os juros percentuais e a multa fixa "
-            "cobrados nessa baixa. O vencimento pode ser de outro mês. "
-            "Parcela emitida e ainda sem baixa, mesmo atrasada, fica fora da base até o pagamento."
-        )
-        pdf.paragrafo(
-            "No Simples Nacional, essa é a opção de apurar pelo recebimento. "
-            "No Lucro Presumido, PIS, COFINS, IRPJ e CSLL deste mês usam a mesma base recebida. "
-            "A DRE continua simplificada, sem plano de contas."
+            "O total pago é o que teve baixa neste mês, com juros e multa quando houver. "
+            "Esse valor entra na apuração do regime de caixa. "
+            "O total não pago vence neste mês e não teve baixa, então ficou fora da apuração."
         )
     else:
         pdf.paragrafo(
-            "No regime de competência, a mensalidade entra no imposto pelo vencimento, paga ou não. "
-            "A data da baixa não muda esse mês. Juros e multa só existem depois da baixa e aparecem "
-            "no lançamento pago, somados ao que entrou na conta."
+            "O total pago é o que teve baixa neste mês. "
+            "O total não pago vence neste mês e ainda não teve baixa. "
+            "No regime de competência, os dois entram pelo vencimento."
         )
+    if anteriores:
+        pdf.linha("Parcelas anteriores sem baixa", _brl(total_anteriores), negrito=True)
+        pdf.paragrafo("Elas também estão sem pagamento e aparecem na folha de quem não pagou.")
+    pdf.paragrafo("A folha seguinte lista os alunos sem baixa. A outra folha lista os alunos que pagaram neste mês.")
 
-    pdf.secao("O que foi pago e entrou neste mês")
+    pdf.add_page()
+    _titulo_folha(pdf, "Não pagos neste mês")
     if caixa:
-        pdf.paragrafo("Cada linha abaixo teve baixa neste mês. Por isso entra na base do regime de caixa.")
+        pdf.paragrafo(
+            "Estes alunos vencem neste mês e não tiveram baixa. "
+            "O valor não entrou na apuração do regime de caixa. "
+            "Em cada mensalidade está a apuração de juros e de multa."
+        )
     else:
-        pdf.paragrafo("Baixas deste mês. No regime de competência, a mensalidade já entrou pelo vencimento.")
-    total_pago = 0.0
+        pdf.paragrafo(
+            "Estes alunos vencem neste mês e não tiveram baixa. "
+            "Em cada mensalidade está a apuração de juros e de multa."
+        )
+    if not nao_pagos:
+        pdf.paragrafo("Nenhuma mensalidade deste mês ficou sem baixa.")
+    for item in nao_pagos:
+        _ficha_nao_pago(pdf, item, caixa)
+    if nao_pagos:
+        pdf.linha("Total não pago no mês", _brl(total_nao_pago), negrito=True, tamanho=12)
+
+    if anteriores:
+        pdf.ln(2)
+        pdf.secao("Parcelas anteriores ainda sem baixa")
+        pdf.paragrafo(
+            "Venceram antes deste mês e continuam sem pagamento. "
+            + (
+                "Ficam fora da apuração até a baixa, com juros e multa se forem lançados nesse dia."
+                if caixa else
+                "No regime de competência, já entraram no mês do vencimento."
+            )
+        )
+        for item in anteriores:
+            _ficha_nao_pago(pdf, item, caixa)
+        pdf.linha("Total de parcelas anteriores", _brl(total_anteriores), negrito=True, tamanho=12)
+
+    pdf.add_page()
+    _titulo_folha(pdf, "Pagos neste mês")
+    pdf.paragrafo(
+        "Estes alunos tiveram baixa neste mês. "
+        + (
+            "O total de cada um, com juros e multa, entrou na apuração do regime de caixa."
+            if caixa else
+            "A data da baixa mostra quando o dinheiro entrou. No regime de competência, o imposto segue o vencimento."
+        )
+    )
     if not recebidos:
         pdf.paragrafo("Nenhuma baixa neste mês.")
     for item in recebidos or []:
-        entrou = _total_recebido_item(item)
-        total_pago += entrou
-        pdf.linha(_rotulo_parcela(item), _brl(entrou), negrito=True)
-        juros_pct = float(item.get("juros_percentual") or 0)
-        partes = [
-            f"Vencia em {_data_br(item.get('data_vencimento'))}",
-            f"baixa em {_data_br(item.get('data_pagamento'))}",
-            f"mensalidade {_brl(item.get('valor'))}",
-        ]
-        if juros_pct or float(item.get("juros_valor") or 0):
-            partes.append(f"juros {juros_pct:g}% = {_brl(item.get('juros_valor'))}")
-        if float(item.get("multa_valor") or 0):
-            partes.append(f"multa fixa {_brl(item.get('multa_valor'))}")
-        if item.get("forma_pagamento"):
-            partes.append(str(item.get("forma_pagamento")))
-        if caixa:
-            partes.append("entrou porque a baixa é deste mês")
-        pdf.paragrafo(". ".join(partes) + ".")
-    pdf.linha("Total que entrou no mês", _brl(total_pago), negrito=True)
-
-    pdf.secao("O que não foi pago")
-    pdf.paragrafo(
-        "Mensalidades com vencimento neste mês que ainda não venceram e não têm baixa. "
-        + ("No regime de caixa, ficam fora do imposto até o pagamento." if caixa else "No regime de competência, já entram pelo vencimento.")
-    )
-    total_pendente = 0.0
-    if not pendentes:
-        pdf.paragrafo("Nenhuma mensalidade pendente neste vencimento.")
-    for item in pendentes or []:
-        valor = float(item.get("valor") or 0)
-        total_pendente += valor
-        pdf.linha(_rotulo_parcela(item), _brl(valor), negrito=True)
-        pdf.paragrafo(
-            f"Vence em {_data_br(item.get('data_vencimento'))} e ainda não houve baixa. "
-            "Por isso não foi paga."
-        )
-    pdf.linha("Total pendente do vencimento", _brl(total_pendente), negrito=True)
-
-    pdf.secao("O que está em atraso, inclusive parcelas anteriores")
-    pdf.paragrafo(
-        "Parcelas com vencimento já passado e sem baixa, deste mês ou de meses anteriores. "
-        + (
-            "Continuam fora da base do regime de caixa. Entram só no mês em que a baixa for dada, com juros e multa se houver."
-            if caixa else
-            "No regime de competência, a parcela atrasada já entrou no mês do vencimento. Ela segue em aberto na cobrança."
-        )
-    )
-    total_atraso = 0.0
-    if not atrasados:
-        pdf.paragrafo("Nenhuma parcela em atraso.")
-    for item in atrasados or []:
-        valor = float(item.get("valor") or 0)
-        total_atraso += valor
-        pdf.linha(_rotulo_parcela(item), _brl(valor), negrito=True)
-        pdf.paragrafo(
-            f"Venceu em {_data_br(item.get('data_vencimento'))} e não há data de baixa. "
-            "O atraso é a falta de pagamento dessa parcela."
-        )
-    pdf.linha("Total em atraso", _brl(total_atraso), negrito=True)
-    if caixa:
-        pdf.linha("Base do imposto neste mês", _brl(total_pago), negrito=True)
+        _ficha_pago(pdf, item, caixa)
+    pdf.linha("Total pago no mês", _brl(total_pago), negrito=True, tamanho=12)
     return _saida(pdf)
 
 
