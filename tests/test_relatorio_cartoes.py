@@ -15,6 +15,9 @@ from relatorios_pdf import (
     pdf_regime_detalhado,
     pdf_simples_nacional,
     pdf_extrato_pgdas,
+    pdf_calculo_rbt12,
+    pdf_calculo_fs12,
+    pdf_calculo_fator_r,
 )
 
 
@@ -167,7 +170,27 @@ class RelatoriosDosCartoes(unittest.TestCase):
             "aliquota_nominal": 0.06, "parcela_deduzir": 0, "aliquota_efetiva_pct": 6,
             "quadro": {"linhas": []}, "regime_apuracao": "caixa",
         }
-        _pdf(pdf_extrato_pgdas("Escola", "Setembro/2026", ap, "caixa"))
+        _pdf(pdf_calculo_rbt12("Escola", "Setembro/2026", ap, "caixa"))
+        _pdf(pdf_calculo_fs12("Escola", "Setembro/2026", ap, "caixa"))
+        _pdf(pdf_calculo_fator_r("Escola", "Setembro/2026", ap, "caixa"))
+        _pdf(pdf_extrato_pgdas(
+            "Escola", "Setembro/2026", ap, "caixa",
+            pendentes=[{
+                "nome_completo": "Beatriz",
+                "matricula": "2026002",
+                "parcela_contrato": 9,
+                "valor": 750,
+                "data_vencimento": date(2026, 9, 30),
+            }],
+            atrasados=[{
+                "nome_completo": "Valentina",
+                "matricula": "2026003",
+                "parcela_contrato": 8,
+                "valor": 950,
+                "data_vencimento": date(2026, 8, 1),
+            }],
+            mes_filtro="2026-09",
+        ))
         _pdf(pdf_simples_nacional(
             "Escola", "Maio/2026", "simples_nacional", ap, [], [],
             dre={"receita": 1500, "das": 90, "folha": 0, "compras": 0, "servicos": 0},

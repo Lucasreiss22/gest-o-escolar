@@ -76,6 +76,9 @@ from relatorios_pdf import (
     pdf_lucro_real,
     pdf_simples_nacional,
     pdf_extrato_pgdas,
+    pdf_calculo_rbt12,
+    pdf_calculo_fs12,
+    pdf_calculo_fator_r,
     pdf_cobranca_mensalidade,
     pdf_composicao_mensalidades,
     pdf_composicao_custos,
@@ -6540,9 +6543,26 @@ def extrato_pgdas_pdf():
             escola = config.get("nome_escola") or "Gestão Escolar"
             regime_apuracao = normalizar_regime_apuracao(config.get("regime_apuracao"))
             apuracao, _colabs = calcular_apuracao_simples(cursor, mes_filtro)
-            buffer = pdf_extrato_pgdas(
-                escola, nome_mes_extenso(mes_filtro), apuracao, regime_apuracao
-            )
+            campo = (request.args.get("campo") or "").strip()
+            mes_label = nome_mes_extenso(mes_filtro)
+            if campo == "rbt12":
+                buffer = pdf_calculo_rbt12(escola, mes_label, apuracao, regime_apuracao)
+                nome_arquivo = f"calculo_rbt12_{mes_filtro}.pdf"
+            elif campo == "fs12":
+                buffer = pdf_calculo_fs12(escola, mes_label, apuracao, regime_apuracao)
+                nome_arquivo = f"calculo_folha_{mes_filtro}.pdf"
+            elif campo == "fator":
+                buffer = pdf_calculo_fator_r(escola, mes_label, apuracao, regime_apuracao)
+                nome_arquivo = f"calculo_fator_r_{mes_filtro}.pdf"
+            else:
+                pendentes, atrasados = [], []
+                if regime_apuracao == "caixa":
+                    _recebidos, pendentes, atrasados = _listas_regime(cursor, mes_filtro)
+                buffer = pdf_extrato_pgdas(
+                    escola, mes_label, apuracao, regime_apuracao,
+                    pendentes=pendentes, atrasados=atrasados, mes_filtro=mes_filtro,
+                )
+                nome_arquivo = f"extrato_pgdas_{mes_filtro}.pdf"
     except Exception as e:
         flash(f"Não foi possível gerar o extrato PGDAS: {e}", "danger")
         return redirect(url_for("pagina_financeiro", mes=mes_filtro, aba="simples"))
@@ -6552,7 +6572,7 @@ def extrato_pgdas_pdf():
         buffer,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"extrato_pgdas_{mes_filtro}.pdf",
+        download_name=nome_arquivo,
     )
 
 

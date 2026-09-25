@@ -405,7 +405,7 @@
                     <div class="calc-passo"><strong>Annualização</strong>Menos de 12 meses na janela: (R$ {{ (ap.rbt_acumulado)|moeda }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ (ap.rbt12)|moeda }}.</div>
                     {% endif %}
                     <div class="calc-passo"><strong>RBT12</strong>R$ {{ (ap.rbt12)|moeda }}</div>
-                    {% include '_simples_envio.html' %}
+                    {% with campo='rbt12' %}{% include '_simples_envio.html' %}{% endwith %}
                 </div>
             </dialog>
 
@@ -429,7 +429,7 @@
                     <div class="calc-passo"><strong>Annualização</strong>(R$ {{ (ap.fs_acumulado)|moeda }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ (ap.fs12)|moeda }}.</div>
                     {% endif %}
                     <div class="calc-passo"><strong>FS12</strong>R$ {{ (ap.fs12)|moeda }}</div>
-                    {% include '_simples_envio.html' %}
+                    {% with campo='fs12' %}{% include '_simples_envio.html' %}{% endwith %}
                 </div>
             </dialog>
 
@@ -439,7 +439,7 @@
                     <div class="calc-passo"><strong>Fórmula</strong>Fator R = FS12 ÷ RBT12</div>
                     <div class="calc-passo"><strong>Conta</strong>R$ {{ (ap.fs12)|moeda }} ÷ R$ {{ (ap.rbt12)|moeda }} = {{ "%.2f"|format(ap.fator_r_pct) }}%</div>
                     <div class="calc-passo"><strong>Anexo</strong>{% if ap.fator_r_pct >= 28 %}{{ "%.2f"|format(ap.fator_r_pct) }}% é igual ou maior que 28%, então o anexo é o III.{% else %}{{ "%.2f"|format(ap.fator_r_pct) }}% ficou abaixo de 28%, então o anexo é o V.{% endif %}</div>
-                    {% include '_simples_envio.html' %}
+                    {% with campo='fator' %}{% include '_simples_envio.html' %}{% endwith %}
                 </div>
             </dialog>
 
@@ -450,7 +450,7 @@
                     <div class="calc-passo"><strong>Faixa do anexo {{ ap.anexo }}</strong>Faixa {{ ap.faixa }}, alíquota nominal {{ "%.2f"|format(aliq_nom) }}%, parcela a deduzir R$ {{ (ap.parcela_deduzir)|moeda }}.</div>
                     <div class="calc-passo"><strong>Alíquota efetiva</strong>((R$ {{ (ap.rbt12)|moeda }} × {{ "%.2f"|format(aliq_nom) }}%) − R$ {{ (ap.parcela_deduzir)|moeda }}) ÷ R$ {{ (ap.rbt12)|moeda }} = {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</div>
                     <div class="calc-passo"><strong>DAS</strong>R$ {{ (ap.receita_mes)|moeda }} × {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% = R$ {{ (ap.das)|moeda }}</div>
-                    {% include '_simples_envio.html' %}
+                    {% with campo='das' %}{% include '_simples_envio.html' %}{% endwith %}
                 </div>
             </dialog>
             <script>

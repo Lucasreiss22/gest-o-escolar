@@ -1,7 +1,18 @@
 <div class="calc-passo">
-    <strong>PDF e e-mail</strong>
-    <a class="btn btn-primary" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Extrato PGDAS</a>
-    <a class="btn btn-success" href="{{ url_for('memoria_simples_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Memória e demonstrativo</a>
+    <strong>PDF deste campo e extrato da DAS</strong>
+    {% if campo == 'das' %}
+    <p class="simples-hint">Este é o extrato PGDAS da DAS, com a RBT12, a folha, o Fator R e, no regime de caixa, o que não foi pago.</p>
+    {% else %}
+    <p class="simples-hint">Os quatro campos abrem o mesmo extrato PGDAS da DAS. O outro botão gera só o cálculo deste campo.</p>
+    {% endif %}
+    {% if campo == 'rbt12' %}
+    <a class="btn btn-success" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual, campo='rbt12') }}" style="margin: 6px 8px 8px 0;">PDF do cálculo da RBT12</a>
+    {% elif campo == 'fs12' %}
+    <a class="btn btn-success" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual, campo='fs12') }}" style="margin: 6px 8px 8px 0;">PDF da folha e encargos</a>
+    {% elif campo == 'fator' %}
+    <a class="btn btn-success" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual, campo='fator') }}" style="margin: 6px 8px 8px 0;">PDF do cálculo do Fator R</a>
+    {% endif %}
+    <a class="btn btn-primary" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Extrato PGDAS da DAS</a>
     <form method="POST" action="{{ url_for('enviar_memoria_simples') }}" class="calc-envio">
         <input type="hidden" name="mes" value="{{ mes_atual }}">
         <div class="form-group">
