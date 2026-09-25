@@ -389,6 +389,11 @@
             var porFor = document.querySelector('label[for="' + CSS.escape(campo.id) + '"]');
             if (porFor) return limparRotulo(porFor.textContent);
         }
+        var irmao = campo.previousElementSibling;
+        while (irmao) {
+            if (irmao.tagName === "LABEL") return limparRotulo(irmao.textContent);
+            irmao = irmao.previousElementSibling;
+        }
         var nodo = campo.parentElement;
         for (var i = 0; i < 4 && nodo; i++) {
             if (nodo.tagName === "LABEL") return limparRotulo(nodo.textContent);
@@ -410,19 +415,6 @@
         var botao = document.querySelector('[data-bs-target="#' + pane.id + '"]');
         if (!botao) return "";
         return limparRotulo(botao.textContent).replace(/^\d+\.\s*/, "");
-    }
-
-    function descreverCampo(campo) {
-        var nome = rotuloCampo(campo);
-        var aba = abaDoCampo(campo);
-        return aba ? nome + " (aba " + aba + ")" : nome;
-    }
-
-    function mensagemCampo(campo) {
-        var nome = descreverCampo(campo);
-        if (campo._problema === "email") return "O campo " + nome + " não está em um formato válido.";
-        if (campo._problema === "curto") return "O campo " + nome + " está curto demais.";
-        return "Falta preencher o campo " + nome + ".";
     }
 
     function revelarCampo(campo) {
@@ -470,10 +462,23 @@
         return "";
     }
 
+    function campoForaDeUso(campo) {
+        var nodo = campo.parentElement;
+        while (nodo && nodo !== document.body) {
+            if (nodo.hasAttribute && nodo.hasAttribute("hidden")) return true;
+            nodo = nodo.parentElement;
+        }
+        return false;
+    }
+
     function camposInvalidos(form) {
         var lista = [];
         var radios = {};
-        form.querySelectorAll("input, select, textarea").forEach(function (campo) {
+        Array.prototype.forEach.call(form.elements || [], function (campo) {
+            if (!campo || !campo.tagName) return;
+            var tag = campo.tagName;
+            if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") return;
+            if (campoForaDeUso(campo)) return;
             var tipo = problemaCampo(campo, radios);
             if (!tipo) return;
             campo._problema = tipo;
@@ -482,22 +487,71 @@
         return lista;
     }
 
+    function textoSeguro(valor) {
+        return String(valor || "").replace(/[&<>]/g, function (ch) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch];
+        });
+    }
+
+    function telaEstreita() {
+        return window.matchMedia("(max-width: 960px)").matches;
+    }
+
+    function avisoAtual(form) {
+        var box = document.querySelector(".aviso-campos");
+        if (!box) return null;
+        return !form || box._form === form ? box : null;
+    }
+
+    function posicionarAviso(form, box) {
+        box._form = form;
+        document.body.appendChild(box);
+        box.classList.add("aviso-campos-fixo");
+    }
+
+    function ajustarAvisoAoTeclado() {
+        var box = document.querySelector(".aviso-campos.aviso-campos-fixo");
+        if (!box || box.hidden) return;
+        var vista = window.visualViewport;
+        if (!vista) {
+            box.style.bottom = "";
+            return;
+        }
+        var coberto = Math.max(0, window.innerHeight - vista.height - vista.offsetTop);
+        box.style.bottom = (coberto + 12) + "px";
+    }
+
+    function irParaCampo(campo) {
+        if (!campo) return;
+        revelarCampo(campo);
+        if (campo.scrollIntoView) campo.scrollIntoView({ block: "center", behavior: "smooth" });
+        if (campo.focus) campo.focus();
+    }
+
     function mostrarAviso(form, campos) {
-        var box = form.querySelector(".aviso-campos");
+        var box = document.querySelector(".aviso-campos");
         if (!box) {
             box = document.createElement("div");
             box.className = "aviso-campos";
             box.setAttribute("role", "alert");
-            form.insertBefore(box, form.firstChild);
         }
-        var itens = campos.map(function (campo) {
-            return "<li>" + mensagemCampo(campo).replace(/[&<>]/g, function (ch) {
-                return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch];
-            }) + "</li>";
+        box._campos = campos;
+        posicionarAviso(form, box);
+        var itens = campos.map(function (campo, indice) {
+            var aba = abaDoCampo(campo);
+            var extra = campo._problema === "email" ? "Formato inválido" : (campo._problema === "curto" ? "Curto demais" : "");
+            return "<button type=\"button\" class=\"aviso-ir\" data-idx=\"" + indice + "\">" +
+                "<span class=\"aviso-nome\">" + textoSeguro(rotuloCampo(campo)) + "</span>" +
+                (aba ? "<span class=\"aviso-aba\">Aba " + textoSeguro(aba) + "</span>" : "") +
+                (extra ? "<span class=\"aviso-extra\">" + extra + "</span>" : "") +
+                "</button>";
         });
-        box.innerHTML = "<strong>Revise o cadastro.</strong><ul>" + itens.join("") + "</ul>";
+        box.innerHTML = "<div class=\"aviso-cabeca\"><strong>Falta preencher</strong>" +
+            "<button type=\"button\" class=\"aviso-fechar\" aria-label=\"Fechar aviso\">×</button></div>" +
+            "<p class=\"aviso-dica\">Escolha o campo para ir até ele.</p>" +
+            "<div class=\"aviso-lista\">" + itens.join("") + "</div>";
         box.hidden = false;
-        if (box.scrollIntoView) box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        ajustarAvisoAoTeclado();
     }
 
     function avisarCampos(form) {
@@ -506,14 +560,13 @@
             item.classList.remove("campo-faltando");
         });
         if (!faltando.length) {
-            var aviso = form.querySelector(".aviso-campos");
+            var aviso = avisoAtual(form);
             if (aviso) aviso.hidden = true;
             return true;
         }
         faltando.forEach(function (item) { item.classList.add("campo-faltando"); });
         mostrarAviso(form, faltando);
-        revelarCampo(faltando[0]);
-        if (faltando[0].focus) faltando[0].focus();
+        if (!telaEstreita()) irParaCampo(faltando[0]);
         return false;
     }
 
@@ -521,6 +574,26 @@
         document.querySelectorAll("form").forEach(function (form) {
             form.setAttribute("novalidate", "novalidate");
         });
+    }
+
+    document.addEventListener("click", function (event) {
+        var fechar = event.target.closest && event.target.closest(".aviso-fechar");
+        if (fechar) {
+            var caixa = fechar.closest(".aviso-campos");
+            if (caixa) caixa.hidden = true;
+            return;
+        }
+        var botao = event.target.closest && event.target.closest(".aviso-ir");
+        if (!botao) return;
+        var box = botao.closest(".aviso-campos");
+        var indice = Number(botao.getAttribute("data-idx"));
+        if (!box || !box._campos || !box._campos[indice]) return;
+        irParaCampo(box._campos[indice]);
+    });
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", ajustarAvisoAoTeclado);
+        window.visualViewport.addEventListener("scroll", ajustarAvisoAoTeclado);
     }
 
     document.addEventListener("submit", function (event) {

@@ -358,21 +358,70 @@ input, select, textarea, button {
 .pdf-bar-hint { font-size: 0.78rem; color: #64748b; margin: 8px 0 0; line-height: 1.4; }
 
 .aviso-campos {
+    background: #fff;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    border-radius: 14px;
+    padding: 12px;
+    margin: 0 0 14px;
+    font-size: 0.92rem;
+    line-height: 1.4;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+}
+.aviso-cabeca { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.aviso-cabeca strong { color: #7f1d1d; }
+.aviso-fechar {
+    border: 0;
+    background: #fee2e2;
+    color: #991b1b;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.aviso-dica { margin: 6px 0 8px; color: #64748b; font-size: 0.8rem; }
+.aviso-lista { display: flex; flex-direction: column; gap: 6px; }
+.aviso-ir {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    text-align: left;
     background: #fef2f2;
     color: #991b1b;
     border: 1px solid #fecaca;
     border-radius: 10px;
-    padding: 12px 14px;
-    margin: 0 0 14px;
-    font-size: 0.92rem;
-    line-height: 1.45;
+    padding: 8px 10px;
+    cursor: pointer;
 }
-.aviso-campos strong { display: block; margin-bottom: 6px; }
-.aviso-campos ul { margin: 0; padding-left: 18px; }
-.aviso-campos li { margin: 2px 0; }
+.aviso-nome { font-weight: 700; }
+.aviso-aba, .aviso-extra { font-size: 0.78rem; color: #b91c1c; }
+.aviso-campos-fixo {
+    position: fixed;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    left: auto;
+    width: min(380px, calc(100vw - 32px));
+    z-index: 2000;
+    margin: 0;
+    max-height: min(46vh, 360px);
+    overflow: auto;
+}
+@media (max-width: 960px) {
+    .aviso-campos-fixo {
+        left: 12px;
+        right: 12px;
+        width: auto;
+        bottom: calc(12px + env(safe-area-inset-bottom));
+    }
+}
 .campo-faltando {
     border-color: #dc2626 !important;
     box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+    scroll-margin-top: 88px;
+    scroll-margin-bottom: 240px;
 }
 
 .hint { color: #64748b; font-size: 0.9rem; line-height: 1.45; }
