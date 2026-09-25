@@ -153,7 +153,9 @@
             <a class="{% if aba == 'pacotes' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='pacotes') }}">Pacotes</a>
             <a class="{% if aba == 'financeiro' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='financeiro', mes=mes_atual) }}">Financeiro</a>
             <a class="{% if aba == 'envio' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='envio') }}">Envio de e-mail</a>
+            {% if nfse_liberada %}
             <a class="{% if aba == 'nfse' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='nfse', mes=mes_atual) }}">NFS-e</a>
+            {% endif %}
             <a class="{% if aba == 'auditoria' %}ativa{% endif %}" href="{{ url_for('plataforma_escolas', aba='auditoria') }}">Auditoria</a>
         </nav>
 
@@ -161,7 +163,21 @@
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
 
-        {% if aba == 'nfse' %}
+        <div class="card-box">
+            <h3>Gerar NFS-e</h3>
+            <p class="hint">Desligado, a nota fiscal some de todas as escolas. Nenhum campo de emissão aparece no sistema.</p>
+            <form method="POST" style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+                <input type="hidden" name="acao" value="definir_emissao_nfse">
+                <input type="hidden" name="aba" value="{{ aba }}">
+                <label style="display:flex; gap:8px; align-items:center; margin:0;">
+                    <input type="checkbox" name="nfse_ligada" value="1" {% if nfse_liberada %}checked{% endif %}>
+                    Gerar NFS-e
+                </label>
+                <button class="btn btn-primary" type="submit">Salvar</button>
+            </form>
+        </div>
+
+        {% if aba == 'nfse' and nfse_liberada %}
         <div class="card-box">
             <h3>NFS-e das licenças</h3>
             <p class="hint">Prestador é a empresa do sistema. Tomador é o CNPJ da escola. Serviço 01.05 ou 01.07. O token e o certificado A1 ficam no banco da plataforma. A nota substituta envia o número, o código de verificação e a chave da nota original para o XML.</p>

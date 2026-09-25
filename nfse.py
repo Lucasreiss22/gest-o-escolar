@@ -473,6 +473,32 @@ def garantir_tabela_escola(cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_notas_aluno ON notas_fiscais (aluno_id)")
 
 
+def emissao_nfse_ligada():
+    """Liga a NFS-e de todas as escolas. Sem a coluna ou sem banco, fica desligada."""
+    from database import obter_conexao
+
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        return False
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute("SELECT emissao_habilitada FROM plataforma_nfse WHERE id = 1")
+            linha = cursor.fetchone()
+        if not linha:
+            return False
+        valor = linha.get("emissao_habilitada") if isinstance(linha, dict) else linha[0]
+        return bool(valor)
+    except Exception:
+        return False
+
+
+def definir_emissao_habilitada(cursor, ligada):
+    cursor.execute(
+        "UPDATE plataforma_nfse SET emissao_habilitada = %s WHERE id = 1",
+        (bool(ligada),),
+    )
+
+
 def garantir_tabela_plataforma(cursor):
     cursor.execute(
         """
@@ -499,9 +525,13 @@ def garantir_tabela_plataforma(cursor):
             numero VARCHAR(20),
             bairro VARCHAR(100),
             uf CHAR(2),
-            cep VARCHAR(9)
+            cep VARCHAR(9),
+            emissao_habilitada BOOLEAN DEFAULT FALSE
         )
         """
+    )
+    cursor.execute(
+        "ALTER TABLE plataforma_nfse ADD COLUMN IF NOT EXISTS emissao_habilitada BOOLEAN DEFAULT FALSE"
     )
     cursor.execute("INSERT INTO plataforma_nfse (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
     cursor.execute(

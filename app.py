@@ -6,7 +6,7 @@ try:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
-from flask import Flask, Response, flash, redirect, render_template, request, url_for, session, send_file
+from flask import Flask, Response, flash, g, redirect, render_template, request, url_for, session, send_file
 from markupsafe import escape
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -60,6 +60,8 @@ from nfse import (
     anexar_ultima_nota,
     cancelar_nota,
     consultar_nota,
+    definir_emissao_habilitada,
+    emissao_nfse_ligada,
     emitir_cobranca_plataforma,
     documento_da_nota,
     emitir_mensalidade,
@@ -934,9 +936,10 @@ def inject_acl():
     return {
         "papel_atual": papel,
         "rotulo_papel": rotulo_papel(papel),
-        "pode": lambda modulo: _no_plano(modulo) and pode_acao(papel, modulo, "acessar", session.get("permissoes")),
-        "pode_alterar": lambda modulo: _no_plano(modulo) and pode_acao(papel, modulo, "alterar", session.get("permissoes")),
-        "pode_excluir": lambda modulo: _no_plano(modulo) and pode_acao(papel, modulo, "excluir", session.get("permissoes")),
+        "nfse_liberada": bool(getattr(g, "nfse_liberada", False)),
+        "pode": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "acessar", session.get("permissoes")),
+        "pode_alterar": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "alterar", session.get("permissoes")),
+        "pode_excluir": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "excluir", session.get("permissoes")),
         "smtp_ok": smtp_ok,
         "google_login": google_login,
         "super_admin": bool(session.get("super_admin")),
@@ -1020,6 +1023,18 @@ def gravar_auditoria(resposta):
     return resposta
 
 
+_ROTAS_NFSE = {
+    "pagina_notas_fiscais",
+    "nfse_emitir",
+    "nfse_cancelar",
+    "nfse_substituir",
+    "nfse_consultar",
+    "nfse_lote",
+    "nfse_xml",
+    "nfse_danfse",
+}
+
+
 @app.before_request
 def proteger_rotas():
     endpoint = request.endpoint
@@ -1028,7 +1043,12 @@ def proteger_rotas():
         "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
     }
     if endpoint in publicos:
+        g.nfse_liberada = False
         return None
+    try:
+        g.nfse_liberada = emissao_nfse_ligada()
+    except Exception:
+        g.nfse_liberada = False
     if session.get("super_admin"):
         if endpoint not in {"plataforma_escolas", "plataforma_autorizar_gmail", "logout", "plataforma_voltar"}:
             return redirect(url_for("plataforma_escolas"))
@@ -1052,6 +1072,9 @@ def proteger_rotas():
     acao_form = request.form.get("acao") if request.method == "POST" else ""
     if isinstance(session.get("escola_telas"), list) and not endpoint_no_plano(endpoint, session.get("escola_telas"), acao_form):
         flash("Esta tela não está no pacote contratado por esta escola.", "danger")
+        return redirect(url_for("dashboard"))
+    if endpoint in _ROTAS_NFSE and not g.nfse_liberada:
+        flash("A geração de NFS-e está desligada.", "danger")
         return redirect(url_for("dashboard"))
     if not pode_requisicao(papel, endpoint, request.method, session.get("permissoes"), acao_form):
         tipo, _modulo = classificar_requisicao(endpoint, request.method, acao_form)
@@ -2461,6 +2484,24 @@ def plataforma_escolas():
         except Exception as e:
             flash(f"Banco indisponível: {e}", "danger")
             return redirect(url_for("plataforma_escolas"))
+        if acao == "definir_emissao_nfse":
+            ligada = request.form.get("nfse_ligada") == "1"
+            try:
+                with conexao.cursor() as cursor:
+                    definir_emissao_habilitada(cursor, ligada)
+                conexao.commit()
+                flash(
+                    "A geração de NFS-e foi ligada em todas as escolas."
+                    if ligada
+                    else "A geração de NFS-e foi desligada em todas as escolas.",
+                    "success",
+                )
+            except Exception as e:
+                conexao.rollback()
+                flash(f"Não foi possível salvar a geração de NFS-e: {e}", "danger")
+            finally:
+                conexao.close()
+            return redirect(url_for("plataforma_escolas", aba=(request.form.get("aba") or "escolas")))
         if acao in {
             "salvar_nfse_plataforma",
             "emitir_nfse_plataforma",
@@ -2469,6 +2510,10 @@ def plataforma_escolas():
             "consultar_nfse_plataforma",
             "salvar_tomador_escola",
         }:
+            if not getattr(g, "nfse_liberada", False):
+                conexao.close()
+                flash("A geração de NFS-e está desligada.", "danger")
+                return redirect(url_for("plataforma_escolas"))
             mes_nf = (request.form.get("mes") or "")[:7]
             try:
                 with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -7363,6 +7408,11 @@ def pagina_configuracoes():
         acao = request.form.get("acao")
         
         if acao == "salvar_nfse":
+            if not getattr(g, "nfse_liberada", False):
+                if conexao:
+                    conexao.close()
+                flash("A geração de NFS-e está desligada.", "danger")
+                return redirect(url_for("pagina_configuracoes"))
             if conexao:
                 try:
                     with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -7382,10 +7432,13 @@ def pagina_configuracoes():
                 try:
                     with conexao.cursor() as cursor:
                         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes TEXT")
-                        cursor.execute("SELECT papel FROM usuarios WHERE id = %s", (uid,))
+                        cursor.execute("SELECT papel, permissoes FROM usuarios WHERE id = %s", (uid,))
                         row = cursor.fetchone() or {}
                         papel = normalizar_papel(row.get("papel") or "funcionario")
                         perm_salvas = _permissoes_do_form(papel) or permissoes_padrao(papel)
+                        if not getattr(g, "nfse_liberada", False):
+                            anteriores = permissoes_efetivas(papel, row.get("permissoes"))
+                            perm_salvas["nfse"] = anteriores.get("nfse") or {}
                         cursor.execute(
                             "UPDATE usuarios SET permissoes = %s WHERE id = %s",
                             (json.dumps(perm_salvas, ensure_ascii=False), uid),
@@ -7496,6 +7549,7 @@ def pagina_configuracoes():
         areas_acesso=[
             area for area in AREAS_ACESSO
             if modulo_no_plano(area[0], session.get("escola_telas"))
+            and (area[0] != "nfse" or getattr(g, "nfse_liberada", False))
         ],
         padroes_acesso=padroes_por_papel(),
         nome_do_papel=rotulo_papel,

@@ -43,7 +43,11 @@
     <div class="content">
         <div class="header-flex">
             <h2>Gerenciar usuários</h2>
+            {% if nfse_liberada %}
             <p class="hint" style="flex-basis:100%;">A nota fiscal começa liberada para o administrador da escola e para o financeiro. Professor e os outros colaboradores só emitem se a área Notas fiscais for marcada em Configurações, no quadro Acesso da equipe. As demais áreas (alunos, pedagógico, equipe, financeiro, calendário, contra-cheque) também se ligam e desligam ali.</p>
+            {% else %}
+            <p class="hint" style="flex-basis:100%;">As áreas (alunos, pedagógico, equipe, financeiro, calendário, contra-cheque) se ligam e desligam em Configurações, no quadro Acesso da equipe.</p>
+            {% endif %}
             <a class="btn btn-secondary" href="{{ url_for('gerenciar_usuarios') }}">Novo cadastro</a>
         </div>
 
