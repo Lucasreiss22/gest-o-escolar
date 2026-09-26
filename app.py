@@ -3596,65 +3596,89 @@ def dashboard():
     return render_template("dashboard.html", metrics=metrics)
 
 
-def _garantir_sala_professor(cursor):
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS professor_arquivos (
-            id SERIAL PRIMARY KEY,
-            funcionario_id INT NOT NULL,
-            turma_id INT,
-            tipo VARCHAR(30) NOT NULL,
-            titulo VARCHAR(180),
-            midia_id INT NOT NULL,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS provas_criadas (
-            id SERIAL PRIMARY KEY,
-            funcionario_id INT NOT NULL,
-            turma_id INT,
-            titulo VARCHAR(180) NOT NULL,
-            materia VARCHAR(100),
-            data_aplicacao DATE,
-            horario TIME,
-            evento_calendario_id INT,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS data_aplicacao DATE")
-    cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS horario TIME")
-    cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS evento_calendario_id INT")
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS provas_criadas_questoes (
-            id SERIAL PRIMARY KEY,
-            prova_id INT NOT NULL REFERENCES provas_criadas(id) ON DELETE CASCADE,
-            ordem INT DEFAULT 1,
-            enunciado TEXT NOT NULL,
-            tipo VARCHAR(20) NOT NULL,
-            alternativas TEXT,
-            resposta TEXT
-        )
-        """
-    )
-    cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)")
-    cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mensagem_prova TEXT")
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS provas_notas (
-            id SERIAL PRIMARY KEY,
-            prova_id INT NOT NULL REFERENCES provas_criadas(id) ON DELETE CASCADE,
-            aluno_id INT NOT NULL,
-            nota VARCHAR(20) NOT NULL,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (prova_id, aluno_id)
-        )
-        """
-    )
+def _garantir_sala_professor():
+    """Cria as tabelas da sala do professor e grava de vez (a conexão compartilhada faz rollback no close)."""
+    from database import _nome_banco_atual, _tabelas_ok
+
+    schema = _nome_banco_atual(master=False)
+    if not schema:
+        return
+    chave = f"{schema}:sala_prof"
+    if chave in _tabelas_ok:
+        return
+    conexao = obter_conexao()
+    if not conexao:
+        return
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS professor_arquivos (
+                    id SERIAL PRIMARY KEY,
+                    funcionario_id INT NOT NULL,
+                    turma_id INT,
+                    tipo VARCHAR(30) NOT NULL,
+                    titulo VARCHAR(180),
+                    midia_id INT NOT NULL,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS provas_criadas (
+                    id SERIAL PRIMARY KEY,
+                    funcionario_id INT NOT NULL,
+                    turma_id INT,
+                    titulo VARCHAR(180) NOT NULL,
+                    materia VARCHAR(100),
+                    data_aplicacao DATE,
+                    horario TIME,
+                    evento_calendario_id INT,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS data_aplicacao DATE")
+            cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS horario TIME")
+            cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS evento_calendario_id INT")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS provas_criadas_questoes (
+                    id SERIAL PRIMARY KEY,
+                    prova_id INT NOT NULL REFERENCES provas_criadas(id) ON DELETE CASCADE,
+                    ordem INT DEFAULT 1,
+                    enunciado TEXT NOT NULL,
+                    tipo VARCHAR(20) NOT NULL,
+                    alternativas TEXT,
+                    resposta TEXT
+                )
+                """
+            )
+            cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)")
+            cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mensagem_prova TEXT")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS provas_notas (
+                    id SERIAL PRIMARY KEY,
+                    prova_id INT NOT NULL REFERENCES provas_criadas(id) ON DELETE CASCADE,
+                    aluno_id INT NOT NULL,
+                    nota VARCHAR(20) NOT NULL,
+                    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (prova_id, aluno_id)
+                )
+                """
+            )
+        conexao.commit()
+        _tabelas_ok.add(chave)
+    except Exception:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conexao.close()
 
 
 def _professor_da_sessao(cursor, funcionario_id):
@@ -3681,17 +3705,31 @@ def sala_professor():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
     garantir_tabelas_pedagogicas()
-    funcionario_id = _id_funcionario_da_sessao()
+    try:
+        _garantir_sala_professor()
+    except Exception as e:
+        flash(f"Não foi possível preparar a sala do professor: {e}", "danger")
+        return redirect(url_for("dashboard"))
+
+    funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
+    if funcionario_id:
+        session["funcionario_id"] = funcionario_id
+
     conexao = obter_conexao()
     if not conexao:
         flash("Sem conexão com o banco.", "danger")
         return redirect(url_for("dashboard"))
+    arquivos, provas, escola = [], [], {}
+    pessoa, turmas = None, []
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            _garantir_sala_professor(cursor)
             pessoa, turmas = _professor_da_sessao(cursor, funcionario_id)
             if not pessoa:
-                flash("Seu usuário não está ligado a um professor da equipe.", "danger")
+                flash(
+                    "Seu usuário não está ligado a um professor da equipe. "
+                    "Peça à secretaria para vincular seu login ao cadastro em Equipe / Professores.",
+                    "danger",
+                )
                 return redirect(url_for("dashboard"))
             if request.method == "POST":
                 acao = request.form.get("acao")
@@ -3956,7 +3994,7 @@ def sala_professor():
                 """,
                 (pessoa["id"],),
             )
-            provas = cursor.fetchall() or []
+            provas = [dict(row) for row in (cursor.fetchall() or [])]
             notas_por_prova = {}
             if provas:
                 ids = [item["id"] for item in provas]
@@ -3971,7 +4009,7 @@ def sala_professor():
                     (ids,),
                 )
                 for row in cursor.fetchall() or []:
-                    notas_por_prova.setdefault(row["prova_id"], []).append(row)
+                    notas_por_prova.setdefault(row["prova_id"], []).append(dict(row))
             for prova in provas:
                 prova["notas"] = notas_por_prova.get(prova["id"], [])
             cursor.execute(
@@ -3981,7 +4019,9 @@ def sala_professor():
     except Exception as e:
         conexao.rollback()
         flash(str(e), "danger")
-        return redirect(url_for("sala_professor") if request.method == "POST" else url_for("dashboard"))
+        if request.method == "POST":
+            return redirect(url_for("sala_professor"))
+        return redirect(url_for("dashboard"))
     finally:
         conexao.close()
     return render_template(
@@ -3998,14 +4038,18 @@ def sala_professor():
 def prova_pdf(prova_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
-    funcionario_id = _id_funcionario_da_sessao()
+    try:
+        _garantir_sala_professor()
+    except Exception as e:
+        flash(f"Não foi possível preparar a sala do professor: {e}", "danger")
+        return redirect(url_for("sala_professor"))
+    funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
     conexao = obter_conexao()
     if not conexao:
         flash("Sem conexão com o banco.", "danger")
         return redirect(url_for("sala_professor"))
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            _garantir_sala_professor(cursor)
             pessoa, _turmas = _professor_da_sessao(cursor, funcionario_id)
             if not pessoa:
                 raise ValueError("Seu usuário não está ligado a um professor da equipe.")
@@ -5395,14 +5439,18 @@ def relatorio_auditoria_pdf():
 def pasta_professor_pdf():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
-    funcionario_id = _id_funcionario_da_sessao()
+    try:
+        _garantir_sala_professor()
+    except Exception as e:
+        flash(f"Não foi possível preparar a sala do professor: {e}", "danger")
+        return redirect(url_for("sala_professor"))
+    funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
     conexao = obter_conexao()
     if not conexao:
         flash("Sem conexão com o banco.", "danger")
         return redirect(url_for("sala_professor"))
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            _garantir_sala_professor(cursor)
             pessoa, _turmas = _professor_da_sessao(cursor, funcionario_id)
             if not pessoa:
                 flash("Seu usuário não está ligado a um professor da equipe.", "danger")
