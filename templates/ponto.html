@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ponto</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        h2 { font-weight: 600; color: #1e293b; }
+        .card-box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,.05); margin-bottom: 16px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: .82rem; font-weight: 700; color: #334155; }
+        input, select, textarea { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: .9rem; }
+        textarea { min-height: 72px; resize: vertical; }
+        .btn { padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; text-decoration: none; display: inline-block; font-size: .85rem; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .alert { padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+        .alert-success { background: #dcfce7; color: #166534; }
+        .alert-danger { background: #fee2e2; color: #991b1b; }
+        table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+        th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+        .hint { color: #64748b; font-size: .88rem; margin: 0 0 14px; }
+    </style>
+</head>
+<body>
+    {% set nav_active = 'ponto' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        <h2>Ponto</h2>
+        <p class="hint">{{ pessoa.nome_completo }}. Registre os horários do dia e anexe atestados em PDF. A justificativa do atestado é opcional.</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+
+        <div class="card-box">
+            <h3>Horários do dia</h3>
+            <form method="POST" class="form-grid">
+                <input type="hidden" name="acao" value="salvar_ponto">
+                <div class="form-group">
+                    <label>Data</label>
+                    <input type="date" name="data_ref" value="{{ data_ref }}" required>
+                </div>
+                <div class="form-group">
+                    <label>Entrada</label>
+                    <input type="time" name="entrada" value="{{ registro.entrada or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Almoço</label>
+                    <input type="time" name="almoco" value="{{ registro.almoco or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Café</label>
+                    <input type="time" name="cafe" value="{{ registro.cafe or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Saída</label>
+                    <input type="time" name="saida" value="{{ registro.saida or '' }}">
+                </div>
+                <div class="form-group" style="justify-content:end;">
+                    <button class="btn btn-primary" type="submit">Salvar horários</button>
+                </div>
+            </form>
+        </div>
+
+        {% if historico %}
+        <div class="card-box">
+            <h3>Histórico recente</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Entrada</th>
+                        <th>Almoço</th>
+                        <th>Café</th>
+                        <th>Saída</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for item in historico %}
+                <tr>
+                    <td>{{ item.data_ref.strftime('%d/%m/%Y') if item.data_ref.strftime is defined else item.data_ref }}</td>
+                    <td>{{ item.entrada or '—' }}</td>
+                    <td>{{ item.almoco or '—' }}</td>
+                    <td>{{ item.cafe or '—' }}</td>
+                    <td>{{ item.saida or '—' }}</td>
+                    <td>
+                        <a class="btn btn-primary" href="{{ url_for('ponto', data=item.data_ref) }}">Abrir</a>
+                        <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir este registro de ponto?');">
+                            <input type="hidden" name="acao" value="excluir_ponto">
+                            <input type="hidden" name="ponto_id" value="{{ item.id }}">
+                            <button class="btn btn-danger" type="submit">Excluir</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <div class="card-box">
+            <h3>Atestados</h3>
+            <p class="hint">Anexe o PDF do atestado. A justificativa não é obrigatória.</p>
+            <form method="POST" enctype="multipart/form-data" class="form-grid">
+                <input type="hidden" name="acao" value="enviar_atestado">
+                <div class="form-group">
+                    <label>Título</label>
+                    <input type="text" name="titulo" placeholder="Ex.: Atestado médico">
+                </div>
+                <div class="form-group" style="grid-column: 1 / -1;">
+                    <label>Justificativa (opcional)</label>
+                    <textarea name="justificativa" placeholder="Motivo ou observação, se quiser"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>PDF do atestado *</label>
+                    <input type="file" name="arquivo" accept="application/pdf" required>
+                </div>
+                <div class="form-group" style="justify-content:end;">
+                    <button class="btn btn-primary" type="submit">Guardar atestado</button>
+                </div>
+            </form>
+
+            {% if atestados %}
+            <table style="margin-top:16px;">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Título</th>
+                        <th>Justificativa</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for item in atestados %}
+                <tr>
+                    <td>{{ item.criado_em.strftime('%d/%m/%Y') if item.criado_em and item.criado_em.strftime is defined else (item.criado_em or '—') }}</td>
+                    <td>{{ item.titulo or 'Atestado' }}</td>
+                    <td>{{ item.justificativa or '—' }}</td>
+                    <td>
+                        {% if item.origem == 'legado' %}
+                        <a class="btn btn-primary" href="{{ url_for('arquivo_professor', arquivo_id=item.id) }}" target="_blank" rel="noopener">Abrir</a>
+                        {% else %}
+                        <a class="btn btn-primary" href="{{ url_for('atestado_ponto', atestado_id=item.id) }}" target="_blank" rel="noopener">Abrir</a>
+                        {% endif %}
+                        <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir este atestado?');">
+                            <input type="hidden" name="acao" value="excluir_atestado">
+                            <input type="hidden" name="atestado_id" value="{{ item.id }}">
+                            <input type="hidden" name="origem" value="{{ item.origem }}">
+                            <button class="btn btn-danger" type="submit">Excluir</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

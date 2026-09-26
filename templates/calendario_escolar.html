@@ -253,15 +253,46 @@
                     <h4>Provas do dia</h4>
                     {% if provas_do_dia %}
                         {% for pv in provas_do_dia %}
-                        <p style="margin: 0 0 10px;">
-                            <strong>{{ pv.titulo }}</strong>
-                            {% if pv.materia %} — {{ pv.materia }}{% endif %}
-                            <span style="color:#7c3aed; font-weight:700;">
-                                {% if pv.horario %} Horário: {{ pv.horario.strftime('%H:%M') if pv.horario.strftime is defined else pv.horario }}{% else %} Horário não informado{% endif %}
-                            </span>
-                            {% if pv.turma_nome %}<br>Turma: {{ pv.turma_nome }}{% endif %}
-                            {% if pv.descricao %}<br>{{ pv.descricao }}{% endif %}
-                        </p>
+                        <div style="margin: 0 0 14px; padding-bottom:10px; border-bottom:1px solid #e2e8f0;">
+                            <p style="margin: 0 0 6px;">
+                                <strong>{{ pv.titulo }}</strong>
+                                {% if pv.materia %} — {{ pv.materia }}{% endif %}
+                                <span style="color:#7c3aed; font-weight:700;">
+                                    {% if pv.horario %} Horário: {{ pv.horario.strftime('%H:%M') if pv.horario.strftime is defined else pv.horario }}{% else %} Horário não informado{% endif %}
+                                </span>
+                                {% if pv.turma_nome %}<br>Turma: {{ pv.turma_nome }}{% endif %}
+                                {% if pv.descricao %}<br>{{ pv.descricao }}{% endif %}
+                                {% if pv.data_original and pv.justificativa %}
+                                <br><span style="color:#b45309;">Remarcada (original {{ pv.data_original.strftime('%d/%m/%Y') if pv.data_original.strftime is defined else pv.data_original }})</span>
+                                {% endif %}
+                            </p>
+                            {% if pv.ajustavel and contexto_aluno and (pode_alterar('calendario') or pode_alterar('pedagogico')) %}
+                            <details>
+                                <summary style="cursor:pointer;color:#2563eb;font-weight:700;">Alterar data deste aluno (atestado/justificativa)</summary>
+                                <form method="POST" enctype="multipart/form-data" action="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, dia=dia_selecionado, **cal_params) }}" style="margin-top:8px;">
+                                    <input type="hidden" name="acao" value="ajustar_data_prova_aluno">
+                                    <input type="hidden" name="agenda_id" value="{{ pv.agenda_id or pv.id }}">
+                                    <div class="form-group" style="max-width:220px;">
+                                        <label>Nova data</label>
+                                        <input type="date" name="nova_data" required>
+                                    </div>
+                                    <div class="form-group" style="max-width:220px;">
+                                        <label>Horário</label>
+                                        <input type="time" name="horario">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Justificativa *</label>
+                                        <input type="text" name="justificativa" required placeholder="Ex.: Atestado médico">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Atestado PDF (opcional)</label>
+                                        <input type="file" name="atestado_pdf" accept="application/pdf">
+                                    </div>
+                                    <button class="btn btn-primary" type="submit">Salvar nova data</button>
+                                </form>
+                            </details>
+                            {% endif %}
+                        </div>
                         {% endfor %}
                     {% else %}
                         <p style="color:#64748b; margin:0;">Nenhuma prova neste dia.</p>

@@ -174,64 +174,171 @@
         {% if aba == 'materias' %}
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-body">
+                <h3 class="fs-5 fw-bold mb-1">{% if materia_editar %}Editar matéria{% else %}Matérias (BNCC){% endif %}</h3>
+                <p class="small text-muted mb-3">
+                    Catálogo alinhado à BNCC do Ensino Fundamental. Matérias padrão do sistema não podem ser excluídas nem renomeadas — apenas desativadas, para preservar históricos.
+                    Cadastre aqui extracurriculares e eletivas (ex.: Música, Robótica, Espanhol, Xadrez).
+                </p>
+
                 {% if pode_alterar('pedagogico_cadastro') %}
-                <h3 class="fs-5 fw-bold mb-2">Cadastrar matéria</h3>
-                <p class="small text-muted">Informe quantas aulas de cada duração em cada dia. O total soma as horas: 3 dias com 1 h = 3 h/semana.</p>
-                <form method="POST" class="row g-2">
+                <form method="POST" class="row g-2 mb-4 p-3 rounded" style="background:#f8fafc;border:1px solid #e2e8f0;">
+                    {% if materia_editar %}
+                    <input type="hidden" name="acao" value="editar_disciplina">
+                    <input type="hidden" name="disciplina_id" value="{{ materia_editar.id }}">
+                    {% else %}
                     <input type="hidden" name="acao" value="criar_disciplina">
+                    {% endif %}
                     <input type="hidden" name="aba" value="materias">
+
                     <div class="col-md-4">
                         <label class="form-label small fw-bold">Nome</label>
-                        <input class="form-control" name="nome_disciplina" placeholder="Ex: História, Música" required>
+                        <input class="form-control" name="nome_disciplina"
+                               value="{{ materia_editar.nome if materia_editar else '' }}"
+                               placeholder="Ex.: Aula de Música, Robótica"
+                               {% if materia_editar and not materia_editar.is_custom %}readonly{% else %}required{% endif %}>
+                        {% if materia_editar and not materia_editar.is_custom %}
+                        <div class="form-text">Nome protegido (matéria padrão BNCC).</div>
+                        {% endif %}
                     </div>
                     <div class="col-md-2">
-                        <label class="form-label small fw-bold">Frequência</label>
-                        <select name="tipo_frequencia" class="form-select js-tipo-materia">
-                            <option value="semanal">Semanal</option>
-                            <option value="esporadica">Esporádica</option>
+                        <label class="form-label small fw-bold">Código / sigla</label>
+                        <input class="form-control" name="codigo_disciplina"
+                               value="{{ materia_editar.codigo if materia_editar else '' }}"
+                               placeholder="Ex.: MUS"
+                               {% if materia_editar and not materia_editar.is_custom %}readonly{% endif %}>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold">Categoria</label>
+                        <select name="categoria" class="form-select"
+                                {% if materia_editar and not materia_editar.is_custom %}disabled{% endif %}>
+                            {% for chave, rotulo in categorias_materia.items() %}
+                            <option value="{{ chave }}"
+                                {% if (materia_editar and materia_editar.categoria == chave) or (not materia_editar and chave == 'EXTRACURRICULAR') %}selected{% endif %}>
+                                {{ rotulo }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% if materia_editar and not materia_editar.is_custom %}
+                        <input type="hidden" name="categoria" value="{{ materia_editar.categoria }}">
+                        {% endif %}
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold">Etapa de ensino</label>
+                        <select name="etapa_ensino" class="form-select"
+                                {% if materia_editar and not materia_editar.is_custom %}disabled{% endif %}>
+                            {% for chave, rotulo in etapas_materia.items() %}
+                            <option value="{{ chave }}"
+                                {% if (materia_editar and materia_editar.etapa_ensino == chave) or (not materia_editar and chave == 'AMBOS') %}selected{% endif %}>
+                                {{ rotulo }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% if materia_editar and not materia_editar.is_custom %}
+                        <input type="hidden" name="etapa_ensino" value="{{ materia_editar.etapa_ensino }}">
+                        {% endif %}
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold">Carga horária semanal (opcional)</label>
+                        <input class="form-control" type="number" min="0" name="carga_horaria_semanal"
+                               value="{{ materia_editar.carga_horaria_semanal if materia_editar and materia_editar.carga_horaria_semanal is not none else '' }}"
+                               placeholder="Ex.: 2">
+                    </div>
+                    {% if materia_editar %}
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold">Situação</label>
+                        <select name="ativo" class="form-select">
+                            <option value="1" {% if materia_editar.ativo %}selected{% endif %}>Ativa</option>
+                            <option value="0" {% if not materia_editar.ativo %}selected{% endif %}>Desativada</option>
                         </select>
                     </div>
-                    <div class="col-md-2 campo-esporadica" style="display:none;">
-                        <label class="form-label small fw-bold">Vezes no mês</label>
-                        <input class="form-control" type="number" name="vezes_mes" min="1" value="1">
-                    </div>
-                    <div class="col-md-2 campo-esporadica" style="display:none;">
-                        <label class="form-label small fw-bold">Duração</label>
-                        <select name="minutos_aula" class="form-select">
-                            <option value="60">1 hora</option>
-                            <option value="50">50 min</option>
-                            <option value="45">45 min</option>
-                            <option value="30">30 min</option>
-                        </select>
-                    </div>
-                    {{ grade_por_dia() }}
-                    <div class="col-md-3 d-grid">
-                        <button class="btn btn-primary" type="submit">Cadastrar matéria</button>
+                    {% endif %}
+                    <div class="col-md-6 d-flex align-items-end gap-2">
+                        <button class="btn btn-primary" type="submit">
+                            {% if materia_editar %}Salvar alterações{% else %}Cadastrar matéria customizada{% endif %}
+                        </button>
+                        {% if materia_editar %}
+                        <a class="btn btn-outline-secondary" href="{{ url_for('pagina_pedagogico', aba='materias') }}">Cancelar</a>
+                        {% endif %}
                     </div>
                 </form>
-                {% else %}
-                <h3 class="fs-5 fw-bold mb-2">Matérias</h3>
                 {% endif %}
-                <ul class="mt-3 mb-0 list-unstyled">
-                    {% for d in disciplinas %}
-                    <li class="d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 border-bottom">
-                        <span>
-                            <strong>{{ d.nome }}</strong>
-                            <small class="text-muted d-block">{{ d.resumo }}</small>
-                        </span>
-                        {% if pode_excluir('pedagogico_cadastro') %}
-                        <form method="POST" class="m-0" onsubmit="return confirm('Excluir a matéria {{ d.nome }}? Ela sai também das turmas.');">
-                            <input type="hidden" name="acao" value="excluir_disciplina">
-                            <input type="hidden" name="aba" value="materias">
-                            <input type="hidden" name="disciplina_id" value="{{ d.id }}">
-                            <button class="btn btn-sm btn-outline-danger" type="submit">Excluir</button>
-                        </form>
-                        {% endif %}
-                    </li>
-                    {% else %}
-                    <li class="text-muted">Nenhuma matéria cadastrada.</li>
-                    {% endfor %}
-                </ul>
+
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Matéria</th>
+                                <th>Código</th>
+                                <th>Categoria</th>
+                                <th>Etapa</th>
+                                <th>Carga</th>
+                                <th>Origem</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for d in disciplinas %}
+                            <tr class="{% if not d.ativo %}table-secondary{% endif %}">
+                                <td>
+                                    <strong>{{ d.nome }}</strong>
+                                    {% if d.turmas_vinculadas %}
+                                    <div class="small text-muted">{{ d.turmas_vinculadas }} turma(s)</div>
+                                    {% endif %}
+                                </td>
+                                <td>{{ d.codigo or '—' }}</td>
+                                <td>{{ d.categoria_rotulo }}</td>
+                                <td>{{ d.etapa_rotulo }}</td>
+                                <td>{% if d.carga_horaria_semanal %}{{ d.carga_horaria_semanal }} h{% else %}—{% endif %}</td>
+                                <td>
+                                    {% if d.is_custom %}
+                                    <span class="badge text-bg-info">Customizada</span>
+                                    {% else %}
+                                    <span class="badge text-bg-primary">BNCC</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if d.ativo %}
+                                    <span class="badge text-bg-success">Ativa</span>
+                                    {% else %}
+                                    <span class="badge text-bg-secondary">Desativada</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-nowrap">
+                                    {% if pode_alterar('pedagogico_cadastro') %}
+                                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('pagina_pedagogico', aba='materias', editar=d.id) }}">Editar</a>
+                                    {% if d.ativo %}
+                                    <form method="POST" class="d-inline" onsubmit="return confirm('Desativar {{ d.nome }}? Ela deixa de aparecer para novas turmas, mas o histórico permanece.');">
+                                        <input type="hidden" name="acao" value="desativar_disciplina">
+                                        <input type="hidden" name="aba" value="materias">
+                                        <input type="hidden" name="disciplina_id" value="{{ d.id }}">
+                                        <button class="btn btn-sm btn-outline-warning" type="submit">Desativar</button>
+                                    </form>
+                                    {% else %}
+                                    <form method="POST" class="d-inline">
+                                        <input type="hidden" name="acao" value="ativar_disciplina">
+                                        <input type="hidden" name="aba" value="materias">
+                                        <input type="hidden" name="disciplina_id" value="{{ d.id }}">
+                                        <button class="btn btn-sm btn-outline-success" type="submit">Reativar</button>
+                                    </form>
+                                    {% endif %}
+                                    {% endif %}
+                                    {% if d.is_custom and pode_excluir('pedagogico_cadastro') %}
+                                    <form method="POST" class="d-inline" onsubmit="return confirm('Excluir a matéria {{ d.nome }}? Só é permitido se não estiver em turmas.');">
+                                        <input type="hidden" name="acao" value="excluir_disciplina">
+                                        <input type="hidden" name="aba" value="materias">
+                                        <input type="hidden" name="disciplina_id" value="{{ d.id }}">
+                                        <button class="btn btn-sm btn-outline-danger" type="submit" {% if d.turmas_vinculadas %}disabled title="Remova dos vínculos de turma primeiro"{% endif %}>Excluir</button>
+                                    </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="8" class="text-muted">Nenhuma matéria cadastrada.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
         {% endif %}
@@ -409,6 +516,8 @@
                 <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mt-2">
                     <input type="hidden" name="acao" value="criar_disciplina_turma">
                     <input type="hidden" name="turma_id" value="{{ turma.id }}">
+                    <input type="hidden" name="categoria" value="EXTRACURRICULAR">
+                    <input type="hidden" name="etapa_ensino" value="AMBOS">
                     {{ ctx_turma('horas') }}
                     <div class="col-md-3">
                         <input class="form-control form-control-sm" name="nome_disciplina" placeholder="Nome da matéria" required>
@@ -435,7 +544,7 @@
                         <button class="btn btn-primary btn-sm" type="submit">Cadastrar na turma</button>
                     </div>
                 </form>
-                {% if disciplinas %}
+                {% if disciplinas_ativas %}
                 <form action="{{ url_for('pagina_pedagogico') }}" method="POST" class="row g-2 mb-0">
                     <input type="hidden" name="acao" value="vincular_disciplina">
                     <input type="hidden" name="turma_id" value="{{ turma.id }}">
@@ -443,8 +552,8 @@
                     <div class="col-md-8">
                         <select name="disciplina_id" class="form-select form-select-sm" required>
                             <option value="">Ou usar matéria já cadastrada...</option>
-                            {% for d in disciplinas %}
-                            <option value="{{ d.id }}">{{ d.nome }}</option>
+                            {% for d in disciplinas_ativas %}
+                            <option value="{{ d.id }}">{{ d.nome }}{% if d.codigo %} ({{ d.codigo }}){% endif %}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -474,7 +583,7 @@
                                 <option value="{{ nome }}">{{ nome }}</option>
                                 {% endfor %}
                             {% else %}
-                                {% for d in disciplinas %}
+                                {% for d in disciplinas_ativas %}
                                 <option value="{{ d.nome }}">{{ d.nome }}</option>
                                 {% endfor %}
                             {% endif %}

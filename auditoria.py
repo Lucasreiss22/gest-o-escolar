@@ -110,6 +110,8 @@ _MODULOS = {
     "excluir_usuario_sistema": "Usuários",
     "contracheque": "Contra-cheque",
     "ajustar_contracheque": "Contra-cheque",
+    "ponto": "Ponto",
+    "atestado_ponto": "Ponto",
     "plataforma_escolas": "Plataforma",
     "pagina_notas_fiscais": "Notas fiscais",
     "nfse_emitir": "Notas fiscais",

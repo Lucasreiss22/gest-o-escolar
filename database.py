@@ -493,12 +493,62 @@ def _garantir_coluna(cursor, tabela, coluna, spec, mapa=None):
         mapa.setdefault(tabela, set()).add(coluna)
 
 
+def _seed_materias_bncc(cursor):
+    """Insere matérias obrigatórias da BNCC (Ensino Fundamental) se ainda não existirem."""
+    padrao = [
+        ("LP", "Língua Portuguesa", "OBRIGATORIA", "AMBOS"),
+        ("MAT", "Matemática", "OBRIGATORIA", "AMBOS"),
+        ("CIE", "Ciências", "OBRIGATORIA", "AMBOS"),
+        ("HIS", "História", "OBRIGATORIA", "AMBOS"),
+        ("GEO", "Geografia", "OBRIGATORIA", "AMBOS"),
+        ("ART", "Arte", "OBRIGATORIA", "AMBOS"),
+        ("EF", "Educação Física", "OBRIGATORIA", "AMBOS"),
+        ("ER", "Ensino Religioso", "OBRIGATORIA", "AMBOS"),
+        ("ING", "Língua Inglesa", "OBRIGATORIA", "FUNDAMENTAL_2"),
+    ]
+    for codigo, nome, categoria, etapa in padrao:
+        cursor.execute(
+            """
+            SELECT id FROM disciplinas
+            WHERE UPPER(TRIM(codigo)) = %s OR LOWER(TRIM(nome)) = LOWER(%s)
+            LIMIT 1
+            """,
+            (codigo, nome),
+        )
+        row = cursor.fetchone()
+        if row:
+            disc_id = row[0] if not isinstance(row, dict) else row["id"]
+            cursor.execute(
+                """
+                UPDATE disciplinas
+                SET codigo = COALESCE(NULLIF(TRIM(codigo), ''), %s),
+                    categoria = COALESCE(NULLIF(TRIM(categoria), ''), %s),
+                    etapa_ensino = COALESCE(NULLIF(TRIM(etapa_ensino), ''), %s),
+                    is_custom = FALSE,
+                    ativo = COALESCE(ativo, TRUE)
+                WHERE id = %s
+                """,
+                (codigo, categoria, etapa, disc_id),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO disciplinas (
+                    codigo, nome, carga_horaria, categoria, etapa_ensino,
+                    is_custom, ativo, carga_horaria_semanal
+                )
+                VALUES (%s, %s, 0, %s, %s, FALSE, TRUE, NULL)
+                """,
+                (codigo, nome, categoria, etapa),
+            )
+
+
 def garantir_tabelas_pedagogicas():
     """Cria tabelas de frequência, boletins anexos e vínculos de disciplina."""
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ped"
+    chave = f"{schema}:ped_bncc_v1"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -596,9 +646,68 @@ def garantir_tabelas_pedagogicas():
                 ("turma_disciplinas", "dias_semana", "VARCHAR(40) DEFAULT ''"),
                 ("disciplinas", "grade_json", "TEXT DEFAULT '[]'"),
                 ("turma_disciplinas", "grade_json", "TEXT DEFAULT '[]'"),
+                ("disciplinas", "categoria", "VARCHAR(30) DEFAULT 'OBRIGATORIA'"),
+                ("disciplinas", "etapa_ensino", "VARCHAR(30) DEFAULT 'AMBOS'"),
+                ("disciplinas", "is_custom", "BOOLEAN DEFAULT FALSE"),
+                ("disciplinas", "ativo", "BOOLEAN DEFAULT TRUE"),
+                ("disciplinas", "carga_horaria_semanal", "INT"),
                 ("funcionarios", "foto_url", "VARCHAR(255)"),
             ):
                 _garantir_coluna(cursor, tabela, coluna, spec, mapa)
+            cursor.execute(
+                """
+                UPDATE disciplinas
+                SET categoria = COALESCE(NULLIF(TRIM(categoria), ''), 'OBRIGATORIA'),
+                    etapa_ensino = COALESCE(NULLIF(TRIM(etapa_ensino), ''), 'AMBOS'),
+                    is_custom = COALESCE(is_custom, FALSE),
+                    ativo = COALESCE(ativo, TRUE)
+                """
+            )
+            # Matérias criadas antes do catálogo BNCC entram como customizadas
+            # até o seed marcar as obrigatórias do sistema (is_custom = false).
+            cursor.execute(
+                """
+                UPDATE disciplinas
+                SET is_custom = TRUE
+                WHERE COALESCE(is_custom, FALSE) = FALSE
+                  AND UPPER(TRIM(COALESCE(codigo, ''))) NOT IN
+                      ('LP', 'MAT', 'CIE', 'HIS', 'GEO', 'ART', 'EF', 'ER', 'ING')
+                  AND LOWER(TRIM(nome)) NOT IN (
+                      'língua portuguesa', 'lingua portuguesa',
+                      'matemática', 'matematica',
+                      'ciências', 'ciencias',
+                      'história', 'historia',
+                      'geografia',
+                      'arte',
+                      'educação física', 'educacao fisica',
+                      'ensino religioso',
+                      'língua inglesa', 'lingua inglesa'
+                  )
+                """
+            )
+            _seed_materias_bncc(cursor)
+            cursor.execute(
+                """
+                CREATE OR REPLACE VIEW materias AS
+                SELECT
+                    id,
+                    nome,
+                    codigo,
+                    categoria,
+                    etapa_ensino,
+                    is_custom,
+                    ativo,
+                    carga_horaria_semanal,
+                    carga_horaria,
+                    tipo_frequencia,
+                    aulas_semana,
+                    minutos_aula,
+                    vezes_mes,
+                    dias_semana,
+                    grade_json
+                FROM disciplinas
+                """
+            )
             if "frequencia" in mapa:
                 try:
                     cursor.execute("UPDATE frequencia SET disciplina = '' WHERE disciplina IS NULL;")

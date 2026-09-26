@@ -119,6 +119,12 @@
                 <div>Holerite do colaborador</div>
             </a>
             {% endif %}
+            {% if pode('ponto') %}
+            <a class="card bg-primary" href="{{ url_for('ponto') }}" style="text-decoration:none; min-width:180px;">
+                <h5>Ponto</h5>
+                <div>Horários e atestados</div>
+            </a>
+            {% endif %}
             {% if pode('usuarios') %}
             <a class="card bg-info" href="{{ url_for('gerenciar_usuarios') }}" style="text-decoration:none; min-width:180px;">
                 <h5>Usuários</h5>

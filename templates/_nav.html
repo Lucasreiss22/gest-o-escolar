@@ -36,6 +36,9 @@
     {% if pode('contracheque') %}
     <a href="{{ url_for('contracheque') }}" class="{% if nav_active == 'contracheque' %}active{% endif %}">Contra-cheque</a>
     {% endif %}
+    {% if pode('ponto') %}
+    <a href="{{ url_for('ponto') }}" class="{% if nav_active == 'ponto' %}active{% endif %}">Ponto</a>
+    {% endif %}
     {% if pode('usuarios') %}
     <a href="{{ url_for('gerenciar_usuarios') }}" class="{% if nav_active == 'usuarios' %}active{% endif %}">Gerenciar Usuários</a>
     {% endif %}

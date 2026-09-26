@@ -723,14 +723,16 @@
             </form>
 
             <!-- Exibição das Notas cadastradas -->
-            <div class="table-responsive">
+            <div class="table-responsive" id="provas">
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
+                            <th>Data</th>
                             <th>Trimestre</th>
                             <th>Matéria</th>
                             <th>Avaliação</th>
                             <th>Nota</th>
+                            <th>Origem</th>
                             <th>Prova em PDF</th>
                         </tr>
                     </thead>
@@ -738,13 +740,42 @@
                         {% if provas_notas %}
                             {% for p in provas_notas %}
                             <tr>
-                                <td>{{ p.trimestre }}º Trimestre</td>
-                                <td class="fw-medium">{{ p.materia }}</td>
-                                <td>{{ p.titulo_avaliacao }}</td>
-                                <td><strong class="text-success">{{ p.nota }}</strong></td>
                                 <td>
-                                    {% if p.arquivo_pdf %}
+                                    {% if p.data_aplicacao %}
+                                        {{ p.data_aplicacao.strftime('%d/%m/%Y') if p.data_aplicacao.strftime is defined else p.data_aplicacao }}
+                                    {% else %}
+                                        {{ p.data_registro.strftime('%d/%m/%Y') if p.data_registro and p.data_registro.strftime is defined else (p.data_registro or '—') }}
+                                    {% endif %}
+                                </td>
+                                <td>{% if p.trimestre %}{{ p.trimestre }}º{% else %}—{% endif %}</td>
+                                <td class="fw-medium">{{ p.materia }}</td>
+                                <td>
+                                    {{ p.titulo_avaliacao }}
+                                    {% if p.justificativa %}<div class="small text-muted">{{ p.justificativa }}</div>{% endif %}
+                                </td>
+                                <td>
+                                    {% if p.nota is not none %}
+                                    <strong class="text-success">{{ p.nota }}</strong>
+                                    {% else %}
+                                    <span class="text-muted">Aguardando</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if p.origem == 'professor_sistema' %}
+                                    <span class="badge text-bg-primary">Sistema</span>
+                                    {% elif p.origem == 'professor_pdf' %}
+                                    <span class="badge text-bg-info">PDF professor</span>
+                                    {% else %}
+                                    <span class="badge text-bg-secondary">Secretaria</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if p.arquivo_midia_id %}
+                                        <a href="{{ url_for('servir_midia', midia_id=p.arquivo_midia_id) }}" target="_blank" class="text-primary text-decoration-none fw-medium"><i class="bi bi-file-earmark-pdf"></i> Ver PDF</a>
+                                    {% elif p.arquivo_pdf %}
                                         <a href="{{ url_for('static', filename='uploads/provas/' + p.arquivo_pdf) }}" target="_blank" class="text-primary text-decoration-none fw-medium"><i class="bi bi-file-earmark-pdf"></i> Ver PDF</a>
+                                    {% elif p.prova_criada_id %}
+                                        <a href="{{ url_for('prova_pdf', prova_id=p.prova_criada_id) }}" target="_blank" class="text-primary text-decoration-none fw-medium"><i class="bi bi-file-earmark-pdf"></i> PDF do sistema</a>
                                     {% else %}
                                         <span class="text-muted fst-italic">Nenhum anexo</span>
                                     {% endif %}
@@ -753,12 +784,76 @@
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="5" class="text-center py-3 text-muted fst-italic">Nenhuma nota ou prova lançada para este aluno ainda.</td>
+                                <td colspan="7" class="text-center py-3 text-muted fst-italic">Nenhuma nota ou prova lançada para este aluno ainda.</td>
                             </tr>
                         {% endif %}
                     </tbody>
                 </table>
             </div>
+
+            {% if provas_agenda %}
+            <div class="mt-4">
+                <h4 class="fs-6 fw-bold text-secondary">Calendário de provas deste aluno</h4>
+                <p class="small text-muted">A data da turma pode ser alterada por atestado ou outra justificativa, só para este aluno.</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>Prova</th>
+                                <th>Turma</th>
+                                <th>Data</th>
+                                <th>Original</th>
+                                <th>Justificativa</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for ag in provas_agenda %}
+                            <tr>
+                                <td>
+                                    <strong>{{ ag.titulo }}</strong>
+                                    {% if ag.materia %}<div class="small text-muted">{{ ag.materia }}</div>{% endif %}
+                                </td>
+                                <td>{{ ag.turma_nome or '—' }}</td>
+                                <td>{{ ag.data_aplicacao.strftime('%d/%m/%Y') if ag.data_aplicacao and ag.data_aplicacao.strftime is defined else ag.data_aplicacao }}{% if ag.horario %} · {{ ag.horario.strftime('%H:%M') if ag.horario.strftime is defined else ag.horario }}{% endif %}</td>
+                                <td>{{ ag.data_original.strftime('%d/%m/%Y') if ag.data_original and ag.data_original.strftime is defined else (ag.data_original or '—') }}</td>
+                                <td>{{ ag.justificativa or '—' }}</td>
+                                <td>
+                                    {% if pode_alterar('pedagogico') or pode_alterar('calendario') %}
+                                    <details>
+                                        <summary class="text-primary fw-bold" style="cursor:pointer;">Alterar data</summary>
+                                        <form action="{{ url_for('ajustar_prova_aluno', aluno_id=aluno.id or aluno[0]) }}" method="POST" enctype="multipart/form-data" class="row g-2 mt-2">
+                                            <input type="hidden" name="agenda_id" value="{{ ag.id }}">
+                                            <div class="col-md-4">
+                                                <label class="form-label small">Nova data</label>
+                                                <input type="date" name="nova_data" class="form-control form-control-sm" required>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <label class="form-label small">Horário</label>
+                                                <input type="time" name="horario" class="form-control form-control-sm">
+                                            </div>
+                                            <div class="col-md-5">
+                                                <label class="form-label small">Justificativa *</label>
+                                                <input type="text" name="justificativa" class="form-control form-control-sm" required placeholder="Atestado, remarcação...">
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label small">Atestado PDF (opcional)</label>
+                                                <input type="file" name="atestado_pdf" accept="application/pdf" class="form-control form-control-sm">
+                                            </div>
+                                            <div class="col-md-6 d-flex align-items-end">
+                                                <button class="btn btn-sm btn-primary" type="submit">Salvar alteração</button>
+                                            </div>
+                                        </form>
+                                    </details>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
         </div>
         {% endif %}
     </div>

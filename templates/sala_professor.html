@@ -27,7 +27,7 @@
     {% set nav_active = 'sala_professor' %}
     {% include '_nav.html' %}
     <div class="content">
-        <h2>Provas e atestados</h2>
+        <h2>Minhas provas</h2>
         <p style="color:#64748b;">{{ pessoa.nome_completo }}. A prova gerada leva a logo da escola, o nome e a data em branco para o aluno preencher, e a turma já preenchida.</p>
         <p style="margin:0 0 16px;"><a class="btn btn-primary" href="{{ url_for('pasta_professor_pdf') }}">PDF da pasta</a></p>
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -35,24 +35,31 @@
         {% endwith %}
 
         <div class="card-box">
-            <h3>Enviar PDF</h3>
+            <h3>Enviar PDF da prova</h3>
+            <p style="color:#64748b;font-size:.88rem;margin:0 0 12px;">
+                Escolha a turma e a data. O PDF vai automaticamente para o cadastro e o calendário de todos os alunos da turma.
+                Use “a aplicar” para prova futura ou “já feita” para prova aplicada.
+            </p>
             <form method="POST" enctype="multipart/form-data" class="form-grid">
                 <input type="hidden" name="acao" value="enviar_arquivo">
                 <div class="form-group">
                     <label>Tipo</label>
                     <select name="tipo" id="tipoArquivo" required>
-                        <option value="atestado">Atestado</option>
-                        <option value="prova_aplicar">Prova a ser aplicada</option>
-                        <option value="prova_feita">Prova que já foi feita</option>
+                        <option value="prova_aplicar">Prova a ser aplicada (PDF)</option>
+                        <option value="prova_feita">Prova que já foi feita (PDF)</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label>Título</label>
-                    <input type="text" name="titulo" required placeholder="Ex.: Atestado médico, Prova de matemática">
+                    <input type="text" name="titulo" required placeholder="Ex.: Prova de matemática">
+                </div>
+                <div class="form-group">
+                    <label>Disciplina</label>
+                    <input type="text" name="materia" placeholder="Ex.: Matemática">
                 </div>
                 <div class="form-group" id="campoTurma">
                     <label>Turma</label>
-                    <select name="turma_id">
+                    <select name="turma_id" required>
                         <option value="">Selecione</option>
                         {% for turma in turmas %}
                         <option value="{{ turma.id }}">{{ turma.nome }}</option>
@@ -60,11 +67,19 @@
                     </select>
                 </div>
                 <div class="form-group">
+                    <label>Data de aplicação</label>
+                    <input type="date" name="data_aplicacao" required>
+                </div>
+                <div class="form-group">
+                    <label>Horário (opcional)</label>
+                    <input type="time" name="horario">
+                </div>
+                <div class="form-group">
                     <label>PDF</label>
                     <input type="file" name="arquivo" accept="application/pdf" required>
                 </div>
                 <div class="form-group" style="justify-content:end;">
-                    <button class="btn btn-primary" type="submit">Guardar PDF</button>
+                    <button class="btn btn-primary" type="submit">Guardar e enviar aos alunos</button>
                 </div>
             </form>
             {% if not turmas %}<p style="color:#92400e;">Nenhuma turma está vinculada a você como professor responsável.</p>{% endif %}
@@ -78,7 +93,7 @@
                 <tbody>
                 {% for item in arquivos %}
                 <tr>
-                    <td>{% if item.tipo == 'atestado' %}Atestado{% elif item.tipo == 'prova_feita' %}Prova feita{% else %}Prova a aplicar{% endif %}</td>
+                    <td>{% if item.tipo == 'prova_feita' %}Prova feita{% else %}Prova a aplicar{% endif %}</td>
                     <td>{{ item.titulo }}</td>
                     <td>{{ item.turma_nome or '—' }}</td>
                     <td>
@@ -97,7 +112,11 @@
         {% endif %}
 
         <div class="card-box">
-            <h3>Criar prova</h3>
+            <h3>Criar prova no sistema</h3>
+            <p style="color:#64748b;font-size:.88rem;margin:0 0 12px;">
+                Prova com questões no sistema. Ao salvar, entra no calendário de todos os alunos da turma e no cadastro de provas de cada um.
+                Depois lance a nota — ela também vai para o cadastro do aluno.
+            </p>
             <form method="POST" id="formCriarProva">
                 <input type="hidden" name="acao" value="criar_prova">
                 <div class="form-grid">
@@ -111,8 +130,8 @@
                     </div>
                     <div class="form-group">
                         <label>Turma</label>
-                        <select name="turma_id">
-                            <option value="">Sem turma</option>
+                        <select name="turma_id" required>
+                            <option value="">Selecione a turma</option>
                             {% for turma in turmas %}
                             <option value="{{ turma.id }}">{{ turma.nome }}</option>
                             {% endfor %}
@@ -134,7 +153,7 @@
                         <button class="btn btn-primary" type="button" id="btnMontarQuestoes">Montar questões</button>
                     </div>
                 </div>
-                <p style="color:#64748b;font-size:.88rem;margin:8px 0 0;">A data de aplicação entra no calendário do professor e da turma. Digite quantas perguntas a prova terá (até 150) e clique em Montar questões. Só as que tiverem enunciado entram na prova.</p>
+                <p style="color:#64748b;font-size:.88rem;margin:8px 0 0;">A data de aplicação entra no calendário do professor, da turma e de cada aluno. Digite quantas perguntas a prova terá (até 150) e clique em Montar questões.</p>
                 <div id="listaQuestoes"></div>
                 <button class="btn btn-primary" type="submit" style="margin-top:12px;">Criar prova</button>
             </form>
@@ -170,7 +189,7 @@
                 </div>
                 <div style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:10px;">
                     <strong style="font-size:.9rem;">Lançar nota do aluno</strong>
-                    <p style="color:#64748b;font-size:.82rem;margin:4px 0 10px;">Busque por matrícula ou CPF{% if prova.turma_id %} (só alunos da turma {{ prova.turma_nome }}){% endif %}.</p>
+                    <p style="color:#64748b;font-size:.82rem;margin:4px 0 10px;">Busque por matrícula ou CPF{% if prova.turma_id %} (só alunos da turma {{ prova.turma_nome }}){% endif %}. A nota vai também para o cadastro de provas do aluno.</p>
                     <form method="POST" class="form-grid">
                         <input type="hidden" name="acao" value="lancar_nota">
                         <input type="hidden" name="prova_id" value="{{ prova.id }}">
@@ -208,6 +227,53 @@
                         </tbody>
                     </table>
                     {% endif %}
+                    {% if prova.agendas %}
+                    <div style="margin-top:14px;">
+                        <strong style="font-size:.9rem;">Datas por aluno (ajuste com justificativa)</strong>
+                        <p style="color:#64748b;font-size:.82rem;margin:4px 0 8px;">Se houver atestado ou outro motivo, altere só a data deste aluno. Os demais mantêm a data da turma.</p>
+                        <table>
+                            <thead><tr><th>Aluno</th><th>Data</th><th>Original</th><th>Justificativa</th><th></th></tr></thead>
+                            <tbody>
+                            {% for ag in prova.agendas %}
+                            <tr>
+                                <td>{{ ag.nome_completo }}{% if ag.matricula %}<div style="color:#64748b;font-size:.8rem;">Mat. {{ ag.matricula }}</div>{% endif %}</td>
+                                <td>{{ ag.data_aplicacao.strftime('%d/%m/%Y') if ag.data_aplicacao and ag.data_aplicacao.strftime is defined else ag.data_aplicacao }}</td>
+                                <td>{{ ag.data_original.strftime('%d/%m/%Y') if ag.data_original and ag.data_original.strftime is defined else (ag.data_original or '—') }}</td>
+                                <td>{{ ag.justificativa or '—' }}</td>
+                                <td>
+                                    <details>
+                                        <summary style="cursor:pointer;color:#2563eb;font-weight:700;">Alterar data</summary>
+                                        <form method="POST" enctype="multipart/form-data" class="form-grid" style="margin-top:8px;min-width:260px;">
+                                            <input type="hidden" name="acao" value="ajustar_data_prova_aluno">
+                                            <input type="hidden" name="agenda_id" value="{{ ag.id }}">
+                                            <div class="form-group">
+                                                <label>Nova data</label>
+                                                <input type="date" name="nova_data" required>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Horário</label>
+                                                <input type="time" name="horario" value="{{ ag.horario.strftime('%H:%M') if ag.horario and ag.horario.strftime is defined else (ag.horario or '') }}">
+                                            </div>
+                                            <div class="form-group" style="grid-column:1/-1;">
+                                                <label>Justificativa (obrigatória)</label>
+                                                <input type="text" name="justificativa" required placeholder="Ex.: Atestado médico">
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Atestado PDF (opcional)</label>
+                                                <input type="file" name="atestado_pdf" accept="application/pdf">
+                                            </div>
+                                            <div class="form-group" style="justify-content:end;">
+                                                <button class="btn btn-primary" type="submit">Salvar</button>
+                                            </div>
+                                        </form>
+                                    </details>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
             {% endfor %}
@@ -219,7 +285,7 @@
         var tipo = document.getElementById("tipoArquivo");
         var turma = document.getElementById("campoTurma");
         if (tipo && turma) {
-            function atualizar() { turma.style.display = tipo.value === "prova_feita" ? "" : "none"; }
+            function atualizar() { turma.style.display = ""; }
             tipo.addEventListener("change", atualizar);
             atualizar();
         }

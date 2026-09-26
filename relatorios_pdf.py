@@ -1179,7 +1179,7 @@ def pdf_pasta_professor(escola, professor, arquivos, provas):
     pdf.linha("Arquivos PDF", len(arquivos or []))
     pdf.linha("Provas criadas", len(provas or []))
     pdf.secao("Arquivos")
-    rotulos = {"atestado": "Atestado", "prova_feita": "Prova feita", "prova_aplicar": "Prova a aplicar"}
+    rotulos = {"prova_feita": "Prova feita", "prova_aplicar": "Prova a aplicar"}
     linhas = []
     for item in arquivos or []:
         linhas.append([
