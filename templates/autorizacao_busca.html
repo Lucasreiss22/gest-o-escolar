@@ -42,13 +42,19 @@
                         Sua resposta foi registrada: <strong>Não autorizado</strong>.
                     {% endif %}
                 </div>
+            {% elif ja_respondido and aut.status_autorizacao == 'autorizado' %}
+                <div class="alert alert-info">
+                    Esta pessoa já está <span class="badge badge-ok">Autorizada</span>.
+                    Não é necessário autorizar de novo.
+                    Se houver problema familiar ou quiser revogar, use <strong>Não autorizo</strong> abaixo.
+                </div>
             {% elif ja_respondido %}
                 <div class="alert alert-info">
-                    Esta solicitação já foi respondida
+                    Esta solicitação já está como
                     {% if aut.status_autorizacao == 'autorizado' %}
-                        como <span class="badge badge-ok">Autorizado</span>.
+                        <span class="badge badge-ok">Autorizado</span>.
                     {% else %}
-                        como <span class="badge badge-no">Não autorizado</span>.
+                        <span class="badge badge-no">Não autorizado</span>.
                     {% endif %}
                 </div>
             {% endif %}
@@ -71,14 +77,24 @@
             </p>
             {% endif %}
 
-            {% if not respondido and not ja_respondido and aut.status_autorizacao not in ['autorizado', 'negado'] %}
-            <div class="acoes">
-                <a class="btn ok" href="{{ url_for('autorizacao_busca_responder', token=token, decisao='autorizo') }}">Autorizo</a>
-                <a class="btn no" href="{{ url_for('autorizacao_busca_responder', token=token, decisao='nao_autorizo') }}">Não autorizo</a>
-            </div>
-            <p class="meta" style="margin-top:16px;">Ao clicar, sua resposta fica registrada para a secretaria da escola.</p>
-            {% elif aut.status_autorizacao == 'aguardando' and not respondido %}
-            <p><span class="badge badge-wait">Aguardando resposta</span></p>
+            {% if not respondido %}
+                {% if aut.status_autorizacao not in ['autorizado', 'negado'] %}
+                <div class="acoes">
+                    <a class="btn ok" href="{{ url_for('autorizacao_busca_responder', token=token, decisao='autorizo') }}">Autorizo</a>
+                    <a class="btn no" href="{{ url_for('autorizacao_busca_responder', token=token, decisao='nao_autorizo') }}">Não autorizo</a>
+                </div>
+                <p class="meta" style="margin-top:16px;">Ao clicar, sua resposta fica registrada para a secretaria da escola.</p>
+                {% elif aut.status_autorizacao == 'autorizado' %}
+                <div class="acoes">
+                    <a class="btn no" href="{{ url_for('autorizacao_busca_responder', token=token, decisao='nao_autorizo') }}">Não autorizo</a>
+                </div>
+                <p class="meta" style="margin-top:16px;">Use só se precisar revogar a autorização (problema familiar, mudança etc.).</p>
+                {% elif aut.status_autorizacao == 'negado' %}
+                <div class="acoes">
+                    <a class="btn ok" href="{{ url_for('autorizacao_busca_responder', token=token, decisao='autorizo') }}">Autorizo novamente</a>
+                </div>
+                <p class="meta" style="margin-top:16px;">A autorização estava negada. Você pode autorizar de novo se desejar.</p>
+                {% endif %}
             {% endif %}
         {% endif %}
     </div>

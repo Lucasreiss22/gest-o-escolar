@@ -225,6 +225,7 @@ _FORM_EXCLUIR = {
 _FORM_CADASTRO = {
     ("pagina_alunos", "editar_aluno"): "alunos",
     ("pagina_alunos", "editar_autorizado"): "alunos",
+    ("pagina_alunos", "nao_autorizar_busca"): "alunos",
     ("pagina_alunos", "cadastrar_aluno"): "alunos",
     ("pagina_alunos", "importar_alunos"): "alunos",
     ("salvar_responsavel", "editar_responsavel"): "alunos",

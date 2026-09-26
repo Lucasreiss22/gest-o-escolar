@@ -414,12 +414,37 @@
                                                         </form>
                                                         {% if pode_alterar('alunos') %}
                                                         <div class="border-top px-3 py-3 bg-light rounded-bottom">
+                                                            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                                                {% if st != 'negado' %}
+                                                                <form action="{{ url_for('pagina_alunos') }}" method="POST" class="d-inline">
+                                                                    <input type="hidden" name="acao" value="nao_autorizar_busca">
+                                                                    <input type="hidden" name="autorizado_id" value="{{ aut_id }}">
+                                                                    <input type="hidden" name="aluno_id" value="{{ aluno.id or aluno[0] }}">
+                                                                    <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('Marcar esta pessoa como NÃO autorizada a buscar o aluno? Use em caso de problema familiar ou revogação.');">
+                                                                        Não autorizado
+                                                                    </button>
+                                                                </form>
+                                                                {% endif %}
+                                                                {% if st == 'negado' %}
+                                                                <span class="badge text-bg-danger">Já está como não autorizado</span>
+                                                                {% elif st == 'autorizado' %}
+                                                                <span class="small text-muted">Já autorizado. Não precisa enviar e-mail de novo — use “Não autorizado” se precisar revogar.</span>
+                                                                {% endif %}
+                                                            </div>
+                                                            {% if st != 'autorizado' %}
                                                             <form action="{{ url_for('enviar_autorizacao_busca', aluno_id=aluno.id or aluno[0], aut_id=aut_id) }}" method="POST" class="d-flex flex-wrap gap-2 align-items-start">
                                                                 <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('Enviar e-mail ao responsável com botões Autorizo e Não autorizo? Salve o texto acima antes, se tiver alterado.');">
                                                                     <i class="bi bi-envelope"></i> Enviar autorização por e-mail
                                                                 </button>
                                                                 <span class="small text-muted align-self-center">Usa o e-mail do responsável cadastrado neste aluno.</span>
                                                             </form>
+                                                            {% else %}
+                                                            <form action="{{ url_for('enviar_autorizacao_busca', aluno_id=aluno.id or aluno[0], aut_id=aut_id) }}" method="POST" class="d-flex flex-wrap gap-2 align-items-start">
+                                                                <button type="submit" class="btn btn-outline-success btn-sm" onclick="return confirm('Reenviar e-mail? O responsável poderá só revogar com Não autorizo (já está autorizado).');">
+                                                                    <i class="bi bi-envelope"></i> Reenviar e-mail (opcional)
+                                                                </button>
+                                                            </form>
+                                                            {% endif %}
                                                         </div>
                                                         {% endif %}
                                                     </div>

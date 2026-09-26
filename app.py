@@ -6224,11 +6224,17 @@ def pagina_alunos():
                         conexao.close()
                 return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
 
-        if acao in ("editar_autorizado", "deletar_autorizado"):
+        if acao in ("editar_autorizado", "deletar_autorizado", "nao_autorizar_busca"):
             aluno_id = request.form.get("aluno_id")
             aut_id = request.form.get("autorizado_id")
             if aluno_id and aut_id:
-                if not pode_acao(session.get("usuario_papel"), "alunos", "alterar" if acao == "editar_autorizado" else "excluir", session.get("permissoes")):
+                precisa_excluir = acao == "deletar_autorizado"
+                if not pode_acao(
+                    session.get("usuario_papel"),
+                    "alunos",
+                    "excluir" if precisa_excluir else "alterar",
+                    session.get("permissoes"),
+                ):
                     flash("Somente a secretaria (ou quem tem permissão em Alunos) pode gerenciar pessoas autorizadas.", "danger")
                     return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
                 conexao = obter_conexao()
@@ -6242,6 +6248,20 @@ def pagina_alunos():
                                     (aut_id, aluno_id),
                                 )
                                 flash("Pessoa autorizada removida.", "success")
+                            elif acao == "nao_autorizar_busca":
+                                cursor.execute(
+                                    """
+                                    UPDATE pessoas_autorizadas
+                                    SET status_autorizacao = 'negado',
+                                        respondido_em = NOW()
+                                    WHERE id = %s AND aluno_id = %s
+                                    """,
+                                    (aut_id, aluno_id),
+                                )
+                                if cursor.rowcount:
+                                    flash("Status alterado para não autorizado. Esta pessoa não deve buscar o aluno.", "warning")
+                                else:
+                                    flash("Pessoa autorizada não encontrada.", "danger")
                             else:
                                 foto_aut = None
                                 termo_id = None
@@ -7392,7 +7412,21 @@ def autorizacao_busca_responder(token, decisao):
             aut = cursor.fetchone()
             if not aut:
                 return render_template("autorizacao_busca.html", erro="Autorização não encontrada.", aut=None, aluno=None, escola=None, token=token), 404
-            if aut.get("status_autorizacao") in {"autorizado", "negado"}:
+            status_atual = (aut.get("status_autorizacao") or "").strip()
+            # Já autorizado: não precisa autorizar de novo; só permite "Não autorizo" (revogar).
+            if status_atual == "autorizado" and decisao == "autorizo":
+                cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+                escola = cursor.fetchone() or {}
+                return render_template(
+                    "autorizacao_busca.html",
+                    erro=None,
+                    aut=aut,
+                    aluno={"nome_completo": aut.get("aluno_nome")},
+                    escola=escola,
+                    token=token,
+                    ja_respondido=True,
+                )
+            if status_atual == "negado" and decisao == "nao_autorizo":
                 cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
                 escola = cursor.fetchone() or {}
                 return render_template(
