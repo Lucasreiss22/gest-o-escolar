@@ -79,14 +79,29 @@
         <div class="card-box">
             <h3 style="margin-top:0;">Lançar nota do aluno</h3>
             <p style="color:#64748b;font-size:.88rem;margin:0 0 12px;">
-                Na semana de provas, escolha qual prova recebe a nota. Depois selecione o aluno da turma (ou busque por matrícula/CPF) e anexe o PDF feito pelo aluno.
+                Primeiro escolha a <strong>turma</strong>, depois a prova e o aluno. Assim nada fica misturado na semana de provas.
             </p>
-            {% if outras_provas and outras_provas|length > 1 %}
+            {% if turmas %}
             <div class="form-group" style="margin-bottom:14px;max-width:520px;">
-                <label>Qual prova nesta tela?</label>
-                <select id="sel-prova-prof" onchange="if(this.value) window.location.href=this.value;">
+                <label>Turma</label>
+                <select id="sel-turma-prof">
+                    <option value="">Todas as turmas</option>
+                    {% for t in turmas %}
+                    <option value="{{ t.id }}" {% if prova.turma_id == t.id %}selected{% endif %}>{{ t.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            {% if outras_provas %}
+            <div class="form-group" style="margin-bottom:14px;max-width:520px;">
+                <label>Qual prova nesta turma?</label>
+                <select id="sel-prova-prof">
                     {% for p in outras_provas %}
-                    <option value="{{ url_for('sala_professor_detalhe', prova_id=p.id) }}" {% if p.id == prova.id %}selected{% endif %}>
+                    <option
+                        value="{{ url_for('sala_professor_detalhe', prova_id=p.id) }}"
+                        data-turma="{{ p.turma_id or '' }}"
+                        {% if p.id == prova.id %}selected{% endif %}
+                    >
                         {% if p.data_aplicacao %}{{ p.data_aplicacao.strftime('%d/%m/%Y') if p.data_aplicacao.strftime is defined else p.data_aplicacao }} · {% endif %}
                         {% if p.materia %}{{ p.materia }} · {% endif %}{{ p.titulo }}
                         {% if p.turma_nome %} ({{ p.turma_nome }}){% endif %}
@@ -100,7 +115,7 @@
                 <input type="hidden" name="prova_id" value="{{ prova.id }}">
                 {% if alunos_turma %}
                 <div class="form-group" style="grid-column:1/-1;">
-                    <label>Aluno da turma</label>
+                    <label>Aluno da turma {{ prova.turma_nome or '' }}</label>
                     <select name="aluno_id" id="sel-aluno-turma">
                         <option value="">— Selecione o aluno —</option>
                         {% for a in alunos_turma %}
@@ -125,6 +140,41 @@
                     <button class="btn btn-primary" type="submit">Salvar nota</button>
                 </div>
             </form>
+            <script>
+            (function () {
+                var selTurma = document.getElementById('sel-turma-prof');
+                var selProva = document.getElementById('sel-prova-prof');
+                if (!selProva) return;
+                function filtrarProvas() {
+                    var tid = selTurma ? String(selTurma.value || '') : '';
+                    for (var i = 0; i < selProva.options.length; i++) {
+                        var opt = selProva.options[i];
+                        opt.hidden = !!(tid && String(opt.getAttribute('data-turma') || '') !== tid);
+                    }
+                }
+                if (selTurma) {
+                    selTurma.addEventListener('change', function () {
+                        var tid = String(selTurma.value || '');
+                        filtrarProvas();
+                        var atual = selProva.options[selProva.selectedIndex];
+                        if (tid && atual && String(atual.getAttribute('data-turma') || '') !== tid) {
+                            for (var i = 0; i < selProva.options.length; i++) {
+                                if (!selProva.options[i].hidden && selProva.options[i].value) {
+                                    window.location.href = selProva.options[i].value;
+                                    return;
+                                }
+                            }
+                            window.location.href = '{{ url_for("sala_professor") }}?turma_id=' + encodeURIComponent(tid);
+                            return;
+                        }
+                    });
+                    filtrarProvas();
+                }
+                selProva.addEventListener('change', function () {
+                    if (this.value) window.location.href = this.value;
+                });
+            })();
+            </script>
 
             {% if prova.notas %}
             <table style="margin-top:16px;">

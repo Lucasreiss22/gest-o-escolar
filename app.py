@@ -4296,6 +4296,7 @@ def sala_professor():
         return redirect(url_for("dashboard"))
     arquivos, provas, escola = [], [], {}
     pessoa, turmas = None, []
+    turma_filtro = None
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
             pessoa, turmas = _professor_da_sessao(cursor, funcionario_id)
@@ -4780,8 +4781,11 @@ def sala_professor():
                 (pessoa["id"],),
             )
             arquivos = cursor.fetchall() or []
-            cursor.execute(
-                """
+            turma_filtro = request.args.get("turma_id", type=int)
+            ids_turmas = {item["id"] for item in turmas}
+            if turma_filtro and turma_filtro not in ids_turmas:
+                turma_filtro = None
+            sql_provas = """
                 SELECT p.*, t.nome AS turma_nome,
                        (SELECT COUNT(*) FROM provas_criadas_questoes q WHERE q.prova_id = p.id) AS qtd_questoes,
                        (
@@ -4791,11 +4795,19 @@ def sala_professor():
                 FROM provas_criadas p
                 LEFT JOIN turmas t ON t.id = p.turma_id
                 WHERE p.funcionario_id = %s
-                ORDER BY p.criado_em DESC
-                """,
-                (pessoa["id"],),
-            )
+            """
+            params_provas = [pessoa["id"]]
+            if turma_filtro:
+                sql_provas += " AND p.turma_id = %s"
+                params_provas.append(turma_filtro)
+            sql_provas += " ORDER BY p.data_aplicacao DESC NULLS LAST, p.criado_em DESC"
+            cursor.execute(sql_provas, params_provas)
             provas = [dict(row) for row in (cursor.fetchall() or [])]
+            if turma_filtro:
+                arquivos = [
+                    a for a in arquivos
+                    if (a.get("turma_id") if isinstance(a, dict) else None) == turma_filtro
+                ]
             cursor.execute(
                 "SELECT logo_escola, nome_escola, mensagem_prova FROM configuracoes WHERE id = 1"
             )
@@ -4822,6 +4834,7 @@ def sala_professor():
         turmas=turmas,
         arquivos=arquivos,
         provas=provas,
+        turma_filtro=turma_filtro if pessoa else None,
         escola=escola,
     )
 

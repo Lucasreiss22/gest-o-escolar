@@ -699,7 +699,16 @@
                 <p class="small text-muted mb-3">Na semana de provas, selecione qual prova recebe a nota e o PDF. Matéria e título preenchem sozinhos.</p>
 
                 <div class="row g-3 mb-3">
-                    <div class="col-md-12">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold text-muted">Turma</label>
+                        <select name="turma_id" id="campo-turma-id" class="form-select">
+                            <option value="">— Selecione a turma —</option>
+                            {% for t in turmas %}
+                            <option value="{{ t.turma_id or t.id }}">{{ t.nome }}{% if t.ano_letivo %} ({{ t.ano_letivo }}){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-8">
                         <label class="form-label small fw-bold text-muted">Qual prova?</label>
                         <select name="prova_nota_id" id="sel-prova-aluno" class="form-select">
                             <option value="" data-materia="" data-titulo="" data-trimestre="" data-turma="" data-data="" data-criada="">
@@ -725,7 +734,6 @@
                         </select>
                         <input type="hidden" name="prova_criada_id" id="campo-prova-criada" value="">
                         <input type="hidden" name="data_aplicacao" id="campo-data-aplicacao" value="">
-                        <input type="hidden" name="turma_id" id="campo-turma-id" value="">
                     </div>
 
                     <div class="col-md-3">
@@ -776,7 +784,20 @@
             <script>
             (function () {
                 var sel = document.getElementById('sel-prova-aluno');
+                var selTurma = document.getElementById('campo-turma-id');
                 if (!sel) return;
+                function filtrarPorTurma() {
+                    var tid = selTurma ? String(selTurma.value || '') : '';
+                    for (var i = 0; i < sel.options.length; i++) {
+                        var opt = sel.options[i];
+                        if (!opt.value) { opt.hidden = false; continue; }
+                        var pt = String(opt.getAttribute('data-turma') || '');
+                        opt.hidden = !!(tid && pt && pt !== tid);
+                    }
+                    if (sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].hidden) {
+                        sel.value = '';
+                    }
+                }
                 function aplicar() {
                     var opt = sel.options[sel.selectedIndex];
                     var materia = opt.getAttribute('data-materia') || '';
@@ -788,12 +809,11 @@
                     var elMat = document.getElementById('campo-materia');
                     var elTit = document.getElementById('campo-titulo');
                     var elTri = document.getElementById('campo-trimestre');
-                    var elTur = document.getElementById('campo-turma-id');
                     var elData = document.getElementById('campo-data-aplicacao');
                     var elCri = document.getElementById('campo-prova-criada');
                     if (elCri) elCri.value = criada;
                     if (elData) elData.value = data;
-                    if (elTur) elTur.value = turma;
+                    if (selTurma && turma) selTurma.value = turma;
                     if (sel.value) {
                         if (elMat && materia) {
                             var found = false;
@@ -817,6 +837,11 @@
                     }
                 }
                 sel.addEventListener('change', aplicar);
+                if (selTurma) selTurma.addEventListener('change', function () {
+                    filtrarPorTurma();
+                    aplicar();
+                });
+                filtrarPorTurma();
                 aplicar();
             })();
             </script>

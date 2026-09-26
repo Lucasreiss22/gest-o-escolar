@@ -48,8 +48,31 @@
             <a class="btn btn-secondary" href="{{ url_for('pasta_professor_pdf') }}">PDF da pasta</a>
         </div>
 
+        {% if turmas %}
+        <div class="card-box" style="padding:14px 18px;">
+            <form method="GET" action="{{ url_for('sala_professor') }}" style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;">
+                <div style="display:flex;flex-direction:column;gap:4px;min-width:220px;flex:1;">
+                    <label for="filtro-turma" style="font-size:.82rem;font-weight:700;color:#334155;">Turma para lançar notas</label>
+                    <select name="turma_id" id="filtro-turma" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:.9rem;">
+                        <option value="">Todas as turmas</option>
+                        {% for t in turmas %}
+                        <option value="{{ t.id }}" {% if turma_filtro == t.id %}selected{% endif %}>{{ t.nome }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button class="btn btn-primary" type="submit">Filtrar</button>
+                {% if turma_filtro %}
+                <a class="btn btn-secondary" href="{{ url_for('sala_professor') }}">Limpar</a>
+                {% endif %}
+            </form>
+            <p style="color:#64748b;font-size:.85rem;margin:10px 0 0;">
+                Escolha a turma para ver só as provas dela e não misturar com as outras.
+            </p>
+        </div>
+        {% endif %}
+
         <div class="card-box">
-            <h3 style="margin-top:0;">Provas no sistema</h3>
+            <h3 style="margin-top:0;">Provas no sistema{% if turma_filtro %} — turma filtrada{% endif %}</h3>
             {% if provas %}
             <div class="prova-lista">
                 {% for prova in provas %}
