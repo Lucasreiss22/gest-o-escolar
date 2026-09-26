@@ -590,13 +590,20 @@ def _salvar_midia(campo, extensoes):
     nome = secure_filename(arquivo.filename)
     ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
     if ext not in extensoes:
-        raise ValueError("Envie um arquivo PDF.")
+        raise ValueError("Envie um arquivo PDF, JPG ou PNG.")
     dados = arquivo.read()
     if not dados:
         raise ValueError("O arquivo chegou vazio.")
     if len(dados) > 8 * 1024 * 1024:
         raise ValueError("O arquivo precisa ter no máximo 8 MB.")
-    mime = "application/pdf" if ext == "pdf" else "application/octet-stream"
+    mime_map = {
+        "pdf": "application/pdf",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+    }
+    mime = mime_map.get(ext, "application/octet-stream")
     from database import _aplicar_schema, _nome_banco_atual, obter_conexao_nova
     schema = _nome_banco_atual(master=False)
     if not schema:
@@ -624,6 +631,105 @@ def _salvar_midia(campo, extensoes):
     finally:
         conexao.close()
     return mid
+
+
+def _garantir_pessoas_autorizadas(cursor=None):
+    """Colunas de termo, texto e resposta do responsável por e-mail."""
+    def _rodar(cur):
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pessoas_autorizadas (
+                id SERIAL PRIMARY KEY,
+                aluno_id INT,
+                nome_completo VARCHAR(150),
+                cpf VARCHAR(14),
+                telefone VARCHAR(30),
+                vinculo VARCHAR(80),
+                endereco VARCHAR(255),
+                foto_url VARCHAR(255)
+            )
+            """
+        )
+        for sql in (
+            "ALTER TABLE pessoas_autorizadas ADD COLUMN IF NOT EXISTS foto_url VARCHAR(255)",
+            "ALTER TABLE pessoas_autorizadas ADD COLUMN IF NOT EXISTS termo_midia_id INT",
+            "ALTER TABLE pessoas_autorizadas ADD COLUMN IF NOT EXISTS texto_autorizacao TEXT",
+            "ALTER TABLE pessoas_autorizadas ADD COLUMN IF NOT EXISTS status_autorizacao VARCHAR(30) DEFAULT 'rascunho'",
+            "ALTER TABLE pessoas_autorizadas ADD COLUMN IF NOT EXISTS token_autorizacao VARCHAR(80)",
+            "ALTER TABLE pessoas_autorizadas ADD COLUMN IF NOT EXISTS enviado_em TIMESTAMP",
+            "ALTER TABLE pessoas_autorizadas ADD COLUMN IF NOT EXISTS respondido_em TIMESTAMP",
+            "ALTER TABLE pessoas_autorizadas ADD COLUMN IF NOT EXISTS respondido_por_email VARCHAR(180)",
+        ):
+            cur.execute(sql)
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS pessoas_autorizadas_token_uidx
+            ON pessoas_autorizadas (token_autorizacao)
+            WHERE token_autorizacao IS NOT NULL
+            """
+        )
+
+    if cursor is not None:
+        _rodar(cursor)
+        return
+    conexao = obter_conexao()
+    if not conexao:
+        return
+    try:
+        with conexao.cursor() as cur:
+            _rodar(cur)
+        conexao.commit()
+    except Exception:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+    finally:
+        conexao.close()
+
+
+def _texto_padrao_autorizacao(aluno_nome, autorizado_nome, cpf, vinculo, escola_nome):
+    aluno_nome = (aluno_nome or "o(a) aluno(a)").strip()
+    autorizado_nome = (autorizado_nome or "a pessoa indicada").strip()
+    cpf = (cpf or "não informado").strip()
+    vinculo = (vinculo or "autorizado(a)").strip()
+    escola_nome = (escola_nome or "a escola").strip()
+    return (
+        f"Eu, responsável legal por {aluno_nome}, autorizo {autorizado_nome}, "
+        f"CPF {cpf}, com vínculo de {vinculo}, a buscar e retirar o(a) aluno(a) "
+        f"nas dependências de {escola_nome}, mediante apresentação de documento com foto.\n\n"
+        f"Esta autorização permanece válida até comunicação em contrário à secretaria da escola."
+    )
+
+
+def _serializer_autorizacao():
+    from itsdangerous import URLSafeTimedSerializer
+    return URLSafeTimedSerializer(app.secret_key, salt="autorizacao-busca-v1")
+
+
+def _token_publico_autorizacao(aut_id, escola_db):
+    return _serializer_autorizacao().dumps({"id": int(aut_id), "db": escola_db})
+
+
+def _ler_token_publico_autorizacao(token, max_age=60 * 60 * 24 * 60):
+    from itsdangerous import BadSignature, SignatureExpired
+    try:
+        return _serializer_autorizacao().loads(token, max_age=max_age)
+    except SignatureExpired:
+        raise ValueError("Este link de autorização expirou. Peça à secretaria um novo envio.")
+    except BadSignature:
+        raise ValueError("Link de autorização inválido.")
+
+
+def _abrir_tenant_autorizacao(token):
+    dados = _ler_token_publico_autorizacao(token)
+    escola_db = (dados.get("db") or "").strip()
+    aut_id = dados.get("id")
+    if not escola_db or not aut_id:
+        raise ValueError("Link de autorização incompleto.")
+    definir_banco_escola(escola_db)
+    _garantir_pessoas_autorizadas()
+    return int(aut_id), escola_db
 
 
 @app.route("/midia/<int:midia_id>")
@@ -1092,6 +1198,7 @@ def proteger_rotas():
     publicos = {
         None, "login", "logout", "static", "ping", "login_google", "login_google_callback",
         "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
+        "autorizacao_busca_publico", "autorizacao_busca_responder", "autorizacao_busca_anexo",
     }
     if endpoint in publicos:
         g.nfse_liberada = False
@@ -6121,10 +6228,14 @@ def pagina_alunos():
             aluno_id = request.form.get("aluno_id")
             aut_id = request.form.get("autorizado_id")
             if aluno_id and aut_id:
+                if not pode_acao(session.get("usuario_papel"), "alunos", "alterar" if acao == "editar_autorizado" else "excluir", session.get("permissoes")):
+                    flash("Somente a secretaria (ou quem tem permissão em Alunos) pode gerenciar pessoas autorizadas.", "danger")
+                    return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
                 conexao = obter_conexao()
                 if conexao:
                     try:
                         with conexao.cursor() as cursor:
+                            _garantir_pessoas_autorizadas(cursor)
                             if acao == "deletar_autorizado":
                                 cursor.execute(
                                     "DELETE FROM pessoas_autorizadas WHERE id = %s AND aluno_id = %s",
@@ -6133,15 +6244,24 @@ def pagina_alunos():
                                 flash("Pessoa autorizada removida.", "success")
                             else:
                                 foto_aut = None
+                                termo_id = None
                                 try:
                                     foto_aut = _salvar_foto("foto", "autorizados")
                                 except ValueError as e:
                                     flash(str(e), "danger")
+                                try:
+                                    if request.files.get("termo_autorizacao") and request.files["termo_autorizacao"].filename:
+                                        termo_id = _salvar_midia("termo_autorizacao", {"pdf", "jpg", "jpeg", "png"})
+                                except ValueError as e:
+                                    flash(str(e), "danger")
+                                texto = (request.form.get("texto_autorizacao") or "").strip() or None
                                 cursor.execute(
                                     """
                                     UPDATE pessoas_autorizadas
                                     SET nome_completo = %s, cpf = %s, telefone = %s, vinculo = %s, endereco = %s,
-                                        foto_url = COALESCE(%s, foto_url)
+                                        foto_url = COALESCE(%s, foto_url),
+                                        termo_midia_id = COALESCE(%s, termo_midia_id),
+                                        texto_autorizacao = COALESCE(%s, texto_autorizacao)
                                     WHERE id = %s AND aluno_id = %s
                                     """,
                                     (
@@ -6151,6 +6271,8 @@ def pagina_alunos():
                                         limpar_campo("vinculo") or limpar_campo("grau_parentesco"),
                                         _endereco_do_form(),
                                         foto_aut,
+                                        termo_id,
+                                        texto,
                                         aut_id,
                                         aluno_id,
                                     ),
@@ -6162,7 +6284,7 @@ def pagina_alunos():
                         flash(f"Erro ao atualizar pessoa autorizada: {e}", "danger")
                     finally:
                         conexao.close()
-                return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+                return redirect(url_for("detalhes_aluno", aluno_id=aluno_id) + "#autorizados")
 
         if acao == "importar_alunos":
             arquivo = request.files.get("planilha_alunos")
@@ -6692,12 +6814,24 @@ def detalhes_aluno(aluno_id):
                 """, (aluno_id,))
                 financeiro_aluno = cursor.fetchall()
 
-                cursor.execute("""
-                    SELECT id, nome_completo, cpf, telefone, vinculo, endereco, foto_url
-                    FROM pessoas_autorizadas 
-                    WHERE aluno_id = %s
-                """, (aluno_id,))
-                pessoas_autorizadas = cursor.fetchall()
+                try:
+                    _garantir_pessoas_autorizadas(cursor)
+                    cursor.execute("""
+                        SELECT id, nome_completo, cpf, telefone, vinculo, endereco, foto_url,
+                               termo_midia_id, texto_autorizacao, status_autorizacao,
+                               enviado_em, respondido_em, respondido_por_email
+                        FROM pessoas_autorizadas
+                        WHERE aluno_id = %s
+                        ORDER BY id DESC
+                    """, (aluno_id,))
+                    pessoas_autorizadas = cursor.fetchall()
+                except Exception:
+                    cursor.execute("""
+                        SELECT id, nome_completo, cpf, telefone, vinculo, endereco, foto_url
+                        FROM pessoas_autorizadas
+                        WHERE aluno_id = %s
+                    """, (aluno_id,))
+                    pessoas_autorizadas = cursor.fetchall()
 
                 try:
                     _backfill_notas_professor(cursor, aluno_id=aluno_id)
@@ -7027,6 +7161,9 @@ def adicionar_responsavel(aluno_id):
 def adicionar_autorizado(aluno_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
+    if not pode_acao(session.get("usuario_papel"), "alunos", "alterar", session.get("permissoes")):
+        flash("Somente a secretaria (ou quem tem permissão em Alunos) pode cadastrar pessoas autorizadas.", "danger")
+        return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
 
     garantir_tabelas_folha()
     garantir_tabelas_pedagogicas()
@@ -7034,26 +7171,308 @@ def adicionar_autorizado(aluno_id):
     conexao = obter_conexao()
     if conexao:
         try:
-            with conexao.cursor() as cursor:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                _garantir_pessoas_autorizadas(cursor)
                 foto_aut = None
+                termo_id = None
                 try:
                     foto_aut = _salvar_foto("foto", "autorizados")
                 except ValueError as e:
                     flash(str(e), "danger")
-                cursor.execute("""
-                    INSERT INTO pessoas_autorizadas (aluno_id, nome_completo, cpf, telefone, vinculo, endereco, foto_url)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s);
-                """, (aluno_id, limpar_campo("nome_completo"), limpar_campo("cpf"),
-                      limpar_campo("telefone"), limpar_campo("vinculo") or limpar_campo("grau_parentesco"),
-                      _endereco_do_form(), foto_aut))
+                try:
+                    if request.files.get("termo_autorizacao") and request.files["termo_autorizacao"].filename:
+                        termo_id = _salvar_midia("termo_autorizacao", {"pdf", "jpg", "jpeg", "png"})
+                except ValueError as e:
+                    flash(str(e), "danger")
+                nome = limpar_campo("nome_completo")
+                cpf = limpar_campo("cpf")
+                telefone = limpar_campo("telefone")
+                vinculo = limpar_campo("vinculo") or limpar_campo("grau_parentesco")
+                endereco = _endereco_do_form()
+                texto = (request.form.get("texto_autorizacao") or "").strip()
+                if not texto:
+                    cursor.execute("SELECT nome_completo FROM alunos WHERE id = %s", (aluno_id,))
+                    aluno = cursor.fetchone() or {}
+                    cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+                    cfg = cursor.fetchone() or {}
+                    texto = _texto_padrao_autorizacao(
+                        aluno.get("nome_completo"),
+                        nome,
+                        cpf,
+                        vinculo,
+                        cfg.get("nome_escola"),
+                    )
+                cursor.execute(
+                    """
+                    INSERT INTO pessoas_autorizadas (
+                        aluno_id, nome_completo, cpf, telefone, vinculo, endereco, foto_url,
+                        termo_midia_id, texto_autorizacao, status_autorizacao
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'rascunho')
+                    RETURNING id
+                    """,
+                    (aluno_id, nome, cpf, telefone, vinculo, endereco, foto_aut, termo_id, texto),
+                )
                 conexao.commit()
-                flash("✅ Pessoa autorizada cadastrada com sucesso!", "success")
+                flash("✅ Pessoa autorizada cadastrada pela secretaria. Você pode anexar o termo e enviar o e-mail ao responsável.", "success")
         except Exception as e:
             conexao.rollback()
             flash(f"❌ Erro ao cadastrar pessoa autorizada: {e}", "danger")
         finally:
             conexao.close()
-    return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+    return redirect(url_for("detalhes_aluno", aluno_id=aluno_id) + "#autorizados")
+
+
+@app.route("/alunos/<int:aluno_id>/autorizados/<int:aut_id>/enviar-email", methods=["POST"])
+def enviar_autorizacao_busca(aluno_id, aut_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if not pode_acao(session.get("usuario_papel"), "alunos", "alterar", session.get("permissoes")):
+        flash("Somente a secretaria pode enviar a autorização por e-mail.", "danger")
+        return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+    escola_db = session.get("escola_db")
+    if not escola_db:
+        flash("Sessão sem banco da escola.", "danger")
+        return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            _garantir_pessoas_autorizadas(cursor)
+            cursor.execute(
+                """
+                SELECT p.*, a.nome_completo AS aluno_nome
+                FROM pessoas_autorizadas p
+                JOIN alunos a ON a.id = p.aluno_id
+                WHERE p.id = %s AND p.aluno_id = %s
+                """,
+                (aut_id, aluno_id),
+            )
+            aut = cursor.fetchone()
+            if not aut:
+                raise ValueError("Pessoa autorizada não encontrada.")
+            texto = (request.form.get("texto_autorizacao") or aut.get("texto_autorizacao") or "").strip()
+            if not texto:
+                cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+                cfg = cursor.fetchone() or {}
+                texto = _texto_padrao_autorizacao(
+                    aut.get("aluno_nome"),
+                    aut.get("nome_completo"),
+                    aut.get("cpf"),
+                    aut.get("vinculo"),
+                    cfg.get("nome_escola"),
+                )
+            token_local = secrets.token_urlsafe(18)
+            cursor.execute(
+                """
+                UPDATE pessoas_autorizadas
+                SET texto_autorizacao = %s,
+                    token_autorizacao = %s,
+                    status_autorizacao = 'aguardando',
+                    enviado_em = NOW(),
+                    respondido_em = NULL,
+                    respondido_por_email = NULL
+                WHERE id = %s AND aluno_id = %s
+                """,
+                (texto, token_local, aut_id, aluno_id),
+            )
+            destinos = emails_contato_aluno(cursor, aluno_id)
+            if not destinos:
+                raise ValueError("Cadastre o e-mail do responsável do aluno antes de enviar.")
+            cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+            cfg = cursor.fetchone() or {}
+            escola_nome = cfg.get("nome_escola") or "Escola"
+            token_publico = _token_publico_autorizacao(aut_id, escola_db)
+            link = url_for("autorizacao_busca_publico", token=token_publico, _external=True)
+            link_sim = url_for("autorizacao_busca_responder", token=token_publico, decisao="autorizo", _external=True)
+            link_nao = url_for("autorizacao_busca_responder", token=token_publico, decisao="nao_autorizo", _external=True)
+            assunto = f"Autorização para buscar {aut.get('aluno_nome')} — {escola_nome}"
+            corpo = (
+                f"Olá,\n\nA secretaria de {escola_nome} solicita sua autorização para que "
+                f"{aut.get('nome_completo')} ({aut.get('vinculo') or 'autorizado'}) possa buscar "
+                f"{aut.get('aluno_nome')} na escola.\n\n"
+                f"Texto da autorização:\n{texto}\n\n"
+                f"Para responder, use os botões no e-mail ou abra: {link}\n"
+            )
+            html = f"""
+            <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a;">
+              <h2 style="color:#1e40af;">Autorização para buscar o(a) aluno(a)</h2>
+              <p>A secretaria de <strong>{escape(escola_nome)}</strong> pede sua confirmação.</p>
+              <p><strong>Aluno(a):</strong> {escape(aut.get('aluno_nome') or '')}<br>
+                 <strong>Pessoa autorizada:</strong> {escape(aut.get('nome_completo') or '')}<br>
+                 <strong>Vínculo:</strong> {escape(aut.get('vinculo') or '—')}<br>
+                 <strong>CPF:</strong> {escape(aut.get('cpf') or '—')}</p>
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;white-space:pre-wrap;">{escape(texto)}</div>
+              <p style="margin:22px 0 8px;">Responda com um clique:</p>
+              <p>
+                <a href="{link_sim}" style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;margin-right:8px;">Autorizo</a>
+                <a href="{link_nao}" style="display:inline-block;background:#dc2626;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Não autorizo</a>
+              </p>
+              <p style="font-size:12px;color:#64748b;">Se os botões não abrirem, use este link: <a href="{link}">{link}</a></p>
+            </div>
+            """
+            enviar_email(destinos, assunto, corpo, html=html)
+            conexao.commit()
+            flash(f"Autorização enviada para {', '.join(destinos)}. Aguardando resposta do responsável.", "success")
+    except Exception as e:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        flash(f"Não foi possível enviar a autorização: {e}", "danger")
+    finally:
+        conexao.close()
+    return redirect(url_for("detalhes_aluno", aluno_id=aluno_id) + "#autorizados")
+
+
+@app.route("/autorizacao-busca/<token>")
+def autorizacao_busca_publico(token):
+    try:
+        aut_id, _escola_db = _abrir_tenant_autorizacao(token)
+    except ValueError as e:
+        return render_template("autorizacao_busca.html", erro=str(e), aut=None, aluno=None, escola=None, token=token), 400
+    conexao = obter_conexao()
+    if not conexao:
+        return render_template("autorizacao_busca.html", erro="Sistema indisponível no momento.", aut=None, aluno=None, escola=None, token=token), 503
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT p.*, a.nome_completo AS aluno_nome
+                FROM pessoas_autorizadas p
+                JOIN alunos a ON a.id = p.aluno_id
+                WHERE p.id = %s
+                """,
+                (aut_id,),
+            )
+            aut = cursor.fetchone()
+            cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+            escola = cursor.fetchone() or {}
+    finally:
+        conexao.close()
+    if not aut:
+        return render_template("autorizacao_busca.html", erro="Autorização não encontrada.", aut=None, aluno=None, escola=None, token=token), 404
+    return render_template(
+        "autorizacao_busca.html",
+        erro=None,
+        aut=aut,
+        aluno={"nome_completo": aut.get("aluno_nome")},
+        escola=escola,
+        token=token,
+    )
+
+
+@app.route("/autorizacao-busca/<token>/<decisao>", methods=["GET", "POST"])
+def autorizacao_busca_responder(token, decisao):
+    decisao = (decisao or "").strip().lower()
+    if decisao not in {"autorizo", "nao_autorizo"}:
+        return redirect(url_for("autorizacao_busca_publico", token=token))
+    try:
+        aut_id, _escola_db = _abrir_tenant_autorizacao(token)
+    except ValueError as e:
+        return render_template("autorizacao_busca.html", erro=str(e), aut=None, aluno=None, escola=None, token=token), 400
+    status = "autorizado" if decisao == "autorizo" else "negado"
+    conexao = obter_conexao()
+    if not conexao:
+        return render_template("autorizacao_busca.html", erro="Sistema indisponível no momento.", aut=None, aluno=None, escola=None, token=token), 503
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            _garantir_pessoas_autorizadas(cursor)
+            cursor.execute(
+                """
+                SELECT p.*, a.nome_completo AS aluno_nome
+                FROM pessoas_autorizadas p
+                JOIN alunos a ON a.id = p.aluno_id
+                WHERE p.id = %s
+                """,
+                (aut_id,),
+            )
+            aut = cursor.fetchone()
+            if not aut:
+                return render_template("autorizacao_busca.html", erro="Autorização não encontrada.", aut=None, aluno=None, escola=None, token=token), 404
+            if aut.get("status_autorizacao") in {"autorizado", "negado"}:
+                cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+                escola = cursor.fetchone() or {}
+                return render_template(
+                    "autorizacao_busca.html",
+                    erro=None,
+                    aut=aut,
+                    aluno={"nome_completo": aut.get("aluno_nome")},
+                    escola=escola,
+                    token=token,
+                    ja_respondido=True,
+                )
+            cursor.execute(
+                """
+                UPDATE pessoas_autorizadas
+                SET status_autorizacao = %s,
+                    respondido_em = NOW()
+                WHERE id = %s
+                """,
+                (status, aut_id),
+            )
+            conexao.commit()
+            cursor.execute(
+                """
+                SELECT p.*, a.nome_completo AS aluno_nome
+                FROM pessoas_autorizadas p
+                JOIN alunos a ON a.id = p.aluno_id
+                WHERE p.id = %s
+                """,
+                (aut_id,),
+            )
+            aut = cursor.fetchone()
+            cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+            escola = cursor.fetchone() or {}
+    except Exception as e:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        return render_template("autorizacao_busca.html", erro=str(e), aut=None, aluno=None, escola=None, token=token), 500
+    finally:
+        conexao.close()
+    return render_template(
+        "autorizacao_busca.html",
+        erro=None,
+        aut=aut,
+        aluno={"nome_completo": (aut or {}).get("aluno_nome")},
+        escola=escola,
+        token=token,
+        respondido=True,
+    )
+
+
+@app.route("/autorizacao-busca-anexo/<token>")
+def autorizacao_busca_anexo(token):
+    try:
+        aut_id, _escola_db = _abrir_tenant_autorizacao(token)
+    except ValueError:
+        return "", 404
+    conexao = obter_conexao()
+    if not conexao:
+        return "", 404
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                "SELECT termo_midia_id FROM pessoas_autorizadas WHERE id = %s",
+                (aut_id,),
+            )
+            aut = cursor.fetchone() or {}
+            midia_id = aut.get("termo_midia_id")
+            if not midia_id:
+                return "", 404
+            cursor.execute("SELECT mime, dados FROM midia WHERE id = %s", (midia_id,))
+            row = cursor.fetchone()
+    finally:
+        conexao.close()
+    if not row or not row.get("dados"):
+        return "", 404
+    resp = app.response_class(bytes(row["dados"]), mimetype=row.get("mime") or "application/pdf")
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
 
 
 @app.route("/alunos/<int:aluno_id>/adicionar_nota", methods=["POST"])

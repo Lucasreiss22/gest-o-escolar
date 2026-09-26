@@ -59,6 +59,7 @@ ENDPOINTS = {
     "excluir_usuario_sistema": "usuarios",
     "gerenciar_usuarios": "usuarios",
     "adicionar_autorizado": "alunos",
+    "enviar_autorizacao_busca": "alunos",
     "adicionar_nota": "pedagogico",
     "boletim_pdf": "pedagogico",
     "anexar_boletim": "pedagogico",

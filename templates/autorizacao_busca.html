@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autorização para buscar aluno</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background: #f1f5f9; color: #0f172a; }
+        .box { max-width: 640px; margin: 40px auto; background: #fff; border-radius: 12px; padding: 28px; box-shadow: 0 8px 24px rgba(15,23,42,.08); }
+        h1 { font-size: 1.35rem; margin: 0 0 8px; color: #1e40af; }
+        .meta { color: #64748b; font-size: .92rem; margin-bottom: 16px; }
+        .texto { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; white-space: pre-wrap; line-height: 1.45; }
+        .acoes { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+        .btn { display: inline-block; text-decoration: none; border: none; border-radius: 8px; padding: 12px 18px; font-weight: 700; cursor: pointer; color: #fff; }
+        .ok { background: #16a34a; }
+        .no { background: #dc2626; }
+        .link { color: #2563eb; }
+        .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 14px; }
+        .alert-ok { background: #dcfce7; color: #166534; }
+        .alert-err { background: #fee2e2; color: #991b1b; }
+        .alert-info { background: #e0f2fe; color: #075985; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: .8rem; font-weight: 700; }
+        .badge-ok { background: #dcfce7; color: #166534; }
+        .badge-no { background: #fee2e2; color: #991b1b; }
+        .badge-wait { background: #fef9c3; color: #854d0e; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        {% if erro %}
+            <div class="alert alert-err">{{ erro }}</div>
+            <p>Se precisar, entre em contato com a secretaria da escola.</p>
+        {% else %}
+            <h1>Autorização para buscar o(a) aluno(a)</h1>
+            <p class="meta">{{ (escola.nome_escola if escola else None) or 'Escola' }}</p>
+
+            {% if respondido %}
+                <div class="alert alert-ok">
+                    {% if aut.status_autorizacao == 'autorizado' %}
+                        Sua resposta foi registrada: <strong>Autorizado</strong>.
+                    {% else %}
+                        Sua resposta foi registrada: <strong>Não autorizado</strong>.
+                    {% endif %}
+                </div>
+            {% elif ja_respondido %}
+                <div class="alert alert-info">
+                    Esta solicitação já foi respondida
+                    {% if aut.status_autorizacao == 'autorizado' %}
+                        como <span class="badge badge-ok">Autorizado</span>.
+                    {% else %}
+                        como <span class="badge badge-no">Não autorizado</span>.
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            <p>
+                <strong>Aluno(a):</strong> {{ aluno.nome_completo if aluno else aut.aluno_nome }}<br>
+                <strong>Pessoa:</strong> {{ aut.nome_completo }}<br>
+                <strong>Vínculo:</strong> {{ aut.vinculo or '—' }}<br>
+                <strong>CPF:</strong> {{ aut.cpf or '—' }}
+            </p>
+
+            {% if aut.texto_autorizacao %}
+            <h2 style="font-size:1rem;margin:18px 0 8px;">Texto da autorização</h2>
+            <div class="texto">{{ aut.texto_autorizacao }}</div>
+            {% endif %}
+
+            {% if aut.termo_midia_id %}
+            <p style="margin-top:14px;">
+                <a class="link" href="{{ url_for('autorizacao_busca_anexo', token=token) }}" target="_blank" rel="noopener">Ver documento anexo (PDF/imagem)</a>
+            </p>
+            {% endif %}
+
+            {% if not respondido and not ja_respondido and aut.status_autorizacao not in ['autorizado', 'negado'] %}
+            <div class="acoes">
+                <a class="btn ok" href="{{ url_for('autorizacao_busca_responder', token=token, decisao='autorizo') }}">Autorizo</a>
+                <a class="btn no" href="{{ url_for('autorizacao_busca_responder', token=token, decisao='nao_autorizo') }}">Não autorizo</a>
+            </div>
+            <p class="meta" style="margin-top:16px;">Ao clicar, sua resposta fica registrada para a secretaria da escola.</p>
+            {% elif aut.status_autorizacao == 'aguardando' and not respondido %}
+            <p><span class="badge badge-wait">Aguardando resposta</span></p>
+            {% endif %}
+        {% endif %}
+    </div>
+</body>
+</html>

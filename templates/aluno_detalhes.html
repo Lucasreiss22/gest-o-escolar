@@ -286,7 +286,7 @@
         </div>
 
         <!-- PESSOAS AUTORIZADAS A BUSCAR A CRIANÇA -->
-        <div class="card border-0 shadow-sm mt-4">
+        <div class="card border-0 shadow-sm mt-4" id="autorizados">
             <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-shield-check text-success"></i> Pessoas Autorizadas a Buscar a Criança</span>
                 {% if pode_alterar('alunos') %}
@@ -296,6 +296,7 @@
                 {% endif %}
             </div>
             <div class="card-body p-0">
+                <p class="small text-muted px-3 pt-3 mb-0">Cadastro feito pela secretaria. Anexe o termo (PDF/JPG/PNG), edite o texto e envie ao responsável por e-mail com botões Autorizo / Não autorizo.</p>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
@@ -303,8 +304,8 @@
                                 <th>Nome Completo</th>
                                 <th>CPF</th>
                                 <th>Telefone</th>
-                                <th>Vínculo / Parentesco</th>
-                                <th>Endereço</th>
+                                <th>Vínculo</th>
+                                <th>Termo / Status</th>
                                 <th class="text-end">Ações</th>
                             </tr>
                         </thead>
@@ -312,6 +313,7 @@
                             {% if pessoas_autorizadas %}
                                 {% for aut in pessoas_autorizadas %}
                                     {% set aut_id = aut.id or aut[0] %}
+                                    {% set st = aut.status_autorizacao or 'rascunho' %}
                                     <tr>
                                         <td class="fw-bold">
                                             <span class="d-inline-flex align-items-center gap-2">
@@ -322,7 +324,22 @@
                                         <td>{{ aut.cpf or aut[2] or '-' }}</td>
                                         <td>{{ aut.telefone or aut[3] or '-' }}</td>
                                         <td><span class="badge bg-secondary">{{ aut.vinculo or aut.parentesco or aut[4] or 'Autorizado' }}</span></td>
-                                        <td><small class="text-muted">{{ aut.endereco or aut[5] or 'Não informado' }}</small></td>
+                                        <td>
+                                            {% if aut.termo_midia_id %}
+                                            <a href="{{ url_for('servir_midia', midia_id=aut.termo_midia_id) }}" target="_blank" class="small d-block">Ver termo</a>
+                                            {% else %}
+                                            <span class="small text-muted d-block">Sem anexo</span>
+                                            {% endif %}
+                                            {% if st == 'autorizado' %}
+                                            <span class="badge text-bg-success">Autorizado pelo responsável</span>
+                                            {% elif st == 'negado' %}
+                                            <span class="badge text-bg-danger">Não autorizado</span>
+                                            {% elif st == 'aguardando' %}
+                                            <span class="badge text-bg-warning">Aguardando e-mail</span>
+                                            {% else %}
+                                            <span class="badge text-bg-light text-dark border">Rascunho</span>
+                                            {% endif %}
+                                        </td>
                                         <td class="text-end">
                                             {% if pode_alterar('alunos') or pode_excluir('alunos') %}
                                             <button class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#modalEditAutorizado{{ aut_id }}">
@@ -332,7 +349,7 @@
 
                                             <!-- MODAL EDITAR AUTORIZADO -->
                                             <div class="modal fade text-start" id="modalEditAutorizado{{ aut_id }}" tabindex="-1" aria-hidden="true">
-                                                <div class="modal-dialog modal-dialog-centered">
+                                                <div class="modal-dialog modal-lg modal-dialog-centered">
                                                     <div class="modal-content">
                                                         <div class="modal-header">
                                                             <h5 class="modal-title fw-bold">Editar Pessoa Autorizada</h5>
@@ -369,12 +386,25 @@
                                                                     {% include '_endereco_correios.html' %}
                                                                     <input type="hidden" name="endereco" value="{{ aut.endereco or '' }}">
                                                                 </div>
+                                                                <div class="mb-3">
+                                                                    <label class="form-label small fw-bold">Termo de autorização (PDF, JPG ou PNG)</label>
+                                                                    <input type="file" name="termo_autorizacao" class="form-control" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+                                                                    {% if aut.termo_midia_id %}
+                                                                    <div class="form-text">Já há um termo anexado. Envie outro arquivo para substituir. <a href="{{ url_for('servir_midia', midia_id=aut.termo_midia_id) }}" target="_blank">Abrir atual</a></div>
+                                                                    {% endif %}
+                                                                </div>
+                                                                <div class="mb-3">
+                                                                    <label class="form-label small fw-bold">Texto da autorização (escola)</label>
+                                                                    <textarea name="texto_autorizacao" class="form-control" rows="5" placeholder="Texto que o responsável vai ler no e-mail">{{ aut.texto_autorizacao or '' }}</textarea>
+                                                                </div>
                                                             </div>
-                                                            <div class="modal-footer justify-content-between">
+                                                            <div class="modal-footer justify-content-between flex-wrap gap-2">
                                                                 {% if pode_excluir('alunos') %}
                                                                 <button type="submit" name="acao" value="deletar_autorizado" class="btn btn-outline-danger btn-sm" onclick="return confirm('Remover esta autorização?')">Excluir</button>
+                                                                {% else %}
+                                                                <span></span>
                                                                 {% endif %}
-                                                                <div>
+                                                                <div class="d-flex flex-wrap gap-2">
                                                                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
                                                                     {% if pode_alterar('alunos') %}
                                                                     <button type="submit" class="btn btn-primary btn-sm">Salvar Alterações</button>
@@ -382,6 +412,16 @@
                                                                 </div>
                                                             </div>
                                                         </form>
+                                                        {% if pode_alterar('alunos') %}
+                                                        <div class="border-top px-3 py-3 bg-light rounded-bottom">
+                                                            <form action="{{ url_for('enviar_autorizacao_busca', aluno_id=aluno.id or aluno[0], aut_id=aut_id) }}" method="POST" class="d-flex flex-wrap gap-2 align-items-start">
+                                                                <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('Enviar e-mail ao responsável com botões Autorizo e Não autorizo? Salve o texto acima antes, se tiver alterado.');">
+                                                                    <i class="bi bi-envelope"></i> Enviar autorização por e-mail
+                                                                </button>
+                                                                <span class="small text-muted align-self-center">Usa o e-mail do responsável cadastrado neste aluno.</span>
+                                                            </form>
+                                                        </div>
+                                                        {% endif %}
                                                     </div>
                                                 </div>
                                             </div>
@@ -1054,6 +1094,7 @@
                 </div>
                 <form action="{{ url_for('adicionar_autorizado', aluno_id=aluno.id or aluno[0]) }}" method="POST" enctype="multipart/form-data">
                     <div class="modal-body text-start">
+                        <p class="small text-muted">Cadastro exclusivo da secretaria. Preencha os dados, anexe o termo dos pais (opcional) e, se quiser, ajuste o texto que será enviado por e-mail.</p>
                         <div class="row g-3">
                             <div class="col-md-12">
                                 {% with foto_name='foto', foto_atual='', foto_rotulo='Foto de quem busca o aluno' %}{% include '_foto_circulo.html' %}{% endwith %}
@@ -1081,6 +1122,16 @@
                             <div class="col-md-12">
                                 {% include '_endereco_correios.html' %}
                                 <input type="hidden" name="endereco" value="">
+                            </div>
+
+                            <div class="col-md-12">
+                                <label class="form-label small fw-bold">Termo de autorização (PDF, JPG ou PNG)</label>
+                                <input type="file" name="termo_autorizacao" class="form-control" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+                            </div>
+
+                            <div class="col-md-12">
+                                <label class="form-label small fw-bold">Texto da autorização (escola)</label>
+                                <textarea name="texto_autorizacao" class="form-control" rows="4" placeholder="Deixe em branco para usar o texto padrão da escola com os dados desta pessoa."></textarea>
                             </div>
                         </div>
                     </div>
