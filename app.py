@@ -3618,10 +3618,16 @@ def _garantir_sala_professor(cursor):
             turma_id INT,
             titulo VARCHAR(180) NOT NULL,
             materia VARCHAR(100),
+            data_aplicacao DATE,
+            horario TIME,
+            evento_calendario_id INT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS data_aplicacao DATE")
+    cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS horario TIME")
+    cursor.execute("ALTER TABLE provas_criadas ADD COLUMN IF NOT EXISTS evento_calendario_id INT")
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS provas_criadas_questoes (
@@ -3715,6 +3721,17 @@ def sala_professor():
                     turma_id = request.form.get("turma_id", type=int)
                     if turma_id and turma_id not in {item["id"] for item in turmas}:
                         raise ValueError("Essa turma não está vinculada a você.")
+                    data_aplicacao = (request.form.get("data_aplicacao") or "").strip()
+                    if not data_aplicacao:
+                        raise ValueError("Informe a data de aplicação da prova.")
+                    try:
+                        datetime.strptime(data_aplicacao[:10], "%Y-%m-%d")
+                    except ValueError:
+                        raise ValueError("Data de aplicação inválida.")
+                    horario = (request.form.get("horario") or "").strip() or None
+                    if horario in ("", "None"):
+                        horario = None
+                    materia = (request.form.get("materia") or "").strip()[:100]
                     enunciados = request.form.getlist("enunciado")
                     tipos = request.form.getlist("tipo_questao")
                     respostas = request.form.getlist("resposta")
@@ -3744,16 +3761,54 @@ def sala_professor():
                         ))
                     if not questoes:
                         raise ValueError("Escreva pelo menos uma pergunta.")
+                    titulo_evento = titulo if not materia else f"{titulo} — {materia}"
+                    descricao_evento = f"Prova criada por {pessoa.get('nome_completo') or 'professor'}."
                     cursor.execute(
                         """
-                        INSERT INTO provas_criadas (funcionario_id, turma_id, titulo, materia)
-                        VALUES (%s, %s, %s, %s) RETURNING id
+                        INSERT INTO calendario_eventos
+                            (titulo, descricao, data_evento, tipo, turma_id, professor_id, horario)
+                        VALUES (%s, %s, %s, 'prova', %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            titulo_evento[:180],
+                            descricao_evento,
+                            data_aplicacao[:10],
+                            turma_id,
+                            pessoa["id"],
+                            horario,
+                        ),
+                    )
+                    evento_id = (cursor.fetchone() or {}).get("id")
+                    if turma_id:
+                        cursor.execute(
+                            """
+                            INSERT INTO provas_turma (turma_id, materia, titulo, descricao, data_prova, horario)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                turma_id,
+                                materia,
+                                titulo[:180],
+                                descricao_evento,
+                                data_aplicacao[:10],
+                                horario,
+                            ),
+                        )
+                    cursor.execute(
+                        """
+                        INSERT INTO provas_criadas
+                            (funcionario_id, turma_id, titulo, materia, data_aplicacao, horario, evento_calendario_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
                         """,
                         (
                             pessoa["id"],
                             turma_id,
                             titulo[:180],
-                            (request.form.get("materia") or "").strip()[:100],
+                            materia,
+                            data_aplicacao[:10],
+                            horario,
+                            evento_id,
                         ),
                     )
                     prova_id = (cursor.fetchone() or {}).get("id")
@@ -3766,13 +3821,34 @@ def sala_professor():
                             """,
                             (prova_id, ordem, *item),
                         )
-                    flash("Prova criada. O PDF já pode ser gerado.", "success")
+                    flash("Prova criada e incluída no calendário. O PDF já pode ser gerado.", "success")
                 elif acao == "excluir_prova":
+                    prova_id = request.form.get("prova_id", type=int)
+                    cursor.execute(
+                        """
+                        SELECT evento_calendario_id, turma_id, titulo, data_aplicacao
+                        FROM provas_criadas
+                        WHERE id = %s AND funcionario_id = %s
+                        """,
+                        (prova_id, pessoa["id"]),
+                    )
+                    prova = cursor.fetchone() or {}
+                    evento_id = prova.get("evento_calendario_id")
+                    if evento_id:
+                        cursor.execute("DELETE FROM calendario_eventos WHERE id = %s", (evento_id,))
+                    if prova.get("turma_id") and prova.get("data_aplicacao"):
+                        cursor.execute(
+                            """
+                            DELETE FROM provas_turma
+                            WHERE turma_id = %s AND data_prova = %s AND titulo = %s
+                            """,
+                            (prova.get("turma_id"), prova.get("data_aplicacao"), prova.get("titulo")),
+                        )
                     cursor.execute(
                         "DELETE FROM provas_criadas WHERE id = %s AND funcionario_id = %s",
-                        (request.form.get("prova_id", type=int), pessoa["id"]),
+                        (prova_id, pessoa["id"]),
                     )
-                    flash("Prova excluída.", "success")
+                    flash("Prova excluída e retirada do calendário.", "success")
                 conexao.commit()
                 return redirect(url_for("sala_professor"))
             cursor.execute(
