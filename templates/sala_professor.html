@@ -189,8 +189,12 @@
                 </div>
                 <div style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:10px;">
                     <strong style="font-size:.9rem;">Lançar nota do aluno</strong>
-                    <p style="color:#64748b;font-size:.82rem;margin:4px 0 10px;">Busque por matrícula ou CPF{% if prova.turma_id %} (só alunos da turma {{ prova.turma_nome }}){% endif %}. A nota vai também para o cadastro de provas do aluno.</p>
-                    <form method="POST" class="form-grid">
+                    <p style="color:#64748b;font-size:.82rem;margin:4px 0 10px;">
+                        Busque por matrícula ou CPF{% if prova.turma_id %} (só alunos da turma {{ prova.turma_nome }}){% endif %}.
+                        A nota e o PDF do aluno (prova escrita/escaneada) vão para o cadastro de provas dele.
+                        O botão PDF acima é o modelo em branco do sistema; o anexo abaixo é a prova deste aluno.
+                    </p>
+                    <form method="POST" enctype="multipart/form-data" class="form-grid">
                         <input type="hidden" name="acao" value="lancar_nota">
                         <input type="hidden" name="prova_id" value="{{ prova.id }}">
                         <div class="form-group">
@@ -201,13 +205,17 @@
                             <label>Nota</label>
                             <input type="text" name="nota" required placeholder="Ex.: 8,5">
                         </div>
+                        <div class="form-group">
+                            <label>PDF da prova do aluno</label>
+                            <input type="file" name="prova_aluno_pdf" accept="application/pdf">
+                        </div>
                         <div class="form-group" style="justify-content:end;">
                             <button class="btn btn-primary" type="submit">Salvar nota</button>
                         </div>
                     </form>
                     {% if prova.notas %}
                     <table style="margin-top:10px;">
-                        <thead><tr><th>Aluno</th><th>Matrícula</th><th>CPF</th><th>Nota</th><th></th></tr></thead>
+                        <thead><tr><th>Aluno</th><th>Matrícula</th><th>CPF</th><th>Nota</th><th>PDF do aluno</th><th></th></tr></thead>
                         <tbody>
                         {% for item in prova.notas %}
                         <tr>
@@ -215,6 +223,13 @@
                             <td>{{ item.matricula or '—' }}</td>
                             <td>{{ item.cpf or '—' }}</td>
                             <td><strong>{{ item.nota }}</strong></td>
+                            <td>
+                                {% if item.arquivo_midia_id %}
+                                <a class="btn btn-primary" href="{{ url_for('servir_midia', midia_id=item.arquivo_midia_id) }}" target="_blank" rel="noopener">Abrir PDF</a>
+                                {% else %}
+                                <span style="color:#94a3b8;">Sem anexo</span>
+                                {% endif %}
+                            </td>
                             <td>
                                 <form method="POST" style="display:inline;">
                                     <input type="hidden" name="acao" value="excluir_nota">

@@ -4616,6 +4616,12 @@ def sala_professor():
                         raise ValueError("Informe a nota.")
                     if len(nota) > 20:
                         raise ValueError("A nota pode ter no máximo 20 caracteres.")
+                    midia_aluno = None
+                    arquivo_pdf = request.files.get("prova_aluno_pdf")
+                    if arquivo_pdf and (arquivo_pdf.filename or "").strip():
+                        midia_aluno = _salvar_midia("prova_aluno_pdf", {"pdf"})
+                        if not midia_aluno:
+                            raise ValueError("Não foi possível guardar o PDF da prova do aluno.")
                     # Cadastro do aluno (tabela unica provas_notas) — fonte da verdade
                     _sincronizar_nota_aluno(
                         cursor,
@@ -4625,6 +4631,7 @@ def sala_professor():
                         titulo=prova.get("titulo"),
                         nota=nota,
                         prova_criada_id=prova_id,
+                        arquivo_midia_id=midia_aluno,
                         data_aplicacao=prova.get("data_aplicacao"),
                         origem="professor_sistema",
                     )
@@ -4638,11 +4645,13 @@ def sala_professor():
                         """,
                         (prova_id, aluno["id"], nota),
                     )
-                    flash(
+                    msg = (
                         f"Nota {nota} lançada para {aluno.get('nome_completo')} "
-                        f"(Mat. {aluno.get('matricula') or '—'}) e gravada no cadastro do aluno.",
-                        "success",
+                        f"(Mat. {aluno.get('matricula') or '—'}) e gravada no cadastro do aluno."
                     )
+                    if midia_aluno:
+                        msg += " PDF da prova do aluno anexado."
+                    flash(msg, "success")
                 elif acao == "excluir_nota":
                     nota_id = request.form.get("nota_id", type=int)
                     cursor.execute(
@@ -4760,6 +4769,7 @@ def sala_professor():
                     """
                     SELECT n.id, n.prova_criada_id AS prova_id,
                            TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM n.nota::text)) AS nota,
+                           n.arquivo_midia_id,
                            a.nome_completo, a.matricula, a.cpf
                     FROM provas_notas n
                     JOIN alunos a ON a.id = n.aluno_id
