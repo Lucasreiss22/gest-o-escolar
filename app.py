@@ -4527,6 +4527,8 @@ def sala_professor():
                         "O PDF já pode ser gerado.",
                         "success",
                     )
+                    conexao.commit()
+                    return redirect(url_for("sala_professor_detalhe", prova_id=prova_id))
                 elif acao == "excluir_prova":
                     prova_id = request.form.get("prova_id", type=int)
                     cursor.execute(
@@ -4734,6 +4736,16 @@ def sala_professor():
                     )
                     flash("Data da prova alterada no calendário do aluno.", "success")
                 conexao.commit()
+                acao_fim = request.form.get("acao")
+                prova_voltar = request.form.get("prova_id", type=int)
+                if acao_fim == "excluir_prova":
+                    return redirect(url_for("sala_professor"))
+                if acao_fim in {"lancar_nota", "excluir_nota", "ajustar_data_prova_aluno"} and prova_voltar:
+                    return redirect(url_for("sala_professor_detalhe", prova_id=prova_voltar))
+                if acao_fim == "enviar_arquivo":
+                    return redirect(url_for("sala_professor"))
+                if acao_fim == "excluir_arquivo":
+                    return redirect(url_for("sala_professor"))
                 return redirect(url_for("sala_professor"))
             cursor.execute(
                 """
@@ -4748,7 +4760,12 @@ def sala_professor():
             arquivos = cursor.fetchall() or []
             cursor.execute(
                 """
-                SELECT p.*, t.nome AS turma_nome
+                SELECT p.*, t.nome AS turma_nome,
+                       (SELECT COUNT(*) FROM provas_criadas_questoes q WHERE q.prova_id = p.id) AS qtd_questoes,
+                       (
+                           SELECT COUNT(*) FROM provas_notas n
+                           WHERE n.prova_criada_id = p.id AND n.nota IS NOT NULL
+                       ) AS qtd_notas
                 FROM provas_criadas p
                 LEFT JOIN turmas t ON t.id = p.turma_id
                 WHERE p.funcionario_id = %s
@@ -4757,62 +4774,6 @@ def sala_professor():
                 (pessoa["id"],),
             )
             provas = [dict(row) for row in (cursor.fetchall() or [])]
-            notas_por_prova = {}
-            if provas:
-                ids = [item["id"] for item in provas]
-                _backfill_notas_professor(cursor, prova_ids=ids)
-                try:
-                    conexao.commit()
-                except Exception:
-                    pass
-                cursor.execute(
-                    """
-                    SELECT n.id, n.prova_criada_id AS prova_id,
-                           TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM n.nota::text)) AS nota,
-                           n.arquivo_midia_id,
-                           a.nome_completo, a.matricula, a.cpf
-                    FROM provas_notas n
-                    JOIN alunos a ON a.id = n.aluno_id
-                    WHERE n.prova_criada_id = ANY(%s) AND n.nota IS NOT NULL
-                    ORDER BY a.nome_completo
-                    """,
-                    (ids,),
-                )
-                for row in cursor.fetchall() or []:
-                    notas_por_prova.setdefault(row["prova_id"], []).append(dict(row))
-                # Fallback se ainda houver só no espelho antigo
-                if not any(notas_por_prova.values()):
-                    cursor.execute(
-                        """
-                        SELECT n.id, n.prova_id, n.nota, a.nome_completo, a.matricula, a.cpf
-                        FROM provas_criadas_notas n
-                        JOIN alunos a ON a.id = n.aluno_id
-                        WHERE n.prova_id = ANY(%s)
-                        ORDER BY a.nome_completo
-                        """,
-                        (ids,),
-                    )
-                    for row in cursor.fetchall() or []:
-                        notas_por_prova.setdefault(row["prova_id"], []).append(dict(row))
-            for prova in provas:
-                prova["notas"] = notas_por_prova.get(prova["id"], [])
-            agendas_por_prova = {}
-            if provas:
-                cursor.execute(
-                    """
-                    SELECT ag.id, ag.prova_criada_id, ag.aluno_id, ag.data_aplicacao, ag.horario,
-                           ag.data_original, ag.justificativa, a.nome_completo, a.matricula
-                    FROM prova_aluno_agenda ag
-                    JOIN alunos a ON a.id = ag.aluno_id
-                    WHERE ag.prova_criada_id = ANY(%s)
-                    ORDER BY a.nome_completo
-                    """,
-                    (ids,),
-                )
-                for row in cursor.fetchall() or []:
-                    agendas_por_prova.setdefault(row["prova_criada_id"], []).append(dict(row))
-            for prova in provas:
-                prova["agendas"] = agendas_por_prova.get(prova["id"], [])
             cursor.execute(
                 "SELECT logo_escola, nome_escola, mensagem_prova FROM configuracoes WHERE id = 1"
             )
@@ -4821,6 +4782,14 @@ def sala_professor():
         conexao.rollback()
         flash(str(e), "danger")
         if request.method == "POST":
+            acao_erro = request.form.get("acao")
+            prova_erro = request.form.get("prova_id", type=int)
+            if acao_erro in {"lancar_nota", "excluir_nota", "ajustar_data_prova_aluno"} and prova_erro:
+                return redirect(url_for("sala_professor_detalhe", prova_id=prova_erro))
+            if acao_erro == "criar_prova":
+                return redirect(url_for("sala_professor_nova"))
+            if acao_erro == "enviar_arquivo":
+                return redirect(url_for("sala_professor_enviar_pdf"))
             return redirect(url_for("sala_professor"))
         return redirect(url_for("dashboard"))
     finally:
@@ -4832,6 +4801,153 @@ def sala_professor():
         arquivos=arquivos,
         provas=provas,
         escola=escola,
+    )
+
+
+@app.route("/minhas-provas/nova")
+def sala_professor_nova():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    try:
+        _garantir_sala_professor()
+    except Exception as e:
+        flash(f"Não foi possível preparar a sala do professor: {e}", "danger")
+        return redirect(url_for("dashboard"))
+    funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("dashboard"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            pessoa, turmas = _professor_da_sessao(cursor, funcionario_id)
+            if not pessoa:
+                flash("Seu usuário não está ligado a um professor da equipe.", "danger")
+                return redirect(url_for("dashboard"))
+    finally:
+        conexao.close()
+    return render_template("sala_professor_nova.html", pessoa=pessoa, turmas=turmas)
+
+
+@app.route("/minhas-provas/enviar-pdf")
+def sala_professor_enviar_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    try:
+        _garantir_sala_professor()
+    except Exception as e:
+        flash(f"Não foi possível preparar a sala do professor: {e}", "danger")
+        return redirect(url_for("dashboard"))
+    funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("dashboard"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            pessoa, turmas = _professor_da_sessao(cursor, funcionario_id)
+            if not pessoa:
+                flash("Seu usuário não está ligado a um professor da equipe.", "danger")
+                return redirect(url_for("dashboard"))
+    finally:
+        conexao.close()
+    return render_template("sala_professor_enviar.html", pessoa=pessoa, turmas=turmas)
+
+
+@app.route("/minhas-provas/<int:prova_id>", methods=["GET", "POST"])
+def sala_professor_detalhe(prova_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    # POST das ações da prova continua em /minhas-provas (mesmo formulário)
+    if request.method == "POST":
+        return sala_professor()
+    try:
+        _garantir_sala_professor()
+    except Exception as e:
+        flash(f"Não foi possível preparar a sala do professor: {e}", "danger")
+        return redirect(url_for("sala_professor"))
+    funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("sala_professor"))
+    prova = None
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            pessoa, turmas = _professor_da_sessao(cursor, funcionario_id)
+            if not pessoa:
+                flash("Seu usuário não está ligado a um professor da equipe.", "danger")
+                return redirect(url_for("dashboard"))
+            cursor.execute(
+                """
+                SELECT p.*, t.nome AS turma_nome,
+                       (SELECT COUNT(*) FROM provas_criadas_questoes q WHERE q.prova_id = p.id) AS qtd_questoes
+                FROM provas_criadas p
+                LEFT JOIN turmas t ON t.id = p.turma_id
+                WHERE p.id = %s AND p.funcionario_id = %s
+                """,
+                (prova_id, pessoa["id"]),
+            )
+            prova = cursor.fetchone()
+            if not prova:
+                flash("Prova não encontrada.", "danger")
+                return redirect(url_for("sala_professor"))
+            prova = dict(prova)
+            _backfill_notas_professor(cursor, prova_ids=[prova_id])
+            try:
+                conexao.commit()
+            except Exception:
+                pass
+            cursor.execute(
+                """
+                SELECT enunciado, tipo, ordem
+                FROM provas_criadas_questoes
+                WHERE prova_id = %s
+                ORDER BY ordem, id
+                """,
+                (prova_id,),
+            )
+            prova["questoes"] = [dict(row) for row in (cursor.fetchall() or [])]
+            cursor.execute(
+                """
+                SELECT n.id, n.prova_criada_id AS prova_id,
+                       TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM n.nota::text)) AS nota,
+                       n.arquivo_midia_id,
+                       a.nome_completo, a.matricula, a.cpf
+                FROM provas_notas n
+                JOIN alunos a ON a.id = n.aluno_id
+                WHERE n.prova_criada_id = %s AND n.nota IS NOT NULL
+                ORDER BY a.nome_completo
+                """,
+                (prova_id,),
+            )
+            prova["notas"] = [dict(row) for row in (cursor.fetchall() or [])]
+            cursor.execute(
+                """
+                SELECT ag.id, ag.prova_criada_id, ag.aluno_id, ag.data_aplicacao, ag.horario,
+                       ag.data_original, ag.justificativa, a.nome_completo, a.matricula
+                FROM prova_aluno_agenda ag
+                JOIN alunos a ON a.id = ag.aluno_id
+                WHERE ag.prova_criada_id = %s
+                ORDER BY a.nome_completo
+                """,
+                (prova_id,),
+            )
+            prova["agendas"] = [dict(row) for row in (cursor.fetchall() or [])]
+    except Exception as e:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        flash(str(e), "danger")
+        return redirect(url_for("sala_professor"))
+    finally:
+        conexao.close()
+    return render_template(
+        "sala_professor_prova.html",
+        pessoa=pessoa,
+        turmas=turmas,
+        prova=prova,
     )
 
 

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Criar prova — Minhas provas</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        h2 { font-weight: 600; color: #1e293b; }
+        .card-box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,.05); margin-bottom: 16px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: .82rem; font-weight: 700; color: #334155; }
+        input, select, textarea { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: .9rem; }
+        .btn { padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; text-decoration: none; display: inline-block; font-size: .85rem; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-secondary { background: #e2e8f0; color: #1e293b; }
+        .questao { border-top: 1px solid #e2e8f0; margin-top: 12px; padding-top: 12px; }
+        .alert { padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+        .alert-success { background: #dcfce7; color: #166534; }
+        .alert-danger { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body>
+    {% set nav_active = 'sala_professor' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        <p style="margin:0 0 8px;"><a class="btn btn-secondary" href="{{ url_for('sala_professor') }}">← Voltar</a></p>
+        <h2>Criar prova no sistema</h2>
+        <p style="color:#64748b;">Defina quantas questões a prova terá, preencha os enunciados e salve. Ela entra no calendário e no cadastro dos alunos da turma.</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+
+        <div class="card-box">
+            <form method="POST" action="{{ url_for('sala_professor') }}" id="formCriarProva">
+                <input type="hidden" name="acao" value="criar_prova">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Nome da prova</label>
+                        <input type="text" name="titulo" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Disciplina</label>
+                        <input type="text" name="materia">
+                    </div>
+                    <div class="form-group">
+                        <label>Turma</label>
+                        <select name="turma_id" required>
+                            <option value="">Selecione a turma</option>
+                            {% for turma in turmas %}
+                            <option value="{{ turma.id }}">{{ turma.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Data de aplicação</label>
+                        <input type="date" name="data_aplicacao" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Horário (opcional)</label>
+                        <input type="time" name="horario">
+                    </div>
+                    <div class="form-group">
+                        <label>Número de questões</label>
+                        <input type="number" id="qtdQuestoes" min="1" max="150" value="10" inputmode="numeric">
+                    </div>
+                    <div class="form-group" style="justify-content:end;">
+                        <button class="btn btn-primary" type="button" id="btnMontarQuestoes">Montar questões</button>
+                    </div>
+                </div>
+                <p style="color:#64748b;font-size:.88rem;margin:8px 0 0;">Digite quantas perguntas (até 150) e clique em Montar questões. Só as que tiverem enunciado entram na prova.</p>
+                <div id="listaQuestoes"></div>
+                <button class="btn btn-primary" type="submit" style="margin-top:12px;">Criar prova</button>
+            </form>
+            {% if not turmas %}<p style="color:#92400e;">Nenhuma turma vinculada a você.</p>{% endif %}
+        </div>
+    </div>
+    <script>
+    (function () {
+        function ligarTipo(bloco) {
+            var escolha = bloco.querySelector("select[name='tipo_questao']");
+            if (!escolha) return;
+            function mostrar() {
+                var descritiva = escolha.value === "descritiva";
+                bloco.querySelectorAll("input[name^='alt_']").forEach(function (campo) {
+                    campo.parentElement.style.display = descritiva ? "none" : "";
+                });
+            }
+            escolha.addEventListener("change", mostrar);
+            mostrar();
+        }
+        function blocoQuestao(n) {
+            var div = document.createElement("div");
+            div.className = "questao";
+            div.innerHTML =
+                "<strong>Pergunta " + n + "</strong>" +
+                "<div class=\"form-group\" style=\"margin-top:8px;\">" +
+                "<label>Enunciado</label>" +
+                "<textarea name=\"enunciado\" rows=\"2\"></textarea>" +
+                "</div>" +
+                "<div class=\"form-grid\">" +
+                "<div class=\"form-group\"><label>Tipo</label>" +
+                "<select name=\"tipo_questao\">" +
+                "<option value=\"multipla\">Múltipla escolha</option>" +
+                "<option value=\"descritiva\">Descritiva</option>" +
+                "</select></div>" +
+                "<div class=\"form-group\"><label>A</label><input type=\"text\" name=\"alt_a\"></div>" +
+                "<div class=\"form-group\"><label>B</label><input type=\"text\" name=\"alt_b\"></div>" +
+                "<div class=\"form-group\"><label>C</label><input type=\"text\" name=\"alt_c\"></div>" +
+                "<div class=\"form-group\"><label>D</label><input type=\"text\" name=\"alt_d\"></div>" +
+                "<div class=\"form-group\"><label>Resposta (só no gabarito)</label><input type=\"text\" name=\"resposta\"></div>" +
+                "</div>";
+            ligarTipo(div);
+            return div;
+        }
+        function montarQuestoes() {
+            var campo = document.getElementById("qtdQuestoes");
+            var lista = document.getElementById("listaQuestoes");
+            if (!campo || !lista) return;
+            var qtd = parseInt(campo.value, 10);
+            if (!qtd || qtd < 1) qtd = 1;
+            if (qtd > 150) qtd = 150;
+            campo.value = qtd;
+            var atuais = Array.prototype.map.call(lista.querySelectorAll(".questao"), function (bloco) {
+                return {
+                    enunciado: (bloco.querySelector("textarea[name='enunciado']") || {}).value || "",
+                    tipo: (bloco.querySelector("select[name='tipo_questao']") || {}).value || "multipla",
+                    a: (bloco.querySelector("input[name='alt_a']") || {}).value || "",
+                    b: (bloco.querySelector("input[name='alt_b']") || {}).value || "",
+                    c: (bloco.querySelector("input[name='alt_c']") || {}).value || "",
+                    d: (bloco.querySelector("input[name='alt_d']") || {}).value || "",
+                    resposta: (bloco.querySelector("input[name='resposta']") || {}).value || ""
+                };
+            });
+            lista.innerHTML = "";
+            for (var i = 1; i <= qtd; i++) {
+                var bloco = blocoQuestao(i);
+                var antigo = atuais[i - 1];
+                if (antigo) {
+                    bloco.querySelector("textarea[name='enunciado']").value = antigo.enunciado;
+                    bloco.querySelector("select[name='tipo_questao']").value = antigo.tipo;
+                    bloco.querySelector("input[name='alt_a']").value = antigo.a;
+                    bloco.querySelector("input[name='alt_b']").value = antigo.b;
+                    bloco.querySelector("input[name='alt_c']").value = antigo.c;
+                    bloco.querySelector("input[name='alt_d']").value = antigo.d;
+                    bloco.querySelector("input[name='resposta']").value = antigo.resposta;
+                    bloco.querySelector("select[name='tipo_questao']").dispatchEvent(new Event("change"));
+                }
+                lista.appendChild(bloco);
+            }
+        }
+        var botao = document.getElementById("btnMontarQuestoes");
+        var campoQtd = document.getElementById("qtdQuestoes");
+        if (botao) botao.addEventListener("click", montarQuestoes);
+        if (campoQtd) {
+            campoQtd.addEventListener("keydown", function (ev) {
+                if (ev.key === "Enter") { ev.preventDefault(); montarQuestoes(); }
+            });
+        }
+        montarQuestoes();
+    })();
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

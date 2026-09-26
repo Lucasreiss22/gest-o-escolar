@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ prova.titulo }} — Minhas provas</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        h2 { font-weight: 600; color: #1e293b; }
+        .card-box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,.05); margin-bottom: 16px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: .82rem; font-weight: 700; color: #334155; }
+        input, select, textarea { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: .9rem; }
+        .btn { padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; text-decoration: none; display: inline-block; font-size: .85rem; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-secondary { background: #e2e8f0; color: #1e293b; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .alert { padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+        .alert-success { background: #dcfce7; color: #166534; }
+        .alert-danger { background: #fee2e2; color: #991b1b; }
+        table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+        th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+        .meta { color: #64748b; margin: 0 0 16px; }
+        .topo-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .chip { display: inline-block; background: #f1f5f9; border-radius: 999px; padding: 4px 10px; font-size: .8rem; font-weight: 700; color: #334155; margin-right: 6px; }
+    </style>
+</head>
+<body>
+    {% set nav_active = 'sala_professor' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        <p style="margin:0 0 8px;"><a class="btn btn-secondary" href="{{ url_for('sala_professor') }}">← Voltar às provas</a></p>
+        <h2>{{ prova.titulo }}</h2>
+        <p class="meta">
+            {% if prova.materia %}{{ prova.materia }} · {% endif %}
+            Turma: {{ prova.turma_nome or '—' }}
+            · Aplicação:
+            {% if prova.data_aplicacao %}
+                {{ prova.data_aplicacao.strftime('%d/%m/%Y') if prova.data_aplicacao.strftime is defined else prova.data_aplicacao }}
+                {% if prova.horario %} · {{ prova.horario.strftime('%H:%M') if prova.horario.strftime is defined else prova.horario }}{% endif %}
+            {% else %}—{% endif %}
+        </p>
+        <p style="margin:0 0 16px;">
+            <span class="chip">{{ prova.qtd_questoes or 0 }} questão(ões)</span>
+            <span class="chip">{{ (prova.notas or [])|length }} nota(s)</span>
+        </p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+
+        <div class="topo-acoes">
+            <a class="btn btn-primary" href="{{ url_for('prova_pdf', prova_id=prova.id) }}" target="_blank" rel="noopener">PDF do sistema</a>
+            <a class="btn btn-primary" href="{{ url_for('prova_pdf', prova_id=prova.id, gabarito=1) }}" target="_blank" rel="noopener">Gabarito</a>
+            <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir esta prova?');">
+                <input type="hidden" name="acao" value="excluir_prova">
+                <input type="hidden" name="prova_id" value="{{ prova.id }}">
+                <button class="btn btn-danger" type="submit">Excluir prova</button>
+            </form>
+        </div>
+
+        {% if prova.questoes %}
+        <div class="card-box">
+            <h3 style="margin-top:0;">Questões ({{ prova.questoes|length }})</h3>
+            <ol style="margin:0;padding-left:18px;">
+                {% for q in prova.questoes %}
+                <li style="margin-bottom:10px;">
+                    <strong>{{ q.enunciado }}</strong>
+                    <div style="color:#64748b;font-size:.85rem;">
+                        {% if q.tipo == 'multipla' %}Múltipla escolha{% else %}Descritiva{% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ol>
+        </div>
+        {% endif %}
+
+        <div class="card-box">
+            <h3 style="margin-top:0;">Lançar nota do aluno</h3>
+            <p style="color:#64748b;font-size:.88rem;margin:0 0 12px;">
+                A nota e o PDF deste aluno (prova escrita/escaneada) vão para o cadastro dele.
+                O “PDF do sistema” acima é o modelo em branco; o anexo abaixo é a prova feita pelo aluno.
+            </p>
+            <form method="POST" enctype="multipart/form-data" class="form-grid">
+                <input type="hidden" name="acao" value="lancar_nota">
+                <input type="hidden" name="prova_id" value="{{ prova.id }}">
+                <div class="form-group">
+                    <label>Matrícula ou CPF</label>
+                    <input type="text" name="busca_aluno" required placeholder="Ex.: 2026001 ou CPF">
+                </div>
+                <div class="form-group">
+                    <label>Nota</label>
+                    <input type="text" name="nota" required placeholder="Ex.: 8,5">
+                </div>
+                <div class="form-group">
+                    <label>PDF da prova do aluno</label>
+                    <input type="file" name="prova_aluno_pdf" accept="application/pdf">
+                </div>
+                <div class="form-group" style="justify-content:end;">
+                    <button class="btn btn-primary" type="submit">Salvar nota</button>
+                </div>
+            </form>
+
+            {% if prova.notas %}
+            <table style="margin-top:16px;">
+                <thead><tr><th>Aluno</th><th>Matrícula</th><th>CPF</th><th>Nota</th><th>PDF</th><th></th></tr></thead>
+                <tbody>
+                {% for item in prova.notas %}
+                <tr>
+                    <td>{{ item.nome_completo }}</td>
+                    <td>{{ item.matricula or '—' }}</td>
+                    <td>{{ item.cpf or '—' }}</td>
+                    <td><strong>{{ item.nota }}</strong></td>
+                    <td>
+                        {% if item.arquivo_midia_id %}
+                        <a class="btn btn-primary" href="{{ url_for('servir_midia', midia_id=item.arquivo_midia_id) }}" target="_blank" rel="noopener">Abrir</a>
+                        {% else %}
+                        <span style="color:#94a3b8;">Sem anexo</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="acao" value="excluir_nota">
+                            <input type="hidden" name="prova_id" value="{{ prova.id }}">
+                            <input type="hidden" name="nota_id" value="{{ item.id }}">
+                            <button class="btn btn-danger" type="submit">Remover</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+
+        {% if prova.agendas %}
+        <div class="card-box">
+            <h3 style="margin-top:0;">Datas por aluno</h3>
+            <p style="color:#64748b;font-size:.88rem;">Altere a data só deste aluno com justificativa (atestado etc.).</p>
+            <table>
+                <thead><tr><th>Aluno</th><th>Data</th><th>Original</th><th>Justificativa</th><th></th></tr></thead>
+                <tbody>
+                {% for ag in prova.agendas %}
+                <tr>
+                    <td>{{ ag.nome_completo }}{% if ag.matricula %}<div style="color:#64748b;font-size:.8rem;">Mat. {{ ag.matricula }}</div>{% endif %}</td>
+                    <td>{{ ag.data_aplicacao.strftime('%d/%m/%Y') if ag.data_aplicacao and ag.data_aplicacao.strftime is defined else ag.data_aplicacao }}</td>
+                    <td>{{ ag.data_original.strftime('%d/%m/%Y') if ag.data_original and ag.data_original.strftime is defined else (ag.data_original or '—') }}</td>
+                    <td>{{ ag.justificativa or '—' }}</td>
+                    <td>
+                        <details>
+                            <summary style="cursor:pointer;color:#2563eb;font-weight:700;">Alterar data</summary>
+                            <form method="POST" enctype="multipart/form-data" class="form-grid" style="margin-top:8px;min-width:260px;">
+                                <input type="hidden" name="acao" value="ajustar_data_prova_aluno">
+                                <input type="hidden" name="prova_id" value="{{ prova.id }}">
+                                <input type="hidden" name="agenda_id" value="{{ ag.id }}">
+                                <div class="form-group">
+                                    <label>Nova data</label>
+                                    <input type="date" name="nova_data" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Horário</label>
+                                    <input type="time" name="horario" value="{{ ag.horario.strftime('%H:%M') if ag.horario and ag.horario.strftime is defined else (ag.horario or '') }}">
+                                </div>
+                                <div class="form-group" style="grid-column:1/-1;">
+                                    <label>Justificativa (obrigatória)</label>
+                                    <input type="text" name="justificativa" required placeholder="Ex.: Atestado médico">
+                                </div>
+                                <div class="form-group">
+                                    <label>Atestado PDF (opcional)</label>
+                                    <input type="file" name="atestado_pdf" accept="application/pdf">
+                                </div>
+                                <div class="form-group" style="justify-content:end;">
+                                    <button class="btn btn-primary" type="submit">Salvar</button>
+                                </div>
+                            </form>
+                        </details>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
