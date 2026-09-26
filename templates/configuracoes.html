@@ -32,6 +32,24 @@
     <div class="content">
         <h2>⚙️ Configurações da instituição</h2>
 
+        <div class="card-box">
+            <h3 class="card-title">Logo da escola</h3>
+            <p style="color:#64748b;font-size:0.9rem;line-height:1.45;">
+                A logo entra no topo da prova, junto com o nome e a data para o aluno preencher e a turma já preenchida. Esse bloco não tem borda.
+            </p>
+            {% if config.logo_escola %}
+            <p><img src="{{ url_for('servir_midia', midia_id=config.logo_escola.split('/')[-1]|int) }}" alt="Logo da escola" style="max-height:72px;"></p>
+            {% endif %}
+            <form action="{{ url_for('pagina_configuracoes') }}" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="acao" value="salvar_logo">
+                <div class="form-group" style="max-width:360px;">
+                    <label>Imagem da logo (PNG ou JPG)</label>
+                    <input type="file" name="logo_escola" accept="image/png,image/jpeg,image/webp" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Salvar logo</button>
+            </form>
+        </div>
+
         <!-- Mensagens Flash do Flask -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}

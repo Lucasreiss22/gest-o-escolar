@@ -21,6 +21,9 @@
     {% if pode('pedagogico') %}
     <a href="{{ url_for('pagina_pedagogico') }}" class="{% if nav_active == 'pedagogico' %}active{% endif %}">Pedagógico</a>
     {% endif %}
+    {% if papel_atual == 'professor' %}
+    <a href="{{ url_for('sala_professor') }}" class="{% if nav_active == 'sala_professor' %}active{% endif %}">Minhas provas</a>
+    {% endif %}
     {% if pode('financeiro') %}
     <a href="{{ url_for('pagina_financeiro') }}" class="{% if nav_active == 'financeiro' %}active{% endif %}">Financeiro</a>
     {% endif %}

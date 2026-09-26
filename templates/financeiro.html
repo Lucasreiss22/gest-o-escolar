@@ -355,8 +355,8 @@
                 No regime de caixa, a RBT12 soma o que foi <strong>recebido</strong> nos 12 meses anteriores a {{ mes_label }}.
                 Mensalidade emitida e não paga não entra. O mês vigente é a base do DAS, só com as baixas dele.
                 {% else %}
-                A RBT12 soma a receita bruta dos <strong>12 meses anteriores</strong> ao mês de apuração ({{ mes_label }}), pelo vencimento.
-                O mês vigente não entra nessa soma — ele é a base do DAS.
+                A RBT12 soma o <strong>faturamento</strong> dos 12 meses anteriores a {{ mes_label }}, pelo vencimento: pago, pendente e atrasado.
+                O DAS deste mês usa o faturamento de {{ mes_label }}{% if apuracao_simples %} (R$ {{ (apuracao_simples.receita_mes)|moeda }}){% endif %}, não só o que entrou no caixa.
                 {% endif %}
                 Quando o primeiro mês de apuração do sistema sai da janela da PGDAS, ele deixa de contar sozinho.
                 {% if quadro_simples and quadro_simples.primeira %}Primeiro mês lançado no sistema: <strong>{{ quadro_simples.primeira }}</strong>.{% endif %}
@@ -383,7 +383,7 @@
                 <button type="button" class="card-resumo tributos" data-abre="dlg-das">
                     <h4>DAS do mês</h4>
                     <div class="valor">R$ {{ (ap.das)|moeda }}</div>
-                    <span class="calc-link">{{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% · ver o cálculo</span>
+                    <span class="calc-link">{% if regime_apuracao == 'caixa' %}sobre o recebido{% else %}sobre o faturamento do mês{% endif %} · {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</span>
                 </button>
             </div>
 
@@ -449,7 +449,7 @@
             <dialog id="dlg-das" class="calc-painel">
                 <div class="calc-head"><h3>Cálculo do DAS</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
                 <div class="calc-body">
-                    <div class="calc-passo"><strong>Receita do mês de apuração</strong>R$ {{ (ap.receita_mes)|moeda }}. Este valor não entra na RBT12.</div>
+                    <div class="calc-passo"><strong>{% if regime_apuracao == 'caixa' %}Recebido no mês{% else %}Faturamento do mês{% endif %}</strong>R$ {{ (ap.receita_mes)|moeda }}. {% if regime_apuracao == 'caixa' %}Só entra o que teve baixa.{% else %}Pago, pendente e atrasado, pelo vencimento. Não é o regime de caixa.{% endif %} Este valor não entra na RBT12.</div>
                     <div class="calc-passo"><strong>Faixa do anexo {{ ap.anexo }}</strong>Faixa {{ ap.faixa }}, alíquota nominal {{ "%.2f"|format(aliq_nom) }}%, parcela a deduzir R$ {{ (ap.parcela_deduzir)|moeda }}.</div>
                     <div class="calc-passo"><strong>Alíquota efetiva</strong>((R$ {{ (ap.rbt12)|moeda }} × {{ "%.2f"|format(aliq_nom) }}%) − R$ {{ (ap.parcela_deduzir)|moeda }}) ÷ R$ {{ (ap.rbt12)|moeda }} = {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</div>
                     <div class="calc-passo"><strong>DAS</strong>R$ {{ (ap.receita_mes)|moeda }} × {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% = R$ {{ (ap.das)|moeda }}</div>

@@ -52,8 +52,10 @@ class RegimeCaixaTeste(unittest.TestCase):
         gravado = {"origem": "pgdas", "receita_bruta": 35750}
         base = receita_para_apuracao(gravado, "competencia", 58700, "2026-09", "2026-09")
         self.assertEqual(base, 58700)
-        anterior = receita_para_apuracao(gravado, "competencia", 58700, "2026-08", "2026-09")
-        self.assertEqual(anterior, 35750)
+        anterior = receita_para_apuracao(gravado, "competencia", 40000, "2026-08", "2026-09")
+        self.assertEqual(anterior, 40000)
+        sem_titulo = receita_para_apuracao(gravado, "competencia", 0, "2025-01", "2026-09")
+        self.assertEqual(sem_titulo, 35750)
         apuracao = apurar_simples(337_500, 43_925.08, 12, base)
         self.assertEqual(apuracao["anexo"], "V")
         self.assertEqual(apuracao["faixa"], 2)

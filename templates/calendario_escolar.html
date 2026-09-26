@@ -8,12 +8,16 @@
     <style>
         h2 { font-weight: 600; color: #2c3e50; }
         .card-box { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 16px; }
-        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-        .cal-head { text-align: center; font-size: 0.75rem; font-weight: 700; color: #64748b; padding: 6px 0; }
+        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+        .cal-head { text-align: center; font-size: 0.75rem; font-weight: 700; color: #64748b; padding: 4px 0 8px; letter-spacing: .04em; text-transform: uppercase; }
         .cal-dia {
-            min-height: 96px; background: #f8fafc; border-radius: 10px; padding: 6px;
-            text-decoration: none; color: inherit; display: block; border: 1px solid #e2e8f0;
+            min-height: 108px; background: #fff; border-radius: 12px; padding: 8px;
+            text-decoration: none; color: inherit; display: flex; flex-direction: column; gap: 3px;
+            border: 1px solid #e2e8f0;
         }
+        .cal-dia:hover { border-color: #93c5fd; background: #f8fafc; }
+        .cal-faixa { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+        .cal-faixa span { background: #dbeafe; color: #1e3a5f; border-radius: 999px; padding: 6px 10px; font-size: .8rem; font-weight: 700; }
         .cal-dia.fora { opacity: 0.45; }
         .cal-dia.hoje { border-color: #3b82f6; background: #eff6ff; }
         .cal-dia.sel { border-color: #1e3a5f; box-shadow: 0 0 0 2px #93c5fd; }
@@ -25,6 +29,10 @@
         }
         .dot-feriado { color: #991b1b; background: #fee2e2; }
         .dot-prova { color: #5b21b6; background: #ede9fe; }
+        .dot-rotina { color: #1e3a5f; background: #dbeafe; }
+        .cal-mais { display: block; font-size: 0.62rem; color: #64748b; margin-top: 2px; }
+        .cal-legenda { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+        .cal-legenda span { font-size: 0.75rem; font-weight: 700; border-radius: 999px; padding: 3px 8px; }
         .dot-geral { color: #075985; background: #e0f2fe; }
         .dot-turma { color: #9a3412; background: #ffedd5; }
         .dot-presente { color: #166534; background: #dcfce7; }
@@ -33,6 +41,7 @@
         .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; font-size: 0.85rem; }
         .btn-primary { background-color: #3498db; color: white; }
         .btn-success { background-color: #2ecc71; color: white; }
+        .btn-danger { background: #e74c3c; color: #fff; }
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
         .form-group { display: flex; flex-direction: column; }
         .form-group label { font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; }
@@ -94,9 +103,13 @@
             <a href="{{ url_for('calendario_escolar') }}">Voltar ao calendário geral</a>
         </p>
         {% else %}
-        <p style="font-size: 0.9rem; color: #475569; margin-bottom: 12px;">
-            Eventos gerais (azul) e de turma (laranja) aparecem nos dias. Clique no dia para ver detalhes, prova e chamada.
-        </p>
+        <div class="cal-legenda">
+            <span class="dot-geral">Evento</span>
+            <span class="dot-turma">Turma</span>
+            <span class="dot-prova">Prova</span>
+            <span class="dot-feriado">Feriado</span>
+            <span class="dot-rotina">Minha rotina</span>
+        </div>
         {% endif %}
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -131,6 +144,17 @@
                 <label>Aluno (matrícula ou CPF)</label>
                 <input type="text" name="busca_aluno" value="{{ busca_aluno }}" placeholder="Ex: 2026001 ou CPF">
             </div>
+            {% if gestor_calendario %}
+            <div class="form-group">
+                <label>Rotina do professor</label>
+                <select name="professor_id">
+                    <option value="">Não mostrar rotinas</option>
+                    {% for p in professores %}
+                    <option value="{{ p.id }}" {% if filtro_professor == p.id %}selected{% endif %}>{{ p.nome_completo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
             <div class="form-group">
                 <button class="btn btn-primary" type="submit">Filtrar</button>
             </div>
@@ -147,6 +171,13 @@
         </form>
 
         <div class="card-box">
+            {% if rotinas_do_mes %}
+            <div class="cal-faixa">
+                {% for ev in rotinas_do_mes %}
+                <span>Mês inteiro: {{ ev.titulo }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
             <div class="cal-grid">
                 {% for d in ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'] %}
                 <div class="cal-head">{{ d }}</div>
@@ -163,9 +194,11 @@
                             {% if modo_presenca and st %}
                                 <span class="cal-dot {% if st == 'presente' %}dot-presente{% else %}dot-falta{% endif %}">{{ st }}</span>
                             {% endif %}
-                            {% for ev in evs[:4] %}
-                                <span class="cal-dot {% if ev.tipo == 'feriado' %}dot-feriado{% elif ev.tipo in ['prova', 'semana_prova'] %}dot-prova{% elif ev.turma_id %}dot-turma{% else %}dot-geral{% endif %}">{{ ev.titulo }}</span>
+                            {% set chips = evs | rejectattr('periodo', 'equalto', 'mes') | list %}
+                            {% for ev in chips[:2] %}
+                                <span class="cal-dot {% if ev.tipo == 'feriado' %}dot-feriado{% elif ev.tipo in ['prova', 'semana_prova'] %}dot-prova{% elif (ev.tipo or '').startswith('rotina') %}dot-rotina{% elif ev.turma_id %}dot-turma{% else %}dot-geral{% endif %}">{% if ev.periodo == 'semana' %}Semana · {% endif %}{{ ev.titulo }}</span>
                             {% endfor %}
+                            {% if chips|length > 2 %}<span class="cal-mais">+{{ chips|length - 2 }}</span>{% endif %}
                             {% for pv in pvs[:2] %}
                                 <span class="cal-dot dot-prova">{{ pv.titulo }}{% if pv.horario %} {{ pv.horario.strftime('%H:%M') if pv.horario.strftime is defined else pv.horario }}{% endif %}</span>
                             {% endfor %}
@@ -193,8 +226,15 @@
                         {% for ev in evs_info %}
                         <p style="margin: 0 0 10px;">
                             <strong>{{ ev.titulo }}</strong>
-                            <span style="color:#64748b;">({{ ev.tipo }}{% if ev.turma_nome %} · {{ ev.turma_nome }}{% endif %}{% if ev.horario %} · {{ ev.horario.strftime('%H:%M') if ev.horario.strftime is defined else ev.horario }}{% endif %})</span>
+                            <span style="color:#64748b;">({% if (ev.tipo or '').startswith('rotina') %}rotina{% if ev.periodo == 'semana' %} da semana{% elif ev.periodo == 'mes' %} do mês{% else %} do dia{% endif %}{% else %}{{ ev.tipo }}{% endif %}{% if ev.turma_nome %} · {{ ev.turma_nome }}{% endif %}{% if ev.horario %} · {{ ev.horario.strftime('%H:%M') if ev.horario.strftime is defined else ev.horario }}{% endif %})</span>
                             {% if ev.descricao %}<br>{{ ev.descricao }}{% else %}<br><span style="color:#94a3b8;">Sem descrição.</span>{% endif %}
+                            {% if (ev.tipo or '').startswith('rotina') and (papel_atual == 'professor' or gestor_calendario) %}
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="acao" value="excluir_rotina">
+                                <input type="hidden" name="evento_id" value="{{ ev.id }}">
+                                <button class="btn btn-danger" type="submit">Apagar rotina</button>
+                            </form>
+                            {% endif %}
                         </p>
                         {% endfor %}
                     {% else %}
@@ -293,9 +333,46 @@
         </div>
         {% endif %}
 
-        {% if not modo_presenca and pode_alterar('calendario') %}
-        <div class="card-box">
-            <h3 style="margin-bottom: 12px;">Novo evento da escola</h3>
+        {% if papel_atual == 'professor' or (gestor_calendario and filtro_professor) %}
+        <details class="card-box" open>
+            <summary style="cursor:pointer;font-weight:700;color:#1e3a5f;">Rotina do professor</summary>
+            <p style="color:#64748b;font-size:0.9rem;">Dia, semana ou mês. Outro professor não vê esta rotina. A semana aparece em todos os dias dela; o mês fica na faixa acima do calendário.</p>
+            <form method="POST">
+                <input type="hidden" name="acao" value="criar_evento">
+                <input type="hidden" name="tipo" value="rotina">
+                {% if gestor_calendario and filtro_professor %}
+                <input type="hidden" name="professor_id" value="{{ filtro_professor }}">
+                {% endif %}
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Quando</label>
+                        <select name="periodo">
+                            <option value="dia">Dia</option>
+                            <option value="semana">Semana</option>
+                            <option value="mes">Mês</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Data</label>
+                        <input type="date" name="data_evento" required value="{{ dia_selecionado or '' }}">
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Rotina</label>
+                        <input type="text" name="titulo" required placeholder="Ex.: Planejamento, reunião de pais, correção">
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label>Detalhe</label>
+                        <textarea name="descricao" rows="2"></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">Salvar rotina</button>
+            </form>
+        </details>
+        {% endif %}
+
+        {% if not modo_presenca and pode_alterar('calendario') and papel_atual != 'professor' %}
+        <details class="card-box">
+            <summary style="cursor:pointer;font-weight:700;color:#1e3a5f;">Novo evento da escola</summary>
             <form method="POST">
                 <input type="hidden" name="acao" value="criar_evento">
                 <div class="form-grid">
@@ -340,17 +417,17 @@
                 </div>
                 <button class="btn btn-primary" type="submit" style="margin-top: 10px;">Salvar evento</button>
             </form>
-        </div>
+        </details>
         {% endif %}
 
-        <div class="card-box">
-            <h3 style="margin-bottom: 12px;">Agenda do mês</h3>
+        <details class="card-box">
+            <summary style="cursor:pointer;font-weight:700;color:#1e3a5f;">Agenda do mês</summary>
             <table>
                 <thead><tr><th>Data</th><th>Horário</th><th>Tipo</th><th>Título</th><th>Turma</th></tr></thead>
                 <tbody>
                 {% set ns = namespace(tem=false) %}
                 {% for ev in eventos %}
-                    {% if ev.data_evento and ev.data_evento.month == mes_atual and ev.data_evento.year == ano_atual %}
+                    {% if ev.aparece_mes %}
                     {% set ns.tem = true %}
                     <tr>
                         <td>{{ ev.data_evento.strftime('%d/%m/%Y') }}</td>
@@ -366,7 +443,7 @@
                 {% endif %}
                 </tbody>
             </table>
-        </div>
+        </details>
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

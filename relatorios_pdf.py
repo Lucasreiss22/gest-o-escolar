@@ -18,6 +18,89 @@ FONTES = {
 }
 
 
+class _ProvaPDF(FPDF):
+    def __init__(self):
+        super().__init__(format="A4")
+        self.set_auto_page_break(auto=True, margin=12)
+        self.set_margins(12, 10, 12)
+        fonte_ok = False
+        for estilo, caminhos in FONTES.items():
+            for caminho in caminhos:
+                if caminho.exists():
+                    self.add_font("Relatorio", estilo, str(caminho))
+                    fonte_ok = True
+                    break
+        self.fonte = "Relatorio" if fonte_ok else "Helvetica"
+
+    def header(self):
+        return
+
+    def footer(self):
+        return
+
+
+def pdf_prova(escola, turma, titulo, materia, questoes, logo=None, com_gabarito=False):
+    """Prova para o aluno preencher. O cabeçalho não tem borda."""
+    pdf = _ProvaPDF()
+    pdf.add_page()
+    try:
+        pdf.set_font(pdf.fonte, "", 12)
+    except Exception:
+        pdf.fonte = "Helvetica"
+        pdf.set_font("Helvetica", "", 12)
+    pdf.set_text_color(20, 20, 20)
+    topo = pdf.get_y()
+    texto_x = 12
+    if logo and logo[0]:
+        arquivo = BytesIO(logo[0])
+        mime = (logo[1] or "").lower()
+        arquivo.name = "logo.png" if "png" in mime else "logo.jpg"
+        try:
+            pdf.image(arquivo, x=12, y=topo, w=16)
+            texto_x = 32
+        except Exception:
+            texto_x = 12
+    pdf.set_xy(texto_x, topo)
+    pdf.cell(0, 6, "Nome: ________________________________", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(texto_x)
+    pdf.cell(0, 6, "Data: ________________________________", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(texto_x)
+    pdf.cell(0, 6, f"Turma: {turma or '—'}", new_x="LMARGIN", new_y="NEXT")
+    if pdf.get_y() < topo + 18:
+        pdf.set_y(topo + 18)
+    pdf.ln(3)
+    pdf.set_x(12)
+    pdf.set_font(pdf.fonte, "B", 14)
+    pdf.multi_cell(0, 7, titulo or "Prova", new_x="LMARGIN", new_y="NEXT")
+    if materia or escola:
+        pdf.set_font(pdf.fonte, "", 11)
+        pdf.set_x(12)
+        pdf.multi_cell(0, 6, " · ".join(parte for parte in [escola, materia] if parte), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    for indice, questao in enumerate(questoes or [], start=1):
+        pdf.set_x(12)
+        pdf.set_font(pdf.fonte, "B", 11)
+        pdf.multi_cell(0, 6, f"{indice}. {questao.get('enunciado') or ''}", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(pdf.fonte, "", 11)
+        if (questao.get("tipo") or "") == "multipla":
+            for letra, texto in zip("ABCD", questao.get("alternativas") or []):
+                if not str(texto or "").strip():
+                    continue
+                pdf.set_x(16)
+                pdf.multi_cell(0, 6, f"{letra}) {texto}", new_x="LMARGIN", new_y="NEXT")
+        else:
+            for _ in range(4):
+                pdf.set_x(16)
+                pdf.cell(0, 7, "______________________________________________", new_x="LMARGIN", new_y="NEXT")
+        if com_gabarito and (questao.get("resposta") or "").strip():
+            pdf.set_x(16)
+            pdf.set_font(pdf.fonte, "B", 10)
+            pdf.multi_cell(0, 6, f"Resposta: {questao.get('resposta')}", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(pdf.fonte, "", 11)
+        pdf.ln(2)
+    return _saida(pdf)
+
+
 class RelatorioPDF(FPDF):
     def __init__(self, titulo):
         super().__init__(format="A4")

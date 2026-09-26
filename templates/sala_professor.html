@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minhas provas</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        h2 { font-weight: 600; color: #1e293b; }
+        .card-box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,.05); margin-bottom: 16px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: .82rem; font-weight: 700; color: #334155; }
+        input, select, textarea { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: .9rem; }
+        .btn { padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; text-decoration: none; display: inline-block; font-size: .85rem; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .questao { border-top: 1px solid #e2e8f0; margin-top: 12px; padding-top: 12px; }
+        .alert { padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+        .alert-success { background: #dcfce7; color: #166534; }
+        .alert-danger { background: #fee2e2; color: #991b1b; }
+        table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+        th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    </style>
+</head>
+<body>
+    {% set nav_active = 'sala_professor' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        <h2>Provas e atestados</h2>
+        <p style="color:#64748b;">{{ pessoa.nome_completo }}. A prova gerada leva a logo da escola, o nome e a data em branco para o aluno preencher, e a turma já preenchida.</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
+        {% endwith %}
+
+        <div class="card-box">
+            <h3>Enviar PDF</h3>
+            <form method="POST" enctype="multipart/form-data" class="form-grid">
+                <input type="hidden" name="acao" value="enviar_arquivo">
+                <div class="form-group">
+                    <label>Tipo</label>
+                    <select name="tipo" id="tipoArquivo" required>
+                        <option value="atestado">Atestado</option>
+                        <option value="prova_aplicar">Prova a ser aplicada</option>
+                        <option value="prova_feita">Prova que já foi feita</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Título</label>
+                    <input type="text" name="titulo" required placeholder="Ex.: Atestado médico, Prova de matemática">
+                </div>
+                <div class="form-group" id="campoTurma">
+                    <label>Turma</label>
+                    <select name="turma_id">
+                        <option value="">Selecione</option>
+                        {% for turma in turmas %}
+                        <option value="{{ turma.id }}">{{ turma.nome }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>PDF</label>
+                    <input type="file" name="arquivo" accept="application/pdf" required>
+                </div>
+                <div class="form-group" style="justify-content:end;">
+                    <button class="btn btn-primary" type="submit">Guardar PDF</button>
+                </div>
+            </form>
+            {% if not turmas %}<p style="color:#92400e;">Nenhuma turma está vinculada a você como professor responsável.</p>{% endif %}
+        </div>
+
+        {% if arquivos %}
+        <div class="card-box">
+            <h3>Arquivos</h3>
+            <table>
+                <thead><tr><th>Tipo</th><th>Título</th><th>Turma</th><th></th></tr></thead>
+                <tbody>
+                {% for item in arquivos %}
+                <tr>
+                    <td>{% if item.tipo == 'atestado' %}Atestado{% elif item.tipo == 'prova_feita' %}Prova feita{% else %}Prova a aplicar{% endif %}</td>
+                    <td>{{ item.titulo }}</td>
+                    <td>{{ item.turma_nome or '—' }}</td>
+                    <td>
+                        <a class="btn btn-primary" href="{{ url_for('arquivo_professor', arquivo_id=item.id) }}" target="_blank" rel="noopener">Abrir</a>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="acao" value="excluir_arquivo">
+                            <input type="hidden" name="arquivo_id" value="{{ item.id }}">
+                            <button class="btn btn-danger" type="submit">Excluir</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <div class="card-box">
+            <h3>Criar prova</h3>
+            <form method="POST">
+                <input type="hidden" name="acao" value="criar_prova">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Nome da prova</label>
+                        <input type="text" name="titulo" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Disciplina</label>
+                        <input type="text" name="materia">
+                    </div>
+                    <div class="form-group">
+                        <label>Turma</label>
+                        <select name="turma_id">
+                            <option value="">Sem turma</option>
+                            {% for turma in turmas %}
+                            <option value="{{ turma.id }}">{{ turma.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                {% for n in range(1, 7) %}
+                <div class="questao">
+                    <strong>Pergunta {{ n }}</strong>
+                    <div class="form-group" style="margin-top:8px;">
+                        <label>Enunciado</label>
+                        <textarea name="enunciado" rows="2"></textarea>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Tipo</label>
+                            <select name="tipo_questao">
+                                <option value="multipla">Múltipla escolha</option>
+                                <option value="descritiva">Descritiva</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>A</label><input type="text" name="alt_a"></div>
+                        <div class="form-group"><label>B</label><input type="text" name="alt_b"></div>
+                        <div class="form-group"><label>C</label><input type="text" name="alt_c"></div>
+                        <div class="form-group"><label>D</label><input type="text" name="alt_d"></div>
+                        <div class="form-group"><label>Resposta (só no gabarito)</label><input type="text" name="resposta"></div>
+                    </div>
+                </div>
+                {% endfor %}
+                <button class="btn btn-primary" type="submit" style="margin-top:12px;">Criar prova</button>
+            </form>
+        </div>
+
+        {% if provas %}
+        <div class="card-box">
+            <h3>Provas criadas</h3>
+            <table>
+                <thead><tr><th>Prova</th><th>Turma</th><th></th></tr></thead>
+                <tbody>
+                {% for prova in provas %}
+                <tr>
+                    <td>{{ prova.titulo }}{% if prova.materia %}<div style="color:#64748b;">{{ prova.materia }}</div>{% endif %}</td>
+                    <td>{{ prova.turma_nome or '—' }}</td>
+                    <td>
+                        <a class="btn btn-primary" href="{{ url_for('prova_pdf', prova_id=prova.id) }}" target="_blank" rel="noopener">PDF</a>
+                        <a class="btn btn-primary" href="{{ url_for('prova_pdf', prova_id=prova.id, gabarito=1) }}" target="_blank" rel="noopener">Gabarito</a>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="acao" value="excluir_prova">
+                            <input type="hidden" name="prova_id" value="{{ prova.id }}">
+                            <button class="btn btn-danger" type="submit">Excluir</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+    <script>
+    (function () {
+        var tipo = document.getElementById("tipoArquivo");
+        var turma = document.getElementById("campoTurma");
+        if (tipo && turma) {
+            function atualizar() { turma.style.display = tipo.value === "prova_feita" ? "" : "none"; }
+            tipo.addEventListener("change", atualizar);
+            atualizar();
+        }
+        document.querySelectorAll(".questao").forEach(function (bloco) {
+            var escolha = bloco.querySelector("select[name='tipo_questao']");
+            if (!escolha) return;
+            function mostrar() {
+                var descritiva = escolha.value === "descritiva";
+                bloco.querySelectorAll("input[name^='alt_']").forEach(function (campo) {
+                    campo.parentElement.style.display = descritiva ? "none" : "";
+                });
+            }
+            escolha.addEventListener("change", mostrar);
+            mostrar();
+        });
+    })();
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

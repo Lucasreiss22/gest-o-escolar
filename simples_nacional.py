@@ -236,11 +236,12 @@ def receita_para_apuracao(gravado, regime, receita_calculada, competencia, mes_a
     depois que o regime passa a ser o vencimento, pago ou não.
     """
     regime = normalizar_regime_apuracao(regime)
-    if regime == "competencia" and competencia == mes_apuracao:
-        return float(receita_calculada or 0)
+    calculada = float(receita_calculada or 0)
+    if regime == "competencia" and (calculada > 0 or competencia == mes_apuracao):
+        return calculada
     if gravado and (gravado.get("origem") or "") in _ORIGENS_CONGELADAS:
         return float(gravado.get("receita_bruta") or 0)
-    return float(receita_calculada or 0)
+    return calculada
 
 
 def _receita_da_linha(cursor, comp, gravado, regime_apuracao, mes_apuracao=None):

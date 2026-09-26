@@ -109,6 +109,7 @@ from relatorios_pdf import (
     pdf_caixa_restante,
     pdf_regime_apuracao,
     pdf_regime_detalhado,
+    pdf_prova,
 )
 from folha import (
     calcular_folha_pessoa,
@@ -574,6 +575,49 @@ def _salvar_foto(campo, pasta="fotos"):
     finally:
         conexao.close()
     return f"midia/{mid}"
+
+
+def _salvar_midia(campo, extensoes):
+    arquivo = request.files.get(campo) if request.files else None
+    if not arquivo or not (arquivo.filename or "").strip():
+        return None
+    nome = secure_filename(arquivo.filename)
+    ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
+    if ext not in extensoes:
+        raise ValueError("Envie um arquivo PDF.")
+    dados = arquivo.read()
+    if not dados:
+        raise ValueError("O arquivo chegou vazio.")
+    if len(dados) > 8 * 1024 * 1024:
+        raise ValueError("O arquivo precisa ter no máximo 8 MB.")
+    mime = "application/pdf" if ext == "pdf" else "application/octet-stream"
+    from database import _aplicar_schema, _nome_banco_atual, obter_conexao_nova
+    schema = _nome_banco_atual(master=False)
+    if not schema:
+        raise ValueError("Sessão sem banco da escola.")
+    conexao = obter_conexao_nova()
+    try:
+        _aplicar_schema(conexao, schema)
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS midia (
+                    id SERIAL PRIMARY KEY,
+                    mime VARCHAR(40) NOT NULL,
+                    dados BYTEA NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                "INSERT INTO midia (mime, dados) VALUES (%s, %s) RETURNING id",
+                (mime, dados),
+            )
+            row = cursor.fetchone() or {}
+            mid = row.get("id") if isinstance(row, dict) else row[0]
+        conexao.commit()
+    finally:
+        conexao.close()
+    return mid
 
 
 @app.route("/midia/<int:midia_id>")
@@ -3545,12 +3589,345 @@ def dashboard():
     return render_template("dashboard.html", metrics=metrics)
 
 
+def _garantir_sala_professor(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS professor_arquivos (
+            id SERIAL PRIMARY KEY,
+            funcionario_id INT NOT NULL,
+            turma_id INT,
+            tipo VARCHAR(30) NOT NULL,
+            titulo VARCHAR(180),
+            midia_id INT NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provas_criadas (
+            id SERIAL PRIMARY KEY,
+            funcionario_id INT NOT NULL,
+            turma_id INT,
+            titulo VARCHAR(180) NOT NULL,
+            materia VARCHAR(100),
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provas_criadas_questoes (
+            id SERIAL PRIMARY KEY,
+            prova_id INT NOT NULL REFERENCES provas_criadas(id) ON DELETE CASCADE,
+            ordem INT DEFAULT 1,
+            enunciado TEXT NOT NULL,
+            tipo VARCHAR(20) NOT NULL,
+            alternativas TEXT,
+            resposta TEXT
+        )
+        """
+    )
+    cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)")
+
+
+def _professor_da_sessao(cursor, funcionario_id):
+    if not funcionario_id:
+        return None, []
+    cursor.execute(
+        "SELECT id, nome_completo FROM funcionarios WHERE id = %s",
+        (funcionario_id,),
+    )
+    pessoa = cursor.fetchone()
+    cursor.execute(
+        """
+        SELECT id, nome FROM turmas
+        WHERE professor_responsavel_id = %s
+        ORDER BY nome
+        """,
+        (funcionario_id,),
+    )
+    return pessoa, cursor.fetchall() or []
+
+
+@app.route("/minhas-provas", methods=["GET", "POST"])
+def sala_professor():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    garantir_tabelas_pedagogicas()
+    funcionario_id = _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("dashboard"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            _garantir_sala_professor(cursor)
+            pessoa, turmas = _professor_da_sessao(cursor, funcionario_id)
+            if not pessoa:
+                flash("Seu usuário não está ligado a um professor da equipe.", "danger")
+                return redirect(url_for("dashboard"))
+            if request.method == "POST":
+                acao = request.form.get("acao")
+                if acao == "enviar_arquivo":
+                    tipo = (request.form.get("tipo") or "").strip()
+                    if tipo not in {"atestado", "prova_aplicar", "prova_feita"}:
+                        raise ValueError("Escolha o tipo do arquivo.")
+                    turma_id = request.form.get("turma_id", type=int)
+                    if tipo == "prova_feita" and not turma_id:
+                        raise ValueError("Escolha a turma da prova que já foi feita.")
+                    if turma_id and turma_id not in {item["id"] for item in turmas}:
+                        raise ValueError("Essa turma não está vinculada a você.")
+                    midia_id = _salvar_midia("arquivo", {"pdf"})
+                    if not midia_id:
+                        raise ValueError("Envie o PDF.")
+                    cursor.execute(
+                        """
+                        INSERT INTO professor_arquivos (funcionario_id, turma_id, tipo, titulo, midia_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            pessoa["id"],
+                            turma_id if tipo == "prova_feita" else None,
+                            tipo,
+                            (request.form.get("titulo") or "Arquivo").strip()[:180],
+                            midia_id,
+                        ),
+                    )
+                    flash("PDF guardado.", "success")
+                elif acao == "excluir_arquivo":
+                    cursor.execute(
+                        "DELETE FROM professor_arquivos WHERE id = %s AND funcionario_id = %s",
+                        (request.form.get("arquivo_id", type=int), pessoa["id"]),
+                    )
+                    flash("Arquivo removido.", "success")
+                elif acao == "criar_prova":
+                    titulo = (request.form.get("titulo") or "").strip()
+                    if not titulo:
+                        raise ValueError("Dê um nome para a prova.")
+                    turma_id = request.form.get("turma_id", type=int)
+                    if turma_id and turma_id not in {item["id"] for item in turmas}:
+                        raise ValueError("Essa turma não está vinculada a você.")
+                    enunciados = request.form.getlist("enunciado")
+                    tipos = request.form.getlist("tipo_questao")
+                    respostas = request.form.getlist("resposta")
+                    letras = [
+                        request.form.getlist("alt_a"),
+                        request.form.getlist("alt_b"),
+                        request.form.getlist("alt_c"),
+                        request.form.getlist("alt_d"),
+                    ]
+                    questoes = []
+                    for indice, texto in enumerate(enunciados):
+                        texto = (texto or "").strip()
+                        if not texto:
+                            continue
+                        tipo = tipos[indice] if indice < len(tipos) else "descritiva"
+                        if tipo not in {"multipla", "descritiva"}:
+                            tipo = "descritiva"
+                        alternativas = []
+                        if tipo == "multipla":
+                            for coluna in letras:
+                                alternativas.append((coluna[indice] if indice < len(coluna) else "").strip())
+                        questoes.append((
+                            texto,
+                            tipo,
+                            "\n".join(alternativas),
+                            (respostas[indice] if indice < len(respostas) else "").strip(),
+                        ))
+                    if not questoes:
+                        raise ValueError("Escreva pelo menos uma pergunta.")
+                    cursor.execute(
+                        """
+                        INSERT INTO provas_criadas (funcionario_id, turma_id, titulo, materia)
+                        VALUES (%s, %s, %s, %s) RETURNING id
+                        """,
+                        (
+                            pessoa["id"],
+                            turma_id,
+                            titulo[:180],
+                            (request.form.get("materia") or "").strip()[:100],
+                        ),
+                    )
+                    prova_id = (cursor.fetchone() or {}).get("id")
+                    for ordem, item in enumerate(questoes, start=1):
+                        cursor.execute(
+                            """
+                            INSERT INTO provas_criadas_questoes
+                                (prova_id, ordem, enunciado, tipo, alternativas, resposta)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (prova_id, ordem, *item),
+                        )
+                    flash("Prova criada. O PDF já pode ser gerado.", "success")
+                elif acao == "excluir_prova":
+                    cursor.execute(
+                        "DELETE FROM provas_criadas WHERE id = %s AND funcionario_id = %s",
+                        (request.form.get("prova_id", type=int), pessoa["id"]),
+                    )
+                    flash("Prova excluída.", "success")
+                conexao.commit()
+                return redirect(url_for("sala_professor"))
+            cursor.execute(
+                """
+                SELECT a.*, t.nome AS turma_nome
+                FROM professor_arquivos a
+                LEFT JOIN turmas t ON t.id = a.turma_id
+                WHERE a.funcionario_id = %s
+                ORDER BY a.criado_em DESC
+                """,
+                (pessoa["id"],),
+            )
+            arquivos = cursor.fetchall() or []
+            cursor.execute(
+                """
+                SELECT p.*, t.nome AS turma_nome
+                FROM provas_criadas p
+                LEFT JOIN turmas t ON t.id = p.turma_id
+                WHERE p.funcionario_id = %s
+                ORDER BY p.criado_em DESC
+                """,
+                (pessoa["id"],),
+            )
+            provas = cursor.fetchall() or []
+            cursor.execute("SELECT logo_escola, nome_escola FROM configuracoes WHERE id = 1")
+            escola = cursor.fetchone() or {}
+    except Exception as e:
+        conexao.rollback()
+        flash(str(e), "danger")
+        return redirect(url_for("sala_professor") if request.method == "POST" else url_for("dashboard"))
+    finally:
+        conexao.close()
+    return render_template(
+        "sala_professor.html",
+        pessoa=pessoa,
+        turmas=turmas,
+        arquivos=arquivos,
+        provas=provas,
+        escola=escola,
+    )
+
+
+@app.route("/minhas-provas/<int:prova_id>/pdf")
+def prova_pdf(prova_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    funcionario_id = _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("sala_professor"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            _garantir_sala_professor(cursor)
+            pessoa, _turmas = _professor_da_sessao(cursor, funcionario_id)
+            if not pessoa:
+                raise ValueError("Seu usuário não está ligado a um professor da equipe.")
+            cursor.execute(
+                """
+                SELECT p.*, t.nome AS turma_nome
+                FROM provas_criadas p
+                LEFT JOIN turmas t ON t.id = p.turma_id
+                WHERE p.id = %s AND p.funcionario_id = %s
+                """,
+                (prova_id, pessoa["id"]),
+            )
+            prova = cursor.fetchone()
+            if not prova:
+                raise ValueError("Prova não encontrada.")
+            cursor.execute(
+                """
+                SELECT enunciado, tipo, alternativas, resposta
+                FROM provas_criadas_questoes
+                WHERE prova_id = %s
+                ORDER BY ordem, id
+                """,
+                (prova_id,),
+            )
+            questoes = []
+            for item in cursor.fetchall() or []:
+                questoes.append({
+                    "enunciado": item.get("enunciado"),
+                    "tipo": item.get("tipo"),
+                    "alternativas": [parte for parte in (item.get("alternativas") or "").split("\n")],
+                    "resposta": item.get("resposta"),
+                })
+            cursor.execute("SELECT nome_escola, logo_escola FROM configuracoes WHERE id = 1")
+            cfg = cursor.fetchone() or {}
+            logo = None
+            caminho = cfg.get("logo_escola") or ""
+            if caminho.startswith("midia/"):
+                cursor.execute("SELECT mime, dados FROM midia WHERE id = %s", (int(caminho.split("/")[-1]),))
+                mid = cursor.fetchone()
+                if mid and mid.get("dados"):
+                    logo = (bytes(mid["dados"]), mid.get("mime"))
+    except Exception as e:
+        flash(str(e), "danger")
+        return redirect(url_for("sala_professor"))
+    finally:
+        conexao.close()
+    buffer = pdf_prova(
+        cfg.get("nome_escola") or "Gestão Escolar",
+        prova.get("turma_nome") or "",
+        prova.get("titulo"),
+        prova.get("materia"),
+        questoes,
+        logo=logo,
+        com_gabarito=request.args.get("gabarito") == "1",
+    )
+    nome = "gabarito" if request.args.get("gabarito") == "1" else "prova"
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name=f"{nome}_{prova_id}.pdf",
+    )
+
+
+@app.route("/minhas-provas/arquivo/<int:arquivo_id>")
+def arquivo_professor(arquivo_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    funcionario_id = _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        return "", 404
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            pessoa, _turmas = _professor_da_sessao(cursor, funcionario_id)
+            if not pessoa:
+                return "", 404
+            cursor.execute(
+                """
+                SELECT a.titulo, m.mime, m.dados
+                FROM professor_arquivos a
+                JOIN midia m ON m.id = a.midia_id
+                WHERE a.id = %s AND a.funcionario_id = %s
+                """,
+                (arquivo_id, pessoa["id"]),
+            )
+            row = cursor.fetchone()
+    finally:
+        conexao.close()
+    if not row or not row.get("dados"):
+        return "", 404
+    resp = app.response_class(bytes(row["dados"]), mimetype=row.get("mime") or "application/pdf")
+    resp.headers["Content-Disposition"] = f"inline; filename=arquivo_{arquivo_id}.pdf"
+    return resp
+
+
 @app.route('/calendario_escolar', methods=['GET', 'POST'])
 def calendario_escolar():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
 
     garantir_tabelas_pedagogicas()
+    papel_cal = normalizar_papel(session.get("usuario_papel"))
+    gestor_calendario = papel_cal in {"admin", "direcao", "supervisor", "secretaria"}
+    meu_professor_id = _id_funcionario_da_sessao()
+    filtro_professor = request.values.get("professor_id", type=int)
+    if papel_cal == "professor":
+        filtro_professor = meu_professor_id
     visao_req = (request.args.get("visao") or request.form.get("visao") or "").strip()
     busca_aluno = (request.args.get("busca_aluno") or request.form.get("busca_aluno") or "").strip()
     contexto_aluno_id = request.values.get("aluno_id", type=int)
@@ -3573,7 +3950,24 @@ def calendario_escolar():
         if conexao:
             try:
                 with conexao.cursor() as cursor:
-                    if acao == "marcar_frequencia":
+                    cursor.execute(
+                        "ALTER TABLE calendario_eventos ADD COLUMN IF NOT EXISTS periodo VARCHAR(20)"
+                    )
+                    if acao == "excluir_rotina":
+                        evento_id = request.form.get("evento_id", type=int)
+                        cursor.execute(
+                            "SELECT professor_id, tipo FROM calendario_eventos WHERE id = %s",
+                            (evento_id,),
+                        )
+                        dono = cursor.fetchone() or {}
+                        if not str(dono.get("tipo") or "").startswith("rotina"):
+                            raise ValueError("Só a rotina do professor pode ser apagada por aqui.")
+                        if papel_cal == "professor" and dono.get("professor_id") != meu_professor_id:
+                            raise ValueError("Essa rotina é de outro professor.")
+                        cursor.execute("DELETE FROM calendario_eventos WHERE id = %s", (evento_id,))
+                        conexao.commit()
+                        flash("Rotina removida.", "success")
+                    elif acao == "marcar_frequencia":
                         data_aula = request.form.get("data_aula")
                         turma_id = request.form.get("turma_id") or None
                         if turma_id in ("", "None"):
@@ -3613,14 +4007,22 @@ def calendario_escolar():
                         professor_id = request.form.get('professor_id') or None
                         aluno_id = request.form.get('aluno_id') or None
                         horario = request.form.get('horario') or None
+                        periodo = (request.form.get("periodo") or "").strip() or None
                         if horario in ("", "None"):
                             horario = None
+                        if tipo == "rotina":
+                            if papel_cal == "professor":
+                                professor_id = meu_professor_id
+                            if not professor_id:
+                                raise ValueError("Escolha o professor da rotina.")
+                            if papel_cal == "professor" and not meu_professor_id:
+                                raise ValueError("Seu usuário não está ligado a um professor da equipe.")
                         cursor.execute(
                             '''
-                            INSERT INTO calendario_eventos (titulo, descricao, data_evento, tipo, turma_id, professor_id, aluno_id, horario)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            INSERT INTO calendario_eventos (titulo, descricao, data_evento, tipo, turma_id, professor_id, aluno_id, horario, periodo)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ''',
-                            (titulo, descricao, data_evento, tipo, turma_id, professor_id, aluno_id, horario),
+                            (titulo, descricao, data_evento, tipo, turma_id, professor_id, aluno_id, horario, periodo),
                         )
                         if tipo == "prova" and data_evento:
                             cursor.execute(
@@ -3647,6 +4049,8 @@ def calendario_escolar():
             kwargs["aluno_id"] = contexto_aluno_id
         if contexto_turma_id:
             kwargs["turma_id"] = contexto_turma_id
+        if filtro_professor and papel_cal != "professor":
+            kwargs["professor_id"] = filtro_professor
         data_aula = request.form.get("data_aula")
         if data_aula:
             kwargs["dia"] = data_aula
@@ -3688,6 +4092,9 @@ def calendario_escolar():
     if conexao:
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    "ALTER TABLE calendario_eventos ADD COLUMN IF NOT EXISTS periodo VARCHAR(20)"
+                )
                 cursor.execute("SELECT id, nome FROM turmas ORDER BY nome ASC")
                 turmas = cursor.fetchall()
                 cursor.execute(
@@ -3730,6 +4137,17 @@ def calendario_escolar():
                     """
                 )
                 eventos = cursor.fetchall()
+                visiveis = []
+                for ev in eventos:
+                    if not str(ev.get("tipo") or "").startswith("rotina"):
+                        visiveis.append(ev)
+                        continue
+                    dono = ev.get("professor_id")
+                    if papel_cal == "professor" and dono == meu_professor_id:
+                        visiveis.append(ev)
+                    elif gestor_calendario and filtro_professor and dono == filtro_professor:
+                        visiveis.append(ev)
+                eventos = visiveis
 
                 if contexto_aluno_id:
                     cursor.execute("SELECT id, nome_completo, matricula, cpf FROM alunos WHERE id = %s", (contexto_aluno_id,))
@@ -3798,16 +4216,43 @@ def calendario_escolar():
     eventos = [ev for ev in eventos if _serve_evento(ev)]
     provas_mes = [pv for pv in provas_mes if _serve_evento(pv)]
 
+    def _data_evento(valor):
+        if isinstance(valor, datetime):
+            return valor.date()
+        if isinstance(valor, date):
+            return valor
+        try:
+            return datetime.strptime(str(valor)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    dias_visiveis = {dia for semana in dias_do_mes for dia in semana}
     eventos_por_dia = {}
+    rotinas_do_mes = []
     for ev in eventos:
-        data_ev = ev.get("data_evento")
+        data_ev = _data_evento(ev.get("data_evento"))
         if not data_ev:
             continue
-        if hasattr(data_ev, "isoformat"):
-            chave = data_ev.isoformat()[:10]
+        periodo = (ev.get("periodo") or "").strip().lower()
+        ev["periodo"] = periodo or None
+        eh_rotina = str(ev.get("tipo") or "").startswith("rotina")
+        if eh_rotina and periodo == "semana":
+            inicio = data_ev - timedelta(days=(data_ev.weekday() + 1) % 7)
+            datas = [inicio + timedelta(days=i) for i in range(7)]
+        elif eh_rotina and periodo == "mes":
+            datas = [
+                dia for dia in dias_visiveis
+                if dia.year == data_ev.year and dia.month == data_ev.month
+            ]
+            if data_ev.year == ano and data_ev.month == mes:
+                rotinas_do_mes.append(ev)
         else:
-            chave = str(data_ev)[:10]
-        eventos_por_dia.setdefault(chave, []).append(ev)
+            datas = [data_ev]
+        ev["aparece_mes"] = any(dia.year == ano and dia.month == mes for dia in datas)
+        for dia in datas:
+            if dia not in dias_visiveis:
+                continue
+            eventos_por_dia.setdefault(dia.isoformat(), []).append(ev)
 
     provas_por_dia = {}
     for pv in provas_mes:
@@ -3859,6 +4304,8 @@ def calendario_escolar():
         cal_params["aluno_id"] = contexto_aluno_id
     if contexto_turma_id:
         cal_params["turma_id"] = contexto_turma_id
+    if filtro_professor and papel_cal != "professor":
+        cal_params["professor_id"] = filtro_professor
 
     return render_template(
         "calendario_escolar.html",
@@ -3873,6 +4320,9 @@ def calendario_escolar():
         data_hoje=datetime.now().date(),
         turmas=turmas,
         professores=professores,
+        filtro_professor=filtro_professor,
+        meu_professor_id=meu_professor_id,
+        gestor_calendario=gestor_calendario,
         alunos=alunos,
         eventos=eventos,
         eventos_por_dia=eventos_por_dia,
@@ -3887,6 +4337,7 @@ def calendario_escolar():
         dia_selecionado=dia_sel,
         cal_params=cal_params,
         provas_por_dia=provas_por_dia,
+        rotinas_do_mes=rotinas_do_mes,
         eventos_do_dia=eventos_do_dia,
         provas_do_dia=provas_do_dia,
         dia_feriado=dia_feriado,
@@ -7454,6 +7905,34 @@ def pagina_configuracoes():
                     conexao.close()
             return redirect(url_for("pagina_configuracoes", uid=uid))
 
+        if acao == "salvar_logo":
+            if conexao:
+                try:
+                    caminho = _salvar_foto("logo_escola")
+                    if not caminho:
+                        raise ValueError("Escolha a imagem da logo.")
+                    with conexao.cursor() as cursor:
+                        cursor.execute(
+                            "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)"
+                        )
+                        cursor.execute(
+                            "UPDATE configuracoes SET logo_escola = %s WHERE id = 1",
+                            (caminho,),
+                        )
+                        if cursor.rowcount == 0:
+                            cursor.execute(
+                                "INSERT INTO configuracoes (id, logo_escola) VALUES (1, %s)",
+                                (caminho,),
+                            )
+                        conexao.commit()
+                        flash("Logo da escola salva. Ela entra no topo da prova.", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"Não foi possível salvar a logo: {e}", "danger")
+                finally:
+                    conexao.close()
+            return redirect(url_for("pagina_configuracoes"))
+
         if acao == "salvar_parametros":
             nome_escola = request.form.get("nome_escola")
             ano_letivo = request.form.get("ano_letivo")
@@ -7501,6 +7980,9 @@ def pagina_configuracoes():
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                 try:
+                    cursor.execute(
+                        "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)"
+                    )
                     cursor.execute("SELECT * FROM configuracoes WHERE id = 1;")
                     config = preparar_config_tela(cursor.fetchone() or {})
                 except Exception:
