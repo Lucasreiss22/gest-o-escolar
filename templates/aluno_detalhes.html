@@ -634,11 +634,27 @@
         <div class="card border-0 shadow-sm mt-4 p-4 bg-white" id="notas">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
                 <h3 class="card-title mb-0 fs-5 text-dark fw-bold"><i class="bi bi-journal-text text-secondary"></i> Boletim e Avaliações por Trimestre</h3>
-                <a class="btn btn-sm btn-success" target="_blank" href="{{ url_for('boletim_pdf', aluno_id=aluno.id) }}">Gerar PDF do boletim</a>
-                <form action="{{ url_for('boletim_pdf', aluno_id=aluno.id) }}" method="POST" style="display:inline;">
-                    <input type="hidden" name="enviar" value="1">
-                    <button class="btn btn-sm btn-outline-primary" type="submit">Enviar boletim por e-mail</button>
-                </form>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <form action="{{ url_for('boletim_pdf', aluno_id=aluno.id) }}" method="GET" class="d-flex flex-wrap gap-2 align-items-center" target="_blank">
+                        <select name="trimestre" class="form-select form-select-sm" style="width:auto;">
+                            <option value="">Todas as provas</option>
+                            <option value="1">1º trimestre</option>
+                            <option value="2">2º trimestre</option>
+                            <option value="3">3º trimestre</option>
+                        </select>
+                        <button class="btn btn-sm btn-success" type="submit">Gerar PDF do boletim</button>
+                    </form>
+                    <form action="{{ url_for('boletim_pdf', aluno_id=aluno.id) }}" method="POST" class="d-flex flex-wrap gap-2 align-items-center">
+                        <input type="hidden" name="enviar" value="1">
+                        <select name="trimestre" class="form-select form-select-sm" style="width:auto;">
+                            <option value="">Todas</option>
+                            <option value="1">1º</option>
+                            <option value="2">2º</option>
+                            <option value="3">3º</option>
+                        </select>
+                        <button class="btn btn-sm btn-outline-primary" type="submit">Enviar boletim por e-mail</button>
+                    </form>
+                </div>
             </div>
 
             <form action="{{ url_for('anexar_boletim', aluno_id=aluno.id or aluno[0]) }}" method="POST" enctype="multipart/form-data" class="mb-4 p-3 border rounded bg-white">
@@ -678,25 +694,61 @@
             </form>
             
             <!-- Formulário Rápido para Lançar Nota/Prova -->
-            <form action="{{ url_for('adicionar_nota', aluno_id=aluno.id or aluno[0]) }}" method="POST" enctype="multipart/form-data" class="mb-4 p-4 bg-light rounded border">
-                <h4 class="mb-3 fs-6 text-secondary fw-bold">Lançar Nova Avaliação / Prova</h4>
-                
+            <form action="{{ url_for('adicionar_nota', aluno_id=aluno.id or aluno[0]) }}" method="POST" enctype="multipart/form-data" class="mb-4 p-4 bg-light rounded border" id="form-lancar-nota">
+                <h4 class="mb-2 fs-6 text-secondary fw-bold">Lançar Nova Avaliação / Prova</h4>
+                <p class="small text-muted mb-3">Na semana de provas, selecione qual prova recebe a nota e o PDF. Matéria e título preenchem sozinhos.</p>
+
                 <div class="row g-3 mb-3">
+                    <div class="col-md-12">
+                        <label class="form-label small fw-bold text-muted">Qual prova?</label>
+                        <select name="prova_nota_id" id="sel-prova-aluno" class="form-select">
+                            <option value="" data-materia="" data-titulo="" data-trimestre="" data-turma="" data-data="" data-criada="">
+                                Avaliação avulsa (sem vínculo com prova do professor)
+                            </option>
+                            {% if provas_notas %}
+                                {% for p in provas_notas %}
+                                <option
+                                    value="{{ p.id }}"
+                                    data-materia="{{ p.materia or '' }}"
+                                    data-titulo="{{ p.titulo_avaliacao or '' }}"
+                                    data-trimestre="{{ p.trimestre or '' }}"
+                                    data-turma="{{ p.turma_id or '' }}"
+                                    data-data="{{ p.data_aplicacao.isoformat()[:10] if p.data_aplicacao and p.data_aplicacao.isoformat is defined else (p.data_aplicacao or '') }}"
+                                    data-criada="{{ p.prova_criada_id or '' }}"
+                                >
+                                    {% if p.data_aplicacao %}{{ p.data_aplicacao.strftime('%d/%m/%Y') if p.data_aplicacao.strftime is defined else p.data_aplicacao }} · {% endif %}
+                                    {{ p.materia or 'Sem matéria' }} · {{ p.titulo_avaliacao or 'Prova' }}
+                                    {% if p.nota is none %} — aguardando nota{% else %} — nota {{ p.nota }}{% endif %}
+                                </option>
+                                {% endfor %}
+                            {% endif %}
+                        </select>
+                        <input type="hidden" name="prova_criada_id" id="campo-prova-criada" value="">
+                        <input type="hidden" name="data_aplicacao" id="campo-data-aplicacao" value="">
+                        <input type="hidden" name="turma_id" id="campo-turma-id" value="">
+                    </div>
+
                     <div class="col-md-3">
                         <label class="form-label small fw-bold text-muted">Matéria</label>
-                        <select name="materia" required class="form-select">
+                        <select name="materia" id="campo-materia" class="form-select">
                             <option value="">Selecione a Matéria</option>
-                            <option value="História">História</option>
-                            <option value="Matemática">Matemática</option>
-                            <option value="Filosofia">Filosofia</option>
-                            <option value="Inglês">Inglês</option>
-                            <option value="Educação Física">Educação Física</option>
+                            {% if disciplinas_aluno %}
+                                {% for disc in disciplinas_aluno %}
+                                <option value="{{ disc }}">{{ disc }}</option>
+                                {% endfor %}
+                            {% else %}
+                                <option value="História">História</option>
+                                <option value="Matemática">Matemática</option>
+                                <option value="Filosofia">Filosofia</option>
+                                <option value="Inglês">Inglês</option>
+                                <option value="Educação Física">Educação Física</option>
+                            {% endif %}
                         </select>
                     </div>
 
                     <div class="col-md-3">
                         <label class="form-label small fw-bold text-muted">Trimestre</label>
-                        <select name="trimestre" required class="form-select">
+                        <select name="trimestre" id="campo-trimestre" class="form-select">
                             <option value="1">1º Trimestre</option>
                             <option value="2">2º Trimestre</option>
                             <option value="3">3º Trimestre</option>
@@ -705,7 +757,7 @@
 
                     <div class="col-md-4">
                         <label class="form-label small fw-bold text-muted">Título da Avaliação</label>
-                        <input type="text" name="titulo_avaliacao" placeholder="Ex: Prova Mensal" required class="form-control">
+                        <input type="text" name="titulo_avaliacao" id="campo-titulo" placeholder="Ex: Prova Mensal" class="form-control">
                     </div>
 
                     <div class="col-md-2">
@@ -721,6 +773,53 @@
 
                 <button type="submit" class="btn btn-primary btn-sm">Salvar Nota e Prova</button>
             </form>
+            <script>
+            (function () {
+                var sel = document.getElementById('sel-prova-aluno');
+                if (!sel) return;
+                function aplicar() {
+                    var opt = sel.options[sel.selectedIndex];
+                    var materia = opt.getAttribute('data-materia') || '';
+                    var titulo = opt.getAttribute('data-titulo') || '';
+                    var trimestre = opt.getAttribute('data-trimestre') || '';
+                    var turma = opt.getAttribute('data-turma') || '';
+                    var data = opt.getAttribute('data-data') || '';
+                    var criada = opt.getAttribute('data-criada') || '';
+                    var elMat = document.getElementById('campo-materia');
+                    var elTit = document.getElementById('campo-titulo');
+                    var elTri = document.getElementById('campo-trimestre');
+                    var elTur = document.getElementById('campo-turma-id');
+                    var elData = document.getElementById('campo-data-aplicacao');
+                    var elCri = document.getElementById('campo-prova-criada');
+                    if (elCri) elCri.value = criada;
+                    if (elData) elData.value = data;
+                    if (elTur) elTur.value = turma;
+                    if (sel.value) {
+                        if (elMat && materia) {
+                            var found = false;
+                            for (var i = 0; i < elMat.options.length; i++) {
+                                if (elMat.options[i].value === materia) { found = true; break; }
+                            }
+                            if (!found) {
+                                var o = document.createElement('option');
+                                o.value = materia; o.textContent = materia;
+                                elMat.appendChild(o);
+                            }
+                            elMat.value = materia;
+                        }
+                        if (elTit) elTit.value = titulo;
+                        if (elTri && trimestre) elTri.value = String(trimestre);
+                        if (elMat) elMat.required = false;
+                        if (elTit) elTit.required = false;
+                    } else {
+                        if (elMat) elMat.required = true;
+                        if (elTit) elTit.required = true;
+                    }
+                }
+                sel.addEventListener('change', aplicar);
+                aplicar();
+            })();
+            </script>
 
             <!-- Exibição das Notas cadastradas -->
             <div class="table-responsive" id="provas">

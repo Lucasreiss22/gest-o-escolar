@@ -4581,38 +4581,60 @@ def sala_professor():
                     prova = cursor.fetchone()
                     if not prova:
                         raise ValueError("Prova não encontrada.")
-                    busca = (request.form.get("busca_aluno") or "").strip()
-                    if not busca:
-                        raise ValueError("Informe a matrícula ou o CPF do aluno.")
-                    digitos = "".join(ch for ch in busca if ch.isdigit())
-                    params = [f"%{busca}%", f"%{busca}%", f"%{digitos or busca}%"]
-                    sql_aluno = """
-                        SELECT a.id, a.nome_completo, a.matricula, a.cpf
-                        FROM alunos a
-                        WHERE (
-                            COALESCE(a.matricula, '') ILIKE %s
-                            OR COALESCE(a.cpf, '') ILIKE %s
-                            OR regexp_replace(COALESCE(a.cpf, ''), '[^0-9]', '', 'g') LIKE %s
-                        )
-                    """
-                    if prova.get("turma_id"):
-                        sql_aluno += """
-                            AND EXISTS (
-                                SELECT 1 FROM turma_alunos ta
-                                WHERE ta.aluno_id = a.id AND ta.turma_id = %s
+                    aluno_id_form = request.form.get("aluno_id", type=int)
+                    aluno = None
+                    if aluno_id_form:
+                        sql_por_id = """
+                            SELECT a.id, a.nome_completo, a.matricula, a.cpf
+                            FROM alunos a
+                            WHERE a.id = %s
+                        """
+                        params_id = [aluno_id_form]
+                        if prova.get("turma_id"):
+                            sql_por_id += """
+                                AND EXISTS (
+                                    SELECT 1 FROM turma_alunos ta
+                                    WHERE ta.aluno_id = a.id AND ta.turma_id = %s
+                                )
+                            """
+                            params_id.append(prova["turma_id"])
+                        cursor.execute(sql_por_id, params_id)
+                        aluno = cursor.fetchone()
+                        if not aluno:
+                            raise ValueError("Aluno não encontrado nesta turma da prova.")
+                    else:
+                        busca = (request.form.get("busca_aluno") or "").strip()
+                        if not busca:
+                            raise ValueError("Selecione o aluno ou informe a matrícula/CPF.")
+                        digitos = "".join(ch for ch in busca if ch.isdigit())
+                        params = [f"%{busca}%", f"%{busca}%", f"%{digitos or busca}%"]
+                        sql_aluno = """
+                            SELECT a.id, a.nome_completo, a.matricula, a.cpf
+                            FROM alunos a
+                            WHERE (
+                                COALESCE(a.matricula, '') ILIKE %s
+                                OR COALESCE(a.cpf, '') ILIKE %s
+                                OR regexp_replace(COALESCE(a.cpf, ''), '[^0-9]', '', 'g') LIKE %s
                             )
                         """
-                        params.append(prova["turma_id"])
-                    sql_aluno += " ORDER BY a.nome_completo LIMIT 8"
-                    cursor.execute(sql_aluno, params)
-                    encontrados = cursor.fetchall() or []
-                    if not encontrados:
-                        raise ValueError("Nenhum aluno encontrado com essa matrícula ou CPF.")
-                    if len(encontrados) > 1:
-                        raise ValueError(
-                            "Achei mais de um aluno. Use a matrícula completa ou o CPF completo."
-                        )
-                    aluno = encontrados[0]
+                        if prova.get("turma_id"):
+                            sql_aluno += """
+                                AND EXISTS (
+                                    SELECT 1 FROM turma_alunos ta
+                                    WHERE ta.aluno_id = a.id AND ta.turma_id = %s
+                                )
+                            """
+                            params.append(prova["turma_id"])
+                        sql_aluno += " ORDER BY a.nome_completo LIMIT 8"
+                        cursor.execute(sql_aluno, params)
+                        encontrados = cursor.fetchall() or []
+                        if not encontrados:
+                            raise ValueError("Nenhum aluno encontrado com essa matrícula ou CPF.")
+                        if len(encontrados) > 1:
+                            raise ValueError(
+                                "Achei mais de um aluno. Use a matrícula completa ou o CPF completo."
+                            )
+                        aluno = encontrados[0]
                     nota = (request.form.get("nota") or "").strip()
                     if not nota:
                         raise ValueError("Informe a nota.")
@@ -4872,6 +4894,10 @@ def sala_professor_detalhe(prova_id):
         flash("Sem conexão com o banco.", "danger")
         return redirect(url_for("sala_professor"))
     prova = None
+    outras_provas = []
+    alunos_turma = []
+    pessoa = None
+    turmas = []
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
             pessoa, turmas = _professor_da_sessao(cursor, funcionario_id)
@@ -4934,6 +4960,32 @@ def sala_professor_detalhe(prova_id):
                 (prova_id,),
             )
             prova["agendas"] = [dict(row) for row in (cursor.fetchall() or [])]
+            cursor.execute(
+                """
+                SELECT p.id, p.titulo, p.materia, p.data_aplicacao, p.horario, p.turma_id,
+                       t.nome AS turma_nome
+                FROM provas_criadas p
+                LEFT JOIN turmas t ON t.id = p.turma_id
+                WHERE p.funcionario_id = %s
+                ORDER BY p.data_aplicacao DESC NULLS LAST, p.id DESC
+                LIMIT 80
+                """,
+                (pessoa["id"],),
+            )
+            outras_provas = [dict(row) for row in (cursor.fetchall() or [])]
+            alunos_turma = []
+            if prova.get("turma_id"):
+                cursor.execute(
+                    """
+                    SELECT a.id, a.nome_completo, a.matricula, a.cpf
+                    FROM turma_alunos ta
+                    JOIN alunos a ON a.id = ta.aluno_id
+                    WHERE ta.turma_id = %s
+                    ORDER BY a.nome_completo
+                    """,
+                    (prova["turma_id"],),
+                )
+                alunos_turma = [dict(row) for row in (cursor.fetchall() or [])]
     except Exception as e:
         try:
             conexao.rollback()
@@ -4948,6 +5000,8 @@ def sala_professor_detalhe(prova_id):
         pessoa=pessoa,
         turmas=turmas,
         prova=prova,
+        outras_provas=outras_provas,
+        alunos_turma=alunos_turma,
     )
 
 
@@ -6997,34 +7051,163 @@ def adicionar_nota(aluno_id):
     conexao = obter_conexao()
     if conexao:
         try:
-            materia = request.form.get("materia")
+            try:
+                _garantir_sala_professor()
+            except Exception:
+                pass
+            materia = (request.form.get("materia") or "").strip()
             trimestre = request.form.get("trimestre")
-            titulo = request.form.get("titulo_avaliacao")
-            nota_raw = request.form.get("nota", "0").replace(",", ".")
+            titulo = (request.form.get("titulo_avaliacao") or "").strip()
+            nota_raw = (request.form.get("nota") or "0").replace(",", ".")
             nota = float(nota_raw) if nota_raw else 0.0
-            turma_id = request.form.get("turma_id") or None
+            turma_id = request.form.get("turma_id", type=int) or None
+            prova_nota_id = request.form.get("prova_nota_id", type=int)
+            prova_criada_id = request.form.get("prova_criada_id", type=int)
+            data_aplicacao = (request.form.get("data_aplicacao") or "").strip() or None
 
             arquivo = request.files.get("arquivo_pdf")
             nome_arquivo = None
+            midia_id = None
             if arquivo and arquivo.filename != "":
                 nome_seguro = secure_filename(arquivo.filename)
                 nome_arquivo = f"aluno_{aluno_id}_{nome_seguro}"
                 caminho_salvar = os.path.join(PASTA_UPLOADS_PROVAS, nome_arquivo)
                 arquivo.save(caminho_salvar)
+                arquivo.stream.seek(0)
+                try:
+                    midia_id = _salvar_midia("arquivo_pdf", {"pdf"})
+                except Exception:
+                    midia_id = None
 
-            with conexao.cursor() as cursor:
-                cursor.execute("""
-                    INSERT INTO provas_notas (aluno_id, turma_id, materia, trimestre, titulo_avaliacao, nota, arquivo_pdf, origem)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'secretaria');
-                """, (aluno_id, turma_id, materia, trimestre, titulo, nota, nome_arquivo))
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                if prova_nota_id:
+                    cursor.execute(
+                        """
+                        SELECT id, prova_criada_id, turma_id, materia, titulo_avaliacao,
+                               trimestre, data_aplicacao, origem
+                        FROM provas_notas
+                        WHERE id = %s AND aluno_id = %s
+                        """,
+                        (prova_nota_id, aluno_id),
+                    )
+                    existente = cursor.fetchone()
+                    if not existente:
+                        raise ValueError("Prova selecionada não encontrada para este aluno.")
+                    materia = materia or (existente.get("materia") or "")
+                    titulo = titulo or (existente.get("titulo_avaliacao") or "")
+                    trimestre = trimestre or existente.get("trimestre")
+                    turma_id = turma_id or existente.get("turma_id")
+                    data_aplicacao = data_aplicacao or (
+                        str(existente.get("data_aplicacao") or "")[:10] or None
+                    )
+                    origem = existente.get("origem") or "secretaria"
+                    cursor.execute(
+                        """
+                        UPDATE provas_notas
+                        SET nota = %s,
+                            materia = %s,
+                            trimestre = %s,
+                            titulo_avaliacao = %s,
+                            turma_id = COALESCE(%s, turma_id),
+                            arquivo_pdf = COALESCE(%s, arquivo_pdf),
+                            arquivo_midia_id = COALESCE(%s, arquivo_midia_id),
+                            data_aplicacao = COALESCE(%s, data_aplicacao),
+                            origem = %s,
+                            data_registro = CURRENT_DATE
+                        WHERE id = %s AND aluno_id = %s
+                        """,
+                        (
+                            nota,
+                            materia,
+                            trimestre,
+                            titulo,
+                            turma_id,
+                            nome_arquivo,
+                            midia_id,
+                            data_aplicacao,
+                            origem,
+                            prova_nota_id,
+                            aluno_id,
+                        ),
+                    )
+                    if existente.get("prova_criada_id"):
+                        cursor.execute(
+                            """
+                            INSERT INTO provas_criadas_notas (prova_id, aluno_id, nota)
+                            VALUES (%s, %s, %s)
+                            ON CONFLICT (prova_id, aluno_id)
+                            DO UPDATE SET nota = EXCLUDED.nota
+                            """,
+                            (existente["prova_criada_id"], aluno_id, str(nota)),
+                        )
+                    flash("✅ Nota e PDF aplicados na prova selecionada.", "success")
+                elif prova_criada_id:
+                    cursor.execute(
+                        """
+                        SELECT id, titulo, materia, turma_id, data_aplicacao
+                        FROM provas_criadas WHERE id = %s
+                        """,
+                        (prova_criada_id,),
+                    )
+                    prova = cursor.fetchone()
+                    if not prova:
+                        raise ValueError("Prova do sistema não encontrada.")
+                    _sincronizar_nota_aluno(
+                        cursor,
+                        aluno_id=aluno_id,
+                        turma_id=turma_id or prova.get("turma_id"),
+                        materia=materia or prova.get("materia"),
+                        titulo=titulo or prova.get("titulo"),
+                        nota=nota,
+                        prova_criada_id=prova_criada_id,
+                        arquivo_midia_id=midia_id,
+                        data_aplicacao=data_aplicacao or prova.get("data_aplicacao"),
+                        origem="secretaria",
+                    )
+                    if nome_arquivo:
+                        cursor.execute(
+                            """
+                            UPDATE provas_notas
+                            SET arquivo_pdf = COALESCE(%s, arquivo_pdf)
+                            WHERE prova_criada_id = %s AND aluno_id = %s
+                            """,
+                            (nome_arquivo, prova_criada_id, aluno_id),
+                        )
+                    flash("✅ Nota e PDF aplicados na prova do sistema.", "success")
+                else:
+                    if not materia or not titulo:
+                        raise ValueError("Informe a matéria e o título, ou selecione uma prova.")
+                    cursor.execute(
+                        """
+                        INSERT INTO provas_notas (
+                            aluno_id, turma_id, materia, trimestre, titulo_avaliacao,
+                            nota, arquivo_pdf, arquivo_midia_id, origem, data_aplicacao
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'secretaria', %s)
+                        """,
+                        (
+                            aluno_id,
+                            turma_id,
+                            materia,
+                            trimestre,
+                            titulo,
+                            nota,
+                            nome_arquivo,
+                            midia_id,
+                            data_aplicacao,
+                        ),
+                    )
+                    flash("✅ Nota e prova anexadas com sucesso!", "success")
                 conexao.commit()
-                flash("✅ Nota e prova anexadas com sucesso!", "success")
         except Exception as e:
-            conexao.rollback()
+            try:
+                conexao.rollback()
+            except Exception:
+                pass
             flash(f"❌ Erro ao salvar nota: {e}", "danger")
         finally:
             conexao.close()
-    return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+    return redirect(url_for("detalhes_aluno", aluno_id=aluno_id) + "#notas")
 
 
 @app.route("/alunos/<int:aluno_id>/ajustar-prova", methods=["POST"])
@@ -7100,14 +7283,26 @@ def boletim_pdf(aluno_id):
             cfg = cursor.fetchone() or {}
             cursor.execute("SELECT * FROM alunos WHERE id = %s", (aluno_id,))
             aluno = cursor.fetchone()
-            cursor.execute(
-                """
-                SELECT trimestre, materia, titulo_avaliacao, nota
-                FROM provas_notas WHERE aluno_id = %s
-                ORDER BY trimestre, materia;
-                """,
-                (aluno_id,),
-            )
+            trimestre_filtro = request.args.get("trimestre") or request.form.get("trimestre")
+            if trimestre_filtro:
+                cursor.execute(
+                    """
+                    SELECT trimestre, materia, titulo_avaliacao, nota
+                    FROM provas_notas
+                    WHERE aluno_id = %s AND trimestre = %s
+                    ORDER BY trimestre, materia;
+                    """,
+                    (aluno_id, trimestre_filtro),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT trimestre, materia, titulo_avaliacao, nota
+                    FROM provas_notas WHERE aluno_id = %s
+                    ORDER BY trimestre, materia;
+                    """,
+                    (aluno_id,),
+                )
             notas = cursor.fetchall()
             cursor.execute(
                 """
