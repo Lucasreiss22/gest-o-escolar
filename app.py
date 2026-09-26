@@ -10182,7 +10182,7 @@ def _garantir_ponto():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ponto_v2"
+    chave = f"{schema}:ponto_v3"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -10203,6 +10203,22 @@ def _garantir_ponto():
                     atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (funcionario_id, data_ref)
                 )
+                """
+            )
+            for sql in (
+                "ALTER TABLE ponto_registros ADD COLUMN IF NOT EXISTS cafe_ida TIME",
+                "ALTER TABLE ponto_registros ADD COLUMN IF NOT EXISTS cafe_volta TIME",
+                "ALTER TABLE ponto_registros ADD COLUMN IF NOT EXISTS almoco_volta TIME",
+            ):
+                cursor.execute(sql)
+            # Migra o antigo "cafe" (que era volta do almoço) para almoco_volta
+            cursor.execute(
+                """
+                UPDATE ponto_registros
+                SET almoco_volta = cafe
+                WHERE cafe IS NOT NULL
+                  AND almoco IS NOT NULL
+                  AND almoco_volta IS NULL
                 """
             )
             cursor.execute(
@@ -10249,8 +10265,14 @@ def _garantir_ponto():
                 ON ponto_faltas (funcionario_id, data_ref)
                 """
             )
+            for sql in (
+                "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT DEFAULT 15",
+                "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT DEFAULT 60",
+            ):
+                cursor.execute(sql)
         conexao.commit()
         _tabelas_ok.discard(f"{schema}:ponto_v1")
+        _tabelas_ok.discard(f"{schema}:ponto_v2")
         _tabelas_ok.add(chave)
     except Exception:
         try:
@@ -10282,18 +10304,104 @@ def _fmt_hora_ponto(valor):
 def _rotulos_batida_ponto():
     return {
         "entrada": "Cheguei na escola",
+        "cafe_ida": "Saí para o café",
+        "cafe_volta": "Voltei do café",
         "almoco": "Saí para o almoço",
-        "cafe": "Voltei do almoço",
+        "almoco_volta": "Voltei do almoço",
         "saida": "Saí da escola",
     }
 
 
+def _ordem_batidas_ponto():
+    return ("entrada", "cafe_ida", "cafe_volta", "almoco", "almoco_volta", "saida")
+
+
+def _mapa_registro_ponto(row):
+    row = row or {}
+    return {
+        "entrada": _fmt_hora_ponto(row.get("entrada")),
+        "cafe_ida": _fmt_hora_ponto(row.get("cafe_ida")),
+        "cafe_volta": _fmt_hora_ponto(row.get("cafe_volta")),
+        "almoco": _fmt_hora_ponto(row.get("almoco")),
+        "almoco_volta": _fmt_hora_ponto(row.get("almoco_volta") or row.get("cafe")),
+        "saida": _fmt_hora_ponto(row.get("saida")),
+    }
+
+
 def _proxima_batida(registro):
-    ordem = ("entrada", "almoco", "cafe", "saida")
-    for chave in ordem:
+    for chave in _ordem_batidas_ponto():
         if not (registro or {}).get(chave):
             return chave
     return None
+
+
+def _parse_hora_ponto_hoje(hora_txt, data_ref, agora):
+    if not hora_txt:
+        return None
+    try:
+        h, m = [int(x) for x in str(hora_txt)[:5].split(":")]
+    except Exception:
+        return None
+    base = data_ref if hasattr(data_ref, "year") else agora.date()
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("America/Sao_Paulo")
+        return datetime(base.year, base.month, base.day, h, m, tzinfo=tz)
+    except Exception:
+        return datetime(base.year, base.month, base.day, h, m)
+
+
+def _contadores_intervalo_ponto(registro, minutos_cafe, minutos_almoco, agora, data_ref=None):
+    """Contadores só de café e almoço (não de entrada/saída da escola)."""
+    contadores = []
+    data_ref = data_ref or agora.date()
+    cafe_min = max(1, int(minutos_cafe or 15))
+    almoco_min = max(1, int(minutos_almoco or 60))
+    if registro.get("cafe_ida") and not registro.get("cafe_volta"):
+        inicio = _parse_hora_ponto_hoje(registro["cafe_ida"], data_ref, agora)
+        if inicio:
+            limite = inicio + timedelta(minutes=cafe_min)
+            restante = int((limite - agora).total_seconds())
+            contadores.append({
+                "tipo": "cafe",
+                "rotulo": "Café",
+                "inicio": registro["cafe_ida"],
+                "limite_min": cafe_min,
+                "fim_previsto": limite.strftime("%H:%M"),
+                "restante_seg": restante,
+                "esgotado": restante <= 0,
+            })
+    if registro.get("almoco") and not registro.get("almoco_volta"):
+        inicio = _parse_hora_ponto_hoje(registro["almoco"], data_ref, agora)
+        if inicio:
+            limite = inicio + timedelta(minutes=almoco_min)
+            restante = int((limite - agora).total_seconds())
+            contadores.append({
+                "tipo": "almoco",
+                "rotulo": "Almoço",
+                "inicio": registro["almoco"],
+                "limite_min": almoco_min,
+                "fim_previsto": limite.strftime("%H:%M"),
+                "restante_seg": restante,
+                "esgotado": restante <= 0,
+            })
+    return contadores
+
+
+def _ler_tempos_ponto(cursor):
+    try:
+        cursor.execute(
+            """
+            SELECT ponto_minutos_cafe, ponto_minutos_almoco
+            FROM configuracoes WHERE id = 1
+            """
+        )
+        row = cursor.fetchone() or {}
+        cafe = row.get("ponto_minutos_cafe") if isinstance(row, dict) else None
+        almoco = row.get("ponto_minutos_almoco") if isinstance(row, dict) else None
+        return int(cafe or 15), int(almoco or 60)
+    except Exception:
+        return 15, 60
 
 
 def _pode_gestao_ponto():
@@ -10350,10 +10458,12 @@ def ponto():
         return redirect(url_for("dashboard"))
 
     pessoa = None
-    registro = {"entrada": "", "almoco": "", "cafe": "", "saida": ""}
+    registro = {k: "" for k in _ordem_batidas_ponto()}
     historico = []
     atestados = []
     faltas = []
+    minutos_cafe, minutos_almoco = 15, 60
+    contadores = []
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -10364,31 +10474,26 @@ def ponto():
             if not pessoa:
                 flash("Cadastro da equipe não encontrado.", "danger")
                 return redirect(url_for("dashboard"))
+            minutos_cafe, minutos_almoco = _ler_tempos_ponto(cursor)
 
             if request.method == "POST":
                 acao = request.form.get("acao")
                 if acao == "bater_ponto":
                     tipo = (request.form.get("tipo") or "").strip()
-                    if tipo not in {"entrada", "almoco", "cafe", "saida"}:
+                    if tipo not in _ordem_batidas_ponto():
                         raise ValueError("Tipo de batida inválido.")
                     agora_bat = _agora_ponto_br()
                     data_dia = agora_bat.date()
                     hora = agora_bat.strftime("%H:%M")
                     cursor.execute(
                         """
-                        SELECT id, entrada, almoco, cafe, saida
+                        SELECT id, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
                         FROM ponto_registros
                         WHERE funcionario_id = %s AND data_ref = %s
                         """,
                         (funcionario_id, data_dia),
                     )
-                    atual = cursor.fetchone() or {}
-                    atual_map = {
-                        "entrada": _fmt_hora_ponto(atual.get("entrada")),
-                        "almoco": _fmt_hora_ponto(atual.get("almoco")),
-                        "cafe": _fmt_hora_ponto(atual.get("cafe")),
-                        "saida": _fmt_hora_ponto(atual.get("saida")),
-                    }
+                    atual_map = _mapa_registro_ponto(cursor.fetchone())
                     proxima = _proxima_batida(atual_map)
                     if proxima != tipo:
                         rotulos = _rotulos_batida_ponto()
@@ -10397,26 +10502,32 @@ def ponto():
                         if proxima:
                             raise ValueError(f"Agora registre: {rotulos[proxima]}.")
                         raise ValueError("Todas as batidas de hoje já foram registradas.")
+                    vals = {k: None for k in _ordem_batidas_ponto()}
+                    vals[tipo] = hora
                     cursor.execute(
                         """
                         INSERT INTO ponto_registros
-                            (funcionario_id, data_ref, entrada, almoco, cafe, saida, atualizado_em)
-                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                            (funcionario_id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, saida, atualizado_em)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT (funcionario_id, data_ref)
                         DO UPDATE SET
                             entrada = COALESCE(ponto_registros.entrada, EXCLUDED.entrada),
+                            cafe_ida = COALESCE(ponto_registros.cafe_ida, EXCLUDED.cafe_ida),
+                            cafe_volta = COALESCE(ponto_registros.cafe_volta, EXCLUDED.cafe_volta),
                             almoco = COALESCE(ponto_registros.almoco, EXCLUDED.almoco),
-                            cafe = COALESCE(ponto_registros.cafe, EXCLUDED.cafe),
+                            almoco_volta = COALESCE(ponto_registros.almoco_volta, EXCLUDED.almoco_volta),
                             saida = COALESCE(ponto_registros.saida, EXCLUDED.saida),
                             atualizado_em = CURRENT_TIMESTAMP
                         """,
                         (
                             funcionario_id,
                             data_dia,
-                            hora if tipo == "entrada" else None,
-                            hora if tipo == "almoco" else None,
-                            hora if tipo == "cafe" else None,
-                            hora if tipo == "saida" else None,
+                            vals["entrada"],
+                            vals["cafe_ida"],
+                            vals["cafe_volta"],
+                            vals["almoco"],
+                            vals["almoco_volta"],
+                            vals["saida"],
                         ),
                     )
                     flash(f"{_rotulos_batida_ponto()[tipo]} às {hora}.", "success")
@@ -10478,7 +10589,7 @@ def ponto():
 
             cursor.execute(
                 """
-                SELECT id, data_ref, entrada, almoco, cafe, saida
+                SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
                 FROM ponto_registros
                 WHERE funcionario_id = %s AND data_ref = %s
                 """,
@@ -10486,15 +10597,13 @@ def ponto():
             )
             row = cursor.fetchone()
             if row:
-                registro = {
-                    "entrada": _fmt_hora_ponto(row.get("entrada")),
-                    "almoco": _fmt_hora_ponto(row.get("almoco")),
-                    "cafe": _fmt_hora_ponto(row.get("cafe")),
-                    "saida": _fmt_hora_ponto(row.get("saida")),
-                }
+                registro = _mapa_registro_ponto(row)
+            contadores = _contadores_intervalo_ponto(
+                registro, minutos_cafe, minutos_almoco, agora, agora.date()
+            )
             cursor.execute(
                 """
-                SELECT id, data_ref, entrada, almoco, cafe, saida
+                SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
                 FROM ponto_registros
                 WHERE funcionario_id = %s
                 ORDER BY data_ref DESC
@@ -10504,14 +10613,17 @@ def ponto():
             )
             historico = []
             for item in cursor.fetchall() or []:
+                m = _mapa_registro_ponto(item)
                 historico.append(
                     {
                         "id": item["id"],
                         "data_ref": item["data_ref"],
-                        "entrada": _fmt_hora_ponto(item.get("entrada")) or "—",
-                        "almoco": _fmt_hora_ponto(item.get("almoco")) or "—",
-                        "cafe": _fmt_hora_ponto(item.get("cafe")) or "—",
-                        "saida": _fmt_hora_ponto(item.get("saida")) or "—",
+                        "entrada": m["entrada"] or "—",
+                        "cafe_ida": m["cafe_ida"] or "—",
+                        "cafe_volta": m["cafe_volta"] or "—",
+                        "almoco": m["almoco"] or "—",
+                        "almoco_volta": m["almoco_volta"] or "—",
+                        "saida": m["saida"] or "—",
                     }
                 )
             cursor.execute(
@@ -10575,6 +10687,9 @@ def ponto():
         atestados=atestados,
         faltas=faltas,
         gestao=_pode_gestao_ponto(),
+        minutos_cafe=minutos_cafe,
+        minutos_almoco=minutos_almoco,
+        contadores=contadores,
     )
 
 
@@ -10841,7 +10956,7 @@ def ponto_relatorio_pdf():
                 return redirect(url_for("ponto"))
             cursor.execute(
                 """
-                SELECT data_ref, entrada, almoco, cafe, saida
+                SELECT data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
                 FROM ponto_registros
                 WHERE funcionario_id = %s AND data_ref BETWEEN %s AND %s
                 ORDER BY data_ref
@@ -10850,13 +10965,16 @@ def ponto_relatorio_pdf():
             )
             registros = []
             for item in cursor.fetchall() or []:
+                m = _mapa_registro_ponto(item)
                 registros.append(
                     {
                         "data_ref": item["data_ref"],
-                        "entrada": _fmt_hora_ponto(item.get("entrada")) or "—",
-                        "almoco": _fmt_hora_ponto(item.get("almoco")) or "—",
-                        "cafe": _fmt_hora_ponto(item.get("cafe")) or "—",
-                        "saida": _fmt_hora_ponto(item.get("saida")) or "—",
+                        "entrada": m["entrada"] or "—",
+                        "cafe_ida": m["cafe_ida"] or "—",
+                        "cafe_volta": m["cafe_volta"] or "—",
+                        "almoco": m["almoco"] or "—",
+                        "almoco_volta": m["almoco_volta"] or "—",
+                        "saida": m["saida"] or "—",
                     }
                 )
             cursor.execute(
@@ -11306,6 +11424,47 @@ def pagina_configuracoes():
                     flash(f"❌ Erro ao salvar parâmetros: {e}", "danger")
                 finally:
                     conexao.close()
+            return redirect(url_for("pagina_configuracoes"))
+
+        if acao == "salvar_ponto_tempos":
+            try:
+                minutos_cafe = int(request.form.get("ponto_minutos_cafe") or 15)
+                minutos_almoco = int(request.form.get("ponto_minutos_almoco") or 60)
+            except ValueError:
+                minutos_cafe, minutos_almoco = 15, 60
+            minutos_cafe = max(1, min(minutos_cafe, 240))
+            minutos_almoco = max(1, min(minutos_almoco, 240))
+            if conexao:
+                try:
+                    with conexao.cursor() as cursor:
+                        try:
+                            _garantir_ponto()
+                        except Exception:
+                            pass
+                        cursor.execute(
+                            "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT DEFAULT 15"
+                        )
+                        cursor.execute(
+                            "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT DEFAULT 60"
+                        )
+                        cursor.execute(
+                            """
+                            INSERT INTO configuracoes (id, ponto_minutos_cafe, ponto_minutos_almoco)
+                            VALUES (1, %s, %s)
+                            ON CONFLICT (id) DO UPDATE
+                            SET ponto_minutos_cafe = EXCLUDED.ponto_minutos_cafe,
+                                ponto_minutos_almoco = EXCLUDED.ponto_minutos_almoco
+                            """,
+                            (minutos_cafe, minutos_almoco),
+                        )
+                        conexao.commit()
+                        flash("Tempos de café e almoço do ponto salvos.", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"Não foi possível salvar os tempos do ponto: {e}", "danger")
+                finally:
+                    conexao.close()
+            return redirect(url_for("pagina_configuracoes") + "#ponto-tempos")
 
         return redirect(url_for("pagina_configuracoes"))
 

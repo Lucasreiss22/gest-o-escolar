@@ -984,6 +984,8 @@ def garantir_tabelas_folha():
                 ("financeiro_mensalidades", "juros_valor", "NUMERIC(12,2) DEFAULT 0"),
                 ("financeiro_mensalidades", "multa_valor", "NUMERIC(12,2) DEFAULT 0"),
                 ("configuracoes", "regime_apuracao", "VARCHAR(20) DEFAULT 'competencia'"),
+                ("configuracoes", "ponto_minutos_cafe", "INT DEFAULT 15"),
+                ("configuracoes", "ponto_minutos_almoco", "INT DEFAULT 60"),
                 ("configuracoes", "nfse_token", "TEXT"),
                 ("configuracoes", "nfse_ambiente", "VARCHAR(20) DEFAULT 'homologacao'"),
                 ("configuracoes", "nfse_cnpj", "VARCHAR(20)"),

@@ -1661,12 +1661,18 @@ def pdf_ponto(escola, colaborador, periodo_rotulo, registros, faltas=None, atest
         linhas.append([
             data or "—",
             item.get("entrada") or "—",
+            item.get("cafe_ida") or "—",
+            item.get("cafe_volta") or "—",
             item.get("almoco") or "—",
-            item.get("cafe") or "—",
+            item.get("almoco_volta") or item.get("cafe") or "—",
             item.get("saida") or "—",
         ])
     if linhas:
-        pdf.tabela(["Data", "Cheguei", "Almoço", "Voltei", "Saí"], linhas, [32, 30, 30, 30, 30])
+        pdf.tabela(
+            ["Data", "Cheguei", "Café↓", "Café↑", "Almoço↓", "Almoço↑", "Saí"],
+            linhas,
+            [24, 22, 22, 22, 24, 24, 22],
+        )
     else:
         pdf.paragrafo("Nenhuma batida neste período.")
     pdf.secao("Faltas e justificativas")

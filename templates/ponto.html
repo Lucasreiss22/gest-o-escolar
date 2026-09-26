@@ -24,14 +24,21 @@
         .alert-success { background: #dcfce7; color: #166534; }
         .alert-danger { background: #fee2e2; color: #991b1b; }
         .alert-warning { background: #fef9c3; color: #854d0e; }
-        table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+        table { width: 100%; border-collapse: collapse; font-size: .85rem; }
         th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
         .hint { color: #64748b; font-size: .88rem; margin: 0 0 14px; }
         .hora-agora { font-size: 1.6rem; font-weight: 700; color: #0f172a; margin: 0 0 8px; }
         .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-        .chip { background: #f1f5f9; border-radius: 999px; padding: 6px 12px; font-size: .82rem; font-weight: 700; color: #334155; }
-        .chip ok { background: #dcfce7; color: #166534; }
+        .chip { background: #f1f5f9; border-radius: 999px; padding: 6px 12px; font-size: .78rem; font-weight: 700; color: #334155; }
         .acoes-topo { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .contador {
+            border: 1px solid #cbd5e1; border-radius: 12px; padding: 14px 16px; margin-bottom: 10px;
+            background: #f8fafc;
+        }
+        .contador.esgotado { background: #fef2f2; border-color: #fecaca; }
+        .contador .titulo { font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+        .contador .tempo { font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+        .contador .meta { color: #64748b; font-size: .85rem; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -39,7 +46,7 @@
     {% include '_nav.html' %}
     <div class="content">
         <h2>Ponto</h2>
-        <p class="hint">{{ pessoa.nome_completo }}. Clique no botão na hora certa — o sistema grava o horário automaticamente. Não dá para digitar a hora.</p>
+        <p class="hint">{{ pessoa.nome_completo }}. Clique no botão na hora certa — o sistema grava o horário automaticamente.</p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
@@ -54,14 +61,34 @@
             <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='mes', data=data_ref) }}">PDF do mês</a>
         </div>
 
+        {% if contadores %}
+        <div class="card-box">
+            <h3 style="margin-top:0;">Tempo restante</h3>
+            <p class="hint">Limites da escola: café {{ minutos_cafe }} min · almoço {{ minutos_almoco }} min.</p>
+            {% for c in contadores %}
+            <div class="contador {% if c.esgotado %}esgotado{% endif %}" data-restante="{{ c.restante_seg }}">
+                <div class="titulo">{{ c.rotulo }}</div>
+                <div class="tempo" data-display>
+                    {% if c.esgotado %}Tempo esgotado{% else %}—{% endif %}
+                </div>
+                <div class="meta">
+                    Saída {{ c.inicio }} · limite {{ c.limite_min }} min · voltar até {{ c.fim_previsto }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         <div class="card-box">
             <h3 style="margin-top:0;">Batidas de hoje</h3>
             <p class="hora-agora">{{ hora_agora }}</p>
             <p class="hint">Data: {{ data_ref[8:10] }}/{{ data_ref[5:7] }}/{{ data_ref[0:4] }}</p>
             <div class="chips">
                 <span class="chip">Cheguei: {{ registro.entrada or '—' }}</span>
-                <span class="chip">Almoço: {{ registro.almoco or '—' }}</span>
-                <span class="chip">Voltei: {{ registro.cafe or '—' }}</span>
+                <span class="chip">Café↓: {{ registro.cafe_ida or '—' }}</span>
+                <span class="chip">Café↑: {{ registro.cafe_volta or '—' }}</span>
+                <span class="chip">Almoço↓: {{ registro.almoco or '—' }}</span>
+                <span class="chip">Almoço↑: {{ registro.almoco_volta or '—' }}</span>
                 <span class="chip">Saí: {{ registro.saida or '—' }}</span>
             </div>
             {% for tipo, rotulo in rotulos.items() %}
@@ -87,13 +114,16 @@
         {% if historico %}
         <div class="card-box">
             <h3>Histórico recente</h3>
+            <div style="overflow-x:auto;">
             <table>
                 <thead>
                     <tr>
                         <th>Data</th>
                         <th>Cheguei</th>
-                        <th>Almoço</th>
-                        <th>Voltei</th>
+                        <th>Café↓</th>
+                        <th>Café↑</th>
+                        <th>Almoço↓</th>
+                        <th>Almoço↑</th>
                         <th>Saí</th>
                         <th></th>
                     </tr>
@@ -103,8 +133,10 @@
                 <tr>
                     <td>{{ item.data_ref.strftime('%d/%m/%Y') if item.data_ref.strftime is defined else item.data_ref }}</td>
                     <td>{{ item.entrada or '—' }}</td>
+                    <td>{{ item.cafe_ida or '—' }}</td>
+                    <td>{{ item.cafe_volta or '—' }}</td>
                     <td>{{ item.almoco or '—' }}</td>
-                    <td>{{ item.cafe or '—' }}</td>
+                    <td>{{ item.almoco_volta or '—' }}</td>
                     <td>{{ item.saida or '—' }}</td>
                     <td>
                         <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir este registro de ponto?');">
@@ -117,6 +149,7 @@
                 {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
         {% endif %}
 
@@ -142,7 +175,7 @@
 
         <div class="card-box">
             <h3>Atestados</h3>
-            <p class="hint">Anexe o PDF. A secretaria confirma o atestado. Falta justificada por atestado aprovado não desconta na folha.</p>
+            <p class="hint">Anexe o PDF. A secretaria confirma o atestado.</p>
             <form method="POST" enctype="multipart/form-data" class="form-grid">
                 <input type="hidden" name="acao" value="enviar_atestado">
                 <div class="form-group">
@@ -219,6 +252,37 @@
             {% endif %}
         </div>
     </div>
+    <script>
+    (function () {
+        function fmt(seg) {
+            var s = Math.abs(seg|0);
+            var h = Math.floor(s / 3600);
+            var m = Math.floor((s % 3600) / 60);
+            var r = s % 60;
+            var base = (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+            if (h > 0) base = h + ':' + base;
+            return (seg < 0 ? '-' : '') + base;
+        }
+        function tick() {
+            document.querySelectorAll('.contador[data-restante]').forEach(function (el) {
+                var restante = parseInt(el.getAttribute('data-restante'), 10);
+                if (isNaN(restante)) return;
+                var display = el.querySelector('[data-display]');
+                if (!display) return;
+                if (restante <= 0) {
+                    el.classList.add('esgotado');
+                    display.textContent = 'Tempo esgotado (' + fmt(restante) + ')';
+                } else {
+                    el.classList.remove('esgotado');
+                    display.textContent = fmt(restante) + ' restantes';
+                }
+                el.setAttribute('data-restante', String(restante - 1));
+            });
+        }
+        tick();
+        setInterval(tick, 1000);
+    })();
+    </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

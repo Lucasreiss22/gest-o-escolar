@@ -117,6 +117,29 @@
             </form>
         </div>
 
+        <div class="card-box" id="ponto-tempos">
+            <h3 class="card-title">Ponto — tempos de café e almoço</h3>
+            <p style="color:#64748b;font-size:0.9rem;line-height:1.45;">
+                Defina o tempo máximo de café da manhã e de almoço. Na tela de ponto do colaborador aparece um contador
+                a partir da saída para o café ou para o almoço até a volta, com o limite estipulado aqui.
+                Entrada e saída da escola não têm contador.
+            </p>
+            <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
+                <input type="hidden" name="acao" value="salvar_ponto_tempos">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Tempo máximo de café (minutos)</label>
+                        <input type="number" name="ponto_minutos_cafe" min="1" max="240" value="{{ config.ponto_minutos_cafe or 15 }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Tempo máximo de almoço (minutos)</label>
+                        <input type="number" name="ponto_minutos_almoco" min="1" max="240" value="{{ config.ponto_minutos_almoco or 60 }}">
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Salvar tempos do ponto</button>
+            </form>
+        </div>
+
         {% if nfse_liberada %}
         <div class="card-box">
             <h3 class="card-title">Nota fiscal de serviço (NFS-e)</h3>
