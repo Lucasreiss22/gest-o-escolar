@@ -347,7 +347,18 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
 
     inss_f = inss_empregado(bruto)
     irrf = irrf_progressivo(bruto - inss_f)
-    descontos = inss_f + irrf
+    desconto_faltas = _num(func.get("desconto_faltas"))
+    desconto_dsr_faltas = _num(func.get("desconto_dsr_faltas"))
+    dias_falta = int(func.get("dias_falta_desconto") or 0)
+    semanas_dsr = int(func.get("semanas_dsr_falta") or 0)
+    descontos = inss_f + irrf + desconto_faltas + desconto_dsr_faltas
+    if desconto_faltas or desconto_dsr_faltas:
+        resultado["observacao"] += (
+            f" Faltas não justificadas confirmadas: {dias_falta} dia(s) "
+            f"({br_money(desconto_faltas)})"
+            + (f" + DSR de {semanas_dsr} semana(s) ({br_money(desconto_dsr_faltas)})" if desconto_dsr_faltas else "")
+            + " — Lei 605/1949."
+        )
     patronal = encargos_clt(bruto, regime)
     simples = (regime or "").lower() in ("simples_nacional", "simples")
     if simples:
@@ -363,6 +374,9 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
             "bruto": bruto,
             "inss_funcionario": inss_f,
             "irrf": irrf,
+            "desconto_faltas": round(desconto_faltas, 2),
+            "desconto_dsr_faltas": round(desconto_dsr_faltas, 2),
+            "dias_falta_desconto": dias_falta,
             "descontos": round(descontos, 2),
             "liquido": round(bruto - descontos, 2),
             "total": patronal["custo_escola"],

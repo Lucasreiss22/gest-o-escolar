@@ -13,15 +13,25 @@
         .form-group label { font-size: .82rem; font-weight: 700; color: #334155; }
         input, select, textarea { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: .9rem; }
         textarea { min-height: 72px; resize: vertical; }
-        .btn { padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; text-decoration: none; display: inline-block; font-size: .85rem; }
+        .btn { padding: 10px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; text-decoration: none; display: inline-block; font-size: .85rem; }
         .btn-primary { background: #3498db; color: #fff; }
+        .btn-success { background: #16a34a; color: #fff; }
         .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-secondary { background: #e2e8f0; color: #1e293b; }
+        .btn-batida { width: 100%; padding: 16px; font-size: 1rem; margin-bottom: 8px; }
+        .btn-batida:disabled { opacity: .45; cursor: not-allowed; }
         .alert { padding: 12px; border-radius: 8px; margin-bottom: 12px; }
         .alert-success { background: #dcfce7; color: #166534; }
         .alert-danger { background: #fee2e2; color: #991b1b; }
+        .alert-warning { background: #fef9c3; color: #854d0e; }
         table { width: 100%; border-collapse: collapse; font-size: .9rem; }
         th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
         .hint { color: #64748b; font-size: .88rem; margin: 0 0 14px; }
+        .hora-agora { font-size: 1.6rem; font-weight: 700; color: #0f172a; margin: 0 0 8px; }
+        .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+        .chip { background: #f1f5f9; border-radius: 999px; padding: 6px 12px; font-size: .82rem; font-weight: 700; color: #334155; }
+        .chip ok { background: #dcfce7; color: #166534; }
+        .acoes-topo { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
     </style>
 </head>
 <body>
@@ -29,39 +39,49 @@
     {% include '_nav.html' %}
     <div class="content">
         <h2>Ponto</h2>
-        <p class="hint">{{ pessoa.nome_completo }}. Registre os horários do dia e anexe atestados em PDF. A justificativa do atestado é opcional.</p>
+        <p class="hint">{{ pessoa.nome_completo }}. Clique no botão na hora certa — o sistema grava o horário automaticamente. Não dá para digitar a hora.</p>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
 
+        <div class="acoes-topo">
+            {% if gestao %}
+            <a class="btn btn-primary" href="{{ url_for('ponto_gestao') }}">Gestão do ponto (secretaria)</a>
+            {% endif %}
+            <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='dia', data=data_ref) }}">PDF do dia</a>
+            <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='semana', data=data_ref) }}">PDF da semana</a>
+            <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='mes', data=data_ref) }}">PDF do mês</a>
+        </div>
+
         <div class="card-box">
-            <h3>Horários do dia</h3>
-            <form method="POST" class="form-grid">
-                <input type="hidden" name="acao" value="salvar_ponto">
-                <div class="form-group">
-                    <label>Data</label>
-                    <input type="date" name="data_ref" value="{{ data_ref }}" required>
-                </div>
-                <div class="form-group">
-                    <label>Entrada</label>
-                    <input type="time" name="entrada" value="{{ registro.entrada or '' }}">
-                </div>
-                <div class="form-group">
-                    <label>Almoço</label>
-                    <input type="time" name="almoco" value="{{ registro.almoco or '' }}">
-                </div>
-                <div class="form-group">
-                    <label>Café</label>
-                    <input type="time" name="cafe" value="{{ registro.cafe or '' }}">
-                </div>
-                <div class="form-group">
-                    <label>Saída</label>
-                    <input type="time" name="saida" value="{{ registro.saida or '' }}">
-                </div>
-                <div class="form-group" style="justify-content:end;">
-                    <button class="btn btn-primary" type="submit">Salvar horários</button>
-                </div>
+            <h3 style="margin-top:0;">Batidas de hoje</h3>
+            <p class="hora-agora">{{ hora_agora }}</p>
+            <p class="hint">Data: {{ data_ref[8:10] }}/{{ data_ref[5:7] }}/{{ data_ref[0:4] }}</p>
+            <div class="chips">
+                <span class="chip">Cheguei: {{ registro.entrada or '—' }}</span>
+                <span class="chip">Almoço: {{ registro.almoco or '—' }}</span>
+                <span class="chip">Voltei: {{ registro.cafe or '—' }}</span>
+                <span class="chip">Saí: {{ registro.saida or '—' }}</span>
+            </div>
+            {% for tipo, rotulo in rotulos.items() %}
+            <form method="POST">
+                <input type="hidden" name="acao" value="bater_ponto">
+                <input type="hidden" name="tipo" value="{{ tipo }}">
+                <button class="btn btn-batida {% if proxima == tipo %}btn-success{% else %}btn-secondary{% endif %}"
+                        type="submit"
+                        {% if registro[tipo] or proxima != tipo %}disabled{% endif %}>
+                    {% if registro[tipo] %}
+                        {{ rotulo }} — {{ registro[tipo] }}
+                    {% else %}
+                        {{ rotulo }}
+                    {% endif %}
+                </button>
             </form>
+            {% endfor %}
+            {% if not proxima %}
+            <p class="hint">Todas as batidas de hoje já foram registradas.</p>
+            {% endif %}
         </div>
 
         {% if historico %}
@@ -71,10 +91,10 @@
                 <thead>
                     <tr>
                         <th>Data</th>
-                        <th>Entrada</th>
+                        <th>Cheguei</th>
                         <th>Almoço</th>
-                        <th>Café</th>
-                        <th>Saída</th>
+                        <th>Voltei</th>
+                        <th>Saí</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -87,7 +107,6 @@
                     <td>{{ item.cafe or '—' }}</td>
                     <td>{{ item.saida or '—' }}</td>
                     <td>
-                        <a class="btn btn-primary" href="{{ url_for('ponto', data=item.data_ref) }}">Abrir</a>
                         <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir este registro de ponto?');">
                             <input type="hidden" name="acao" value="excluir_ponto">
                             <input type="hidden" name="ponto_id" value="{{ item.id }}">
@@ -101,14 +120,42 @@
         </div>
         {% endif %}
 
+        {% if faltas %}
+        <div class="card-box">
+            <h3>Faltas / justificativas</h3>
+            <table>
+                <thead><tr><th>Data</th><th>Tipo</th><th>Status</th><th>Desconto</th><th>Motivo</th></tr></thead>
+                <tbody>
+                {% for f in faltas %}
+                <tr>
+                    <td>{{ f.data_ref.strftime('%d/%m/%Y') if f.data_ref.strftime is defined else f.data_ref }}</td>
+                    <td>{% if f.tipo == 'nao_justificada' %}Não justificada{% else %}Justificada{% endif %}</td>
+                    <td>{{ f.status or '—' }}</td>
+                    <td>{% if f.tipo == 'nao_justificada' and f.descontar and f.status == 'confirmada' %}Sim (folha){% elif f.tipo == 'nao_justificada' %}A definir{% else %}Não{% endif %}</td>
+                    <td>{{ f.motivo or '—' }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         <div class="card-box">
             <h3>Atestados</h3>
-            <p class="hint">Anexe o PDF do atestado. A justificativa não é obrigatória.</p>
+            <p class="hint">Anexe o PDF. A secretaria confirma o atestado. Falta justificada por atestado aprovado não desconta na folha.</p>
             <form method="POST" enctype="multipart/form-data" class="form-grid">
                 <input type="hidden" name="acao" value="enviar_atestado">
                 <div class="form-group">
                     <label>Título</label>
                     <input type="text" name="titulo" placeholder="Ex.: Atestado médico">
+                </div>
+                <div class="form-group">
+                    <label>Início</label>
+                    <input type="date" name="data_inicio" value="{{ data_ref }}" required>
+                </div>
+                <div class="form-group">
+                    <label>Fim</label>
+                    <input type="date" name="data_fim" value="{{ data_ref }}" required>
                 </div>
                 <div class="form-group" style="grid-column: 1 / -1;">
                     <label>Justificativa (opcional)</label>
@@ -119,7 +166,7 @@
                     <input type="file" name="arquivo" accept="application/pdf" required>
                 </div>
                 <div class="form-group" style="justify-content:end;">
-                    <button class="btn btn-primary" type="submit">Guardar atestado</button>
+                    <button class="btn btn-primary" type="submit">Enviar para confirmação</button>
                 </div>
             </form>
 
@@ -127,30 +174,43 @@
             <table style="margin-top:16px;">
                 <thead>
                     <tr>
-                        <th>Data</th>
+                        <th>Período</th>
                         <th>Título</th>
-                        <th>Justificativa</th>
+                        <th>Status</th>
                         <th></th>
                     </tr>
                 </thead>
                 <tbody>
                 {% for item in atestados %}
                 <tr>
-                    <td>{{ item.criado_em.strftime('%d/%m/%Y') if item.criado_em and item.criado_em.strftime is defined else (item.criado_em or '—') }}</td>
+                    <td>
+                        {% if item.data_inicio %}
+                            {{ item.data_inicio.strftime('%d/%m/%Y') if item.data_inicio.strftime is defined else item.data_inicio }}
+                            {% if item.data_fim %} — {{ item.data_fim.strftime('%d/%m/%Y') if item.data_fim.strftime is defined else item.data_fim }}{% endif %}
+                        {% else %}
+                            {{ item.criado_em.strftime('%d/%m/%Y') if item.criado_em and item.criado_em.strftime is defined else (item.criado_em or '—') }}
+                        {% endif %}
+                    </td>
                     <td>{{ item.titulo or 'Atestado' }}</td>
-                    <td>{{ item.justificativa or '—' }}</td>
+                    <td>
+                        {% if item.status == 'aprovado' %}Aprovado
+                        {% elif item.status == 'rejeitado' %}Rejeitado
+                        {% else %}Aguardando secretaria{% endif %}
+                    </td>
                     <td>
                         {% if item.origem == 'legado' %}
                         <a class="btn btn-primary" href="{{ url_for('arquivo_professor', arquivo_id=item.id) }}" target="_blank" rel="noopener">Abrir</a>
                         {% else %}
                         <a class="btn btn-primary" href="{{ url_for('atestado_ponto', atestado_id=item.id) }}" target="_blank" rel="noopener">Abrir</a>
                         {% endif %}
+                        {% if item.status == 'pendente' or not item.status %}
                         <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir este atestado?');">
                             <input type="hidden" name="acao" value="excluir_atestado">
                             <input type="hidden" name="atestado_id" value="{{ item.id }}">
                             <input type="hidden" name="origem" value="{{ item.origem }}">
                             <button class="btn btn-danger" type="submit">Excluir</button>
                         </form>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

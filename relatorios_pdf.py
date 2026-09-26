@@ -1637,9 +1637,70 @@ def pdf_contracheque(escola, mes_label, item):
     pdf.linha("Bruto", _brl((item or {}).get("bruto")), negrito=True)
     pdf.linha("INSS", _brl((item or {}).get("inss_funcionario")))
     pdf.linha("IRRF", _brl((item or {}).get("irrf")))
+    if (item or {}).get("desconto_faltas"):
+        pdf.linha("Faltas não justificadas", _brl(item.get("desconto_faltas")))
+    if (item or {}).get("desconto_dsr_faltas"):
+        pdf.linha("DSR por faltas", _brl(item.get("desconto_dsr_faltas")))
     pdf.linha("Líquido", _brl((item or {}).get("liquido")), negrito=True)
     if (item or {}).get("observacao"):
         pdf.paragrafo(item.get("observacao"))
+    return _saida(pdf)
+
+
+def pdf_ponto(escola, colaborador, periodo_rotulo, registros, faltas=None, atestados=None):
+    pdf = RelatorioPDF("Relatório de ponto")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola or 'Gestão Escolar'} · {colaborador or 'Colaborador'}")
+    pdf.linha("Período", periodo_rotulo or "—")
+    pdf.secao("Batidas")
+    linhas = []
+    for item in registros or []:
+        data = item.get("data_ref")
+        if hasattr(data, "strftime"):
+            data = data.strftime("%d/%m/%Y")
+        linhas.append([
+            data or "—",
+            item.get("entrada") or "—",
+            item.get("almoco") or "—",
+            item.get("cafe") or "—",
+            item.get("saida") or "—",
+        ])
+    if linhas:
+        pdf.tabela(["Data", "Cheguei", "Almoço", "Voltei", "Saí"], linhas, [32, 30, 30, 30, 30])
+    else:
+        pdf.paragrafo("Nenhuma batida neste período.")
+    pdf.secao("Faltas e justificativas")
+    linhas = []
+    for item in faltas or []:
+        data = item.get("data_ref")
+        if hasattr(data, "strftime"):
+            data = data.strftime("%d/%m/%Y")
+        tipo = "Não justificada" if item.get("tipo") == "nao_justificada" else "Justificada"
+        desc = "Sim" if item.get("descontar") and item.get("status") == "confirmada" and item.get("tipo") == "nao_justificada" else "Não"
+        linhas.append([data or "—", tipo, item.get("status") or "—", desc, (item.get("motivo") or "—")[:40]])
+    if linhas:
+        pdf.tabela(["Data", "Tipo", "Status", "Desconto", "Motivo"], linhas, [28, 32, 28, 24, 50])
+    else:
+        pdf.paragrafo("Nenhuma falta neste período.")
+    pdf.secao("Atestados")
+    linhas = []
+    for item in atestados or []:
+        ini = item.get("data_inicio") or item.get("criado_em")
+        fim = item.get("data_fim")
+        if hasattr(ini, "strftime"):
+            ini = ini.strftime("%d/%m/%Y")
+        if hasattr(fim, "strftime"):
+            fim = fim.strftime("%d/%m/%Y")
+        periodo = f"{ini or '—'}" + (f" a {fim}" if fim else "")
+        linhas.append([periodo, item.get("titulo") or "Atestado", item.get("status") or "—"])
+    if linhas:
+        pdf.tabela(["Período", "Título", "Status"], linhas, [50, 80, 40])
+    else:
+        pdf.paragrafo("Nenhum atestado neste período.")
+    pdf.paragrafo(
+        "Falta não justificada confirmada com desconto: dia + DSR da semana (Lei 605/1949). "
+        "Atestado aprovado gera falta justificada sem desconto."
+    )
     return _saida(pdf)
 
 
