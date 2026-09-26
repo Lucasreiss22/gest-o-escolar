@@ -33,20 +33,30 @@
         <h2>⚙️ Configurações da instituição</h2>
 
         <div class="card-box">
-            <h3 class="card-title">Logo da escola</h3>
+            <h3 class="card-title">Identidade das provas</h3>
             <p style="color:#64748b;font-size:0.9rem;line-height:1.45;">
-                A logo entra no topo da prova, junto com o nome e a data para o aluno preencher e a turma já preenchida. Esse bloco não tem borda.
+                A logo e a tarja entram no topo de todas as provas geradas pelo sistema, junto com nome, matrícula, data e nota em branco, e a turma já preenchida. Esse bloco não tem borda.
             </p>
             {% if config.logo_escola %}
             <p><img src="{{ url_for('servir_midia', midia_id=config.logo_escola.split('/')[-1]|int) }}" alt="Logo da escola" style="max-height:72px;"></p>
             {% endif %}
+            {% if config.mensagem_prova %}
+            <p style="margin:0 0 12px;padding:10px 12px;background:#eff6ff;color:#1e3a5f;border-radius:8px;font-weight:600;">{{ config.mensagem_prova }}</p>
+            {% endif %}
             <form action="{{ url_for('pagina_configuracoes') }}" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="acao" value="salvar_logo">
-                <div class="form-group" style="max-width:360px;">
-                    <label>Imagem da logo (PNG ou JPG)</label>
-                    <input type="file" name="logo_escola" accept="image/png,image/jpeg,image/webp" required>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Imagem da logo (PNG ou JPG)</label>
+                        <input type="file" name="logo_escola" accept="image/png,image/jpeg,image/webp">
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Tarja / mensagem das provas</label>
+                        <input type="text" name="mensagem_prova" maxlength="500" value="{{ config.mensagem_prova or '' }}" placeholder="Ex.: Colégio São José — Ensino Fundamental · Avaliações 2026">
+                    </div>
                 </div>
-                <button type="submit" class="btn btn-primary">Salvar logo</button>
+                <p style="color:#64748b;font-size:0.85rem;margin:0 0 12px;">Use a tarja para um nome mais longo, um slogan ou uma mensagem que deve aparecer em todas as provas. Pode salvar só a tarja, sem trocar a logo.</p>
+                <button type="submit" class="btn btn-primary">Salvar identidade das provas</button>
             </form>
         </div>
 

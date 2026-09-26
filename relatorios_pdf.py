@@ -39,7 +39,7 @@ class _ProvaPDF(FPDF):
         return
 
 
-def pdf_prova(escola, turma, titulo, materia, questoes, logo=None, com_gabarito=False):
+def pdf_prova(escola, turma, titulo, materia, questoes, logo=None, com_gabarito=False, tarja=""):
     """Prova para o aluno preencher. O cabeçalho não tem borda."""
     pdf = _ProvaPDF()
     pdf.add_page()
@@ -63,11 +63,22 @@ def pdf_prova(escola, turma, titulo, materia, questoes, logo=None, com_gabarito=
     pdf.set_xy(texto_x, topo)
     pdf.cell(0, 6, "Nome: ________________________________", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(texto_x)
+    pdf.cell(0, 6, "Matrícula: ________________________", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(texto_x)
     pdf.cell(0, 6, "Data: ________________________________", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(texto_x)
     pdf.cell(0, 6, f"Turma: {turma or '—'}", new_x="LMARGIN", new_y="NEXT")
-    if pdf.get_y() < topo + 18:
-        pdf.set_y(topo + 18)
+    pdf.set_x(texto_x)
+    pdf.cell(0, 6, "Nota: ________", new_x="LMARGIN", new_y="NEXT")
+    if pdf.get_y() < topo + 30:
+        pdf.set_y(topo + 30)
+    tarja = (tarja or "").strip()
+    if tarja:
+        pdf.ln(2)
+        pdf.set_x(12)
+        pdf.set_font(pdf.fonte, "B", 11)
+        pdf.multi_cell(0, 6, tarja, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(pdf.fonte, "", 12)
     pdf.ln(3)
     pdf.set_x(12)
     pdf.set_font(pdf.fonte, "B", 14)

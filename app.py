@@ -3642,6 +3642,19 @@ def _garantir_sala_professor(cursor):
         """
     )
     cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)")
+    cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mensagem_prova TEXT")
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provas_notas (
+            id SERIAL PRIMARY KEY,
+            prova_id INT NOT NULL REFERENCES provas_criadas(id) ON DELETE CASCADE,
+            aluno_id INT NOT NULL,
+            nota VARCHAR(20) NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (prova_id, aluno_id)
+        )
+        """
+    )
 
 
 def _professor_da_sessao(cursor, funcionario_id):
@@ -3849,6 +3862,77 @@ def sala_professor():
                         (prova_id, pessoa["id"]),
                     )
                     flash("Prova excluída e retirada do calendário.", "success")
+                elif acao == "lancar_nota":
+                    prova_id = request.form.get("prova_id", type=int)
+                    cursor.execute(
+                        "SELECT id, turma_id FROM provas_criadas WHERE id = %s AND funcionario_id = %s",
+                        (prova_id, pessoa["id"]),
+                    )
+                    prova = cursor.fetchone()
+                    if not prova:
+                        raise ValueError("Prova não encontrada.")
+                    busca = (request.form.get("busca_aluno") or "").strip()
+                    if not busca:
+                        raise ValueError("Informe a matrícula ou o CPF do aluno.")
+                    digitos = "".join(ch for ch in busca if ch.isdigit())
+                    params = [f"%{busca}%", f"%{busca}%", f"%{digitos or busca}%"]
+                    sql_aluno = """
+                        SELECT a.id, a.nome_completo, a.matricula, a.cpf
+                        FROM alunos a
+                        WHERE (
+                            COALESCE(a.matricula, '') ILIKE %s
+                            OR COALESCE(a.cpf, '') ILIKE %s
+                            OR regexp_replace(COALESCE(a.cpf, ''), '[^0-9]', '', 'g') LIKE %s
+                        )
+                    """
+                    if prova.get("turma_id"):
+                        sql_aluno += """
+                            AND EXISTS (
+                                SELECT 1 FROM turma_alunos ta
+                                WHERE ta.aluno_id = a.id AND ta.turma_id = %s
+                            )
+                        """
+                        params.append(prova["turma_id"])
+                    sql_aluno += " ORDER BY a.nome_completo LIMIT 8"
+                    cursor.execute(sql_aluno, params)
+                    encontrados = cursor.fetchall() or []
+                    if not encontrados:
+                        raise ValueError("Nenhum aluno encontrado com essa matrícula ou CPF.")
+                    if len(encontrados) > 1:
+                        raise ValueError(
+                            "Achei mais de um aluno. Use a matrícula completa ou o CPF completo."
+                        )
+                    aluno = encontrados[0]
+                    nota = (request.form.get("nota") or "").strip()
+                    if not nota:
+                        raise ValueError("Informe a nota.")
+                    if len(nota) > 20:
+                        raise ValueError("A nota pode ter no máximo 20 caracteres.")
+                    cursor.execute(
+                        """
+                        INSERT INTO provas_notas (prova_id, aluno_id, nota)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (prova_id, aluno_id)
+                        DO UPDATE SET nota = EXCLUDED.nota
+                        """,
+                        (prova_id, aluno["id"], nota),
+                    )
+                    flash(
+                        f"Nota {nota} lançada para {aluno.get('nome_completo')} "
+                        f"(Mat. {aluno.get('matricula') or '—'}).",
+                        "success",
+                    )
+                elif acao == "excluir_nota":
+                    nota_id = request.form.get("nota_id", type=int)
+                    cursor.execute(
+                        """
+                        DELETE FROM provas_notas n
+                        USING provas_criadas p
+                        WHERE n.id = %s AND n.prova_id = p.id AND p.funcionario_id = %s
+                        """,
+                        (nota_id, pessoa["id"]),
+                    )
+                    flash("Nota removida.", "success")
                 conexao.commit()
                 return redirect(url_for("sala_professor"))
             cursor.execute(
@@ -3873,7 +3957,26 @@ def sala_professor():
                 (pessoa["id"],),
             )
             provas = cursor.fetchall() or []
-            cursor.execute("SELECT logo_escola, nome_escola FROM configuracoes WHERE id = 1")
+            notas_por_prova = {}
+            if provas:
+                ids = [item["id"] for item in provas]
+                cursor.execute(
+                    """
+                    SELECT n.id, n.prova_id, n.nota, a.nome_completo, a.matricula, a.cpf
+                    FROM provas_notas n
+                    JOIN alunos a ON a.id = n.aluno_id
+                    WHERE n.prova_id = ANY(%s)
+                    ORDER BY a.nome_completo
+                    """,
+                    (ids,),
+                )
+                for row in cursor.fetchall() or []:
+                    notas_por_prova.setdefault(row["prova_id"], []).append(row)
+            for prova in provas:
+                prova["notas"] = notas_por_prova.get(prova["id"], [])
+            cursor.execute(
+                "SELECT logo_escola, nome_escola, mensagem_prova FROM configuracoes WHERE id = 1"
+            )
             escola = cursor.fetchone() or {}
     except Exception as e:
         conexao.rollback()
@@ -3935,7 +4038,9 @@ def prova_pdf(prova_id):
                     "alternativas": [parte for parte in (item.get("alternativas") or "").split("\n")],
                     "resposta": item.get("resposta"),
                 })
-            cursor.execute("SELECT nome_escola, logo_escola FROM configuracoes WHERE id = 1")
+            cursor.execute(
+                "SELECT nome_escola, logo_escola, mensagem_prova FROM configuracoes WHERE id = 1"
+            )
             cfg = cursor.fetchone() or {}
             logo = None
             caminho = cfg.get("logo_escola") or ""
@@ -3944,6 +4049,7 @@ def prova_pdf(prova_id):
                 mid = cursor.fetchone()
                 if mid and mid.get("dados"):
                     logo = (bytes(mid["dados"]), mid.get("mime"))
+            tarja = (cfg.get("mensagem_prova") or "").strip()
     except Exception as e:
         flash(str(e), "danger")
         return redirect(url_for("sala_professor"))
@@ -3957,6 +4063,7 @@ def prova_pdf(prova_id):
         questoes,
         logo=logo,
         com_gabarito=request.args.get("gabarito") == "1",
+        tarja=tarja,
     )
     nome = "gabarito" if request.args.get("gabarito") == "1" else "prova"
     return send_file(
@@ -8278,26 +8385,46 @@ def pagina_configuracoes():
             if conexao:
                 try:
                     caminho = _salvar_foto("logo_escola")
-                    if not caminho:
-                        raise ValueError("Escolha a imagem da logo.")
+                    mensagem = (request.form.get("mensagem_prova") or "").strip()[:500]
                     with conexao.cursor() as cursor:
                         cursor.execute(
                             "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)"
                         )
                         cursor.execute(
-                            "UPDATE configuracoes SET logo_escola = %s WHERE id = 1",
-                            (caminho,),
+                            "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mensagem_prova TEXT"
                         )
-                        if cursor.rowcount == 0:
+                        if caminho:
                             cursor.execute(
-                                "INSERT INTO configuracoes (id, logo_escola) VALUES (1, %s)",
-                                (caminho,),
+                                """
+                                UPDATE configuracoes
+                                SET logo_escola = %s, mensagem_prova = %s
+                                WHERE id = 1
+                                """,
+                                (caminho, mensagem or None),
                             )
+                            if cursor.rowcount == 0:
+                                cursor.execute(
+                                    """
+                                    INSERT INTO configuracoes (id, logo_escola, mensagem_prova)
+                                    VALUES (1, %s, %s)
+                                    """,
+                                    (caminho, mensagem or None),
+                                )
+                        else:
+                            cursor.execute(
+                                "UPDATE configuracoes SET mensagem_prova = %s WHERE id = 1",
+                                (mensagem or None,),
+                            )
+                            if cursor.rowcount == 0:
+                                cursor.execute(
+                                    "INSERT INTO configuracoes (id, mensagem_prova) VALUES (1, %s)",
+                                    (mensagem or None,),
+                                )
                         conexao.commit()
-                        flash("Logo da escola salva. Ela entra no topo da prova.", "success")
+                        flash("Identidade das provas salva (logo e tarja).", "success")
                 except Exception as e:
                     conexao.rollback()
-                    flash(f"Não foi possível salvar a logo: {e}", "danger")
+                    flash(f"Não foi possível salvar a identidade das provas: {e}", "danger")
                 finally:
                     conexao.close()
             return redirect(url_for("pagina_configuracoes"))
@@ -8351,6 +8478,9 @@ def pagina_configuracoes():
                 try:
                     cursor.execute(
                         "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)"
+                    )
+                    cursor.execute(
+                        "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mensagem_prova TEXT"
                     )
                     cursor.execute("SELECT * FROM configuracoes WHERE id = 1;")
                     config = preparar_config_tela(cursor.fetchone() or {})
