@@ -548,7 +548,7 @@ def garantir_tabelas_pedagogicas():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ped_bncc_v1"
+    chave = f"{schema}:ped_bncc_v2"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -619,6 +619,17 @@ def garantir_tabelas_pedagogicas():
                     aluno_id INT,
                     horario TIME
                 );
+                CREATE TABLE IF NOT EXISTS provas_notas (
+                    id SERIAL PRIMARY KEY,
+                    aluno_id INT,
+                    turma_id INT,
+                    materia VARCHAR(100),
+                    trimestre SMALLINT,
+                    titulo_avaliacao VARCHAR(150),
+                    nota NUMERIC(6,2),
+                    arquivo_pdf VARCHAR(255),
+                    data_registro DATE DEFAULT CURRENT_DATE
+                );
                 """
             )
             mapa = _mapa_colunas(cursor)
@@ -652,8 +663,23 @@ def garantir_tabelas_pedagogicas():
                 ("disciplinas", "ativo", "BOOLEAN DEFAULT TRUE"),
                 ("disciplinas", "carga_horaria_semanal", "INT"),
                 ("funcionarios", "foto_url", "VARCHAR(255)"),
+                ("provas_notas", "prova_criada_id", "INT"),
+                ("provas_notas", "arquivo_midia_id", "INT"),
+                ("provas_notas", "origem", "VARCHAR(40)"),
+                ("provas_notas", "justificativa", "TEXT"),
+                ("provas_notas", "data_aplicacao", "DATE"),
             ):
                 _garantir_coluna(cursor, tabela, coluna, spec, mapa)
+            try:
+                cursor.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS provas_notas_prova_aluno_uidx
+                    ON provas_notas (prova_criada_id, aluno_id)
+                    WHERE prova_criada_id IS NOT NULL
+                    """
+                )
+            except Exception:
+                pass
             cursor.execute(
                 """
                 UPDATE disciplinas

@@ -3665,7 +3665,7 @@ def _garantir_sala_professor():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:sala_prof_v3"
+    chave = f"{schema}:sala_prof_v4"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -4016,30 +4016,60 @@ def _sincronizar_nota_aluno(
     data_aplicacao=None,
     origem="professor_sistema",
 ):
+    """Grava a nota do professor na mesma tabela do cadastro do aluno (provas_notas)."""
+    for sql in (
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS prova_criada_id INT",
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS arquivo_midia_id INT",
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS origem VARCHAR(40)",
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS justificativa TEXT",
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS data_aplicacao DATE",
+    ):
+        cursor.execute(sql)
     nota_num = _nota_para_cadastro(nota)
     if nota_num is None:
         raise ValueError("Informe a nota em formato numérico (ex.: 8,5) para gravar no cadastro do aluno.")
     trimestre = _trimestre_da_data(data_aplicacao or date.today())
+    data_txt = None
+    if data_aplicacao:
+        data_txt = data_aplicacao if isinstance(data_aplicacao, str) else str(data_aplicacao)[:10]
     if prova_criada_id:
         cursor.execute(
             """
-            UPDATE provas_notas
-            SET nota = %s, materia = COALESCE(NULLIF(%s, ''), materia),
-                titulo_avaliacao = COALESCE(NULLIF(%s, ''), titulo_avaliacao),
-                turma_id = COALESCE(%s, turma_id),
-                arquivo_midia_id = COALESCE(%s, arquivo_midia_id),
-                origem = %s,
-                data_aplicacao = COALESCE(%s, data_aplicacao),
-                trimestre = COALESCE(trimestre, %s),
-                data_registro = CURRENT_DATE
+            SELECT id FROM provas_notas
             WHERE prova_criada_id = %s AND aluno_id = %s
+            LIMIT 1
             """,
-            (
-                nota_num, materia or "", titulo or "", turma_id, arquivo_midia_id,
-                origem, data_aplicacao, trimestre, prova_criada_id, aluno_id,
-            ),
+            (prova_criada_id, aluno_id),
         )
-        if cursor.rowcount:
+        existente = cursor.fetchone()
+        if existente:
+            nota_id = existente["id"] if isinstance(existente, dict) else existente[0]
+            cursor.execute(
+                """
+                UPDATE provas_notas
+                SET nota = %s,
+                    materia = COALESCE(NULLIF(%s, ''), materia),
+                    titulo_avaliacao = COALESCE(NULLIF(%s, ''), titulo_avaliacao),
+                    turma_id = COALESCE(%s, turma_id),
+                    arquivo_midia_id = COALESCE(%s, arquivo_midia_id),
+                    origem = %s,
+                    data_aplicacao = COALESCE(%s, data_aplicacao),
+                    trimestre = COALESCE(%s, trimestre),
+                    data_registro = CURRENT_DATE
+                WHERE id = %s
+                """,
+                (
+                    nota_num,
+                    materia or "",
+                    titulo or "",
+                    turma_id,
+                    arquivo_midia_id,
+                    origem,
+                    data_txt,
+                    trimestre,
+                    nota_id,
+                ),
+            )
             return
     cursor.execute(
         """
@@ -4050,11 +4080,83 @@ def _sincronizar_nota_aluno(
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
-            aluno_id, turma_id, (materia or "Prova")[:100], trimestre,
-            (titulo or "Prova")[:150], nota_num, prova_criada_id,
-            arquivo_midia_id, origem, data_aplicacao,
+            aluno_id,
+            turma_id,
+            (materia or "Prova")[:100],
+            trimestre,
+            (titulo or "Prova")[:150],
+            nota_num,
+            prova_criada_id,
+            arquivo_midia_id,
+            origem,
+            data_txt,
         ),
     )
+
+
+def _backfill_notas_professor(cursor, aluno_id=None, prova_ids=None):
+    """Copia notas antigas de provas_criadas_notas para provas_notas (mesma tabela do cadastro)."""
+    for sql in (
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS prova_criada_id INT",
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS arquivo_midia_id INT",
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS origem VARCHAR(40)",
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS justificativa TEXT",
+        "ALTER TABLE provas_notas ADD COLUMN IF NOT EXISTS data_aplicacao DATE",
+    ):
+        try:
+            cursor.execute(sql)
+        except Exception:
+            pass
+    params = []
+    filtro = ""
+    if aluno_id:
+        filtro += " AND n.aluno_id = %s"
+        params.append(aluno_id)
+    if prova_ids:
+        filtro += " AND n.prova_id = ANY(%s)"
+        params.append(list(prova_ids))
+    cursor.execute(
+        f"""
+        SELECT n.prova_id, n.aluno_id, n.nota, p.turma_id, p.materia, p.titulo, p.data_aplicacao
+        FROM provas_criadas_notas n
+        JOIN provas_criadas p ON p.id = n.prova_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM provas_notas pn
+            WHERE pn.prova_criada_id = n.prova_id AND pn.aluno_id = n.aluno_id
+              AND pn.nota IS NOT NULL
+        )
+        {filtro}
+        """,
+        params,
+    )
+    pendentes = cursor.fetchall() or []
+    for row in pendentes:
+        if isinstance(row, dict):
+            item = row
+        else:
+            item = {
+                "prova_id": row[0],
+                "aluno_id": row[1],
+                "nota": row[2],
+                "turma_id": row[3],
+                "materia": row[4],
+                "titulo": row[5],
+                "data_aplicacao": row[6],
+            }
+        try:
+            _sincronizar_nota_aluno(
+                cursor,
+                aluno_id=item["aluno_id"],
+                turma_id=item.get("turma_id"),
+                materia=item.get("materia"),
+                titulo=item.get("titulo"),
+                nota=item.get("nota"),
+                prova_criada_id=item["prova_id"],
+                data_aplicacao=item.get("data_aplicacao"),
+                origem="professor_sistema",
+            )
+        except Exception:
+            continue
 
 
 def _ajustar_data_prova_aluno(
@@ -4514,15 +4616,7 @@ def sala_professor():
                         raise ValueError("Informe a nota.")
                     if len(nota) > 20:
                         raise ValueError("A nota pode ter no máximo 20 caracteres.")
-                    cursor.execute(
-                        """
-                        INSERT INTO provas_criadas_notas (prova_id, aluno_id, nota)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT (prova_id, aluno_id)
-                        DO UPDATE SET nota = EXCLUDED.nota
-                        """,
-                        (prova_id, aluno["id"], nota),
-                    )
+                    # Cadastro do aluno (tabela unica provas_notas) — fonte da verdade
                     _sincronizar_nota_aluno(
                         cursor,
                         aluno_id=aluno["id"],
@@ -4534,43 +4628,69 @@ def sala_professor():
                         data_aplicacao=prova.get("data_aplicacao"),
                         origem="professor_sistema",
                     )
+                    # Espelho leve para a lista da tela Minhas provas
+                    cursor.execute(
+                        """
+                        INSERT INTO provas_criadas_notas (prova_id, aluno_id, nota)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (prova_id, aluno_id)
+                        DO UPDATE SET nota = EXCLUDED.nota
+                        """,
+                        (prova_id, aluno["id"], nota),
+                    )
                     flash(
                         f"Nota {nota} lançada para {aluno.get('nome_completo')} "
-                        f"(Mat. {aluno.get('matricula') or '—'}) e enviada ao cadastro do aluno.",
+                        f"(Mat. {aluno.get('matricula') or '—'}) e gravada no cadastro do aluno.",
                         "success",
                     )
                 elif acao == "excluir_nota":
                     nota_id = request.form.get("nota_id", type=int)
                     cursor.execute(
                         """
-                        SELECT n.prova_id, n.aluno_id
-                        FROM provas_criadas_notas n
-                        JOIN provas_criadas p ON p.id = n.prova_id
+                        SELECT n.prova_criada_id, n.aluno_id
+                        FROM provas_notas n
+                        JOIN provas_criadas p ON p.id = n.prova_criada_id
                         WHERE n.id = %s AND p.funcionario_id = %s
                         """,
                         (nota_id, pessoa["id"]),
                     )
                     vinculada = cursor.fetchone()
-                    cursor.execute(
-                        """
-                        DELETE FROM provas_criadas_notas n
-                        USING provas_criadas p
-                        WHERE n.id = %s AND n.prova_id = p.id AND p.funcionario_id = %s
-                        """,
-                        (nota_id, pessoa["id"]),
-                    )
                     if vinculada:
-                        pid = vinculada["prova_id"] if isinstance(vinculada, dict) else vinculada[0]
+                        pid = vinculada["prova_criada_id"] if isinstance(vinculada, dict) else vinculada[0]
                         aid = vinculada["aluno_id"] if isinstance(vinculada, dict) else vinculada[1]
+                        cursor.execute("DELETE FROM provas_notas WHERE id = %s", (nota_id,))
                         cursor.execute(
-                            """
-                            UPDATE provas_notas
-                            SET nota = NULL
-                            WHERE prova_criada_id = %s AND aluno_id = %s
-                            """,
+                            "DELETE FROM provas_criadas_notas WHERE prova_id = %s AND aluno_id = %s",
                             (pid, aid),
                         )
-                    flash("Nota removida.", "success")
+                    else:
+                        # Compatibilidade com IDs antigos do espelho
+                        cursor.execute(
+                            """
+                            SELECT n.prova_id, n.aluno_id
+                            FROM provas_criadas_notas n
+                            JOIN provas_criadas p ON p.id = n.prova_id
+                            WHERE n.id = %s AND p.funcionario_id = %s
+                            """,
+                            (nota_id, pessoa["id"]),
+                        )
+                        antiga = cursor.fetchone()
+                        cursor.execute(
+                            """
+                            DELETE FROM provas_criadas_notas n
+                            USING provas_criadas p
+                            WHERE n.id = %s AND n.prova_id = p.id AND p.funcionario_id = %s
+                            """,
+                            (nota_id, pessoa["id"]),
+                        )
+                        if antiga:
+                            pid = antiga["prova_id"] if isinstance(antiga, dict) else antiga[0]
+                            aid = antiga["aluno_id"] if isinstance(antiga, dict) else antiga[1]
+                            cursor.execute(
+                                "DELETE FROM provas_notas WHERE prova_criada_id = %s AND aluno_id = %s",
+                                (pid, aid),
+                            )
+                    flash("Nota removida do cadastro do aluno.", "success")
                 elif acao == "ajustar_data_prova_aluno":
                     agenda_id = request.form.get("agenda_id", type=int)
                     nova_data = (request.form.get("nova_data") or "").strip()
@@ -4631,18 +4751,39 @@ def sala_professor():
             notas_por_prova = {}
             if provas:
                 ids = [item["id"] for item in provas]
+                _backfill_notas_professor(cursor, prova_ids=ids)
+                try:
+                    conexao.commit()
+                except Exception:
+                    pass
                 cursor.execute(
                     """
-                    SELECT n.id, n.prova_id, n.nota, a.nome_completo, a.matricula, a.cpf
-                    FROM provas_criadas_notas n
+                    SELECT n.id, n.prova_criada_id AS prova_id,
+                           TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM n.nota::text)) AS nota,
+                           a.nome_completo, a.matricula, a.cpf
+                    FROM provas_notas n
                     JOIN alunos a ON a.id = n.aluno_id
-                    WHERE n.prova_id = ANY(%s)
+                    WHERE n.prova_criada_id = ANY(%s) AND n.nota IS NOT NULL
                     ORDER BY a.nome_completo
                     """,
                     (ids,),
                 )
                 for row in cursor.fetchall() or []:
                     notas_por_prova.setdefault(row["prova_id"], []).append(dict(row))
+                # Fallback se ainda houver só no espelho antigo
+                if not any(notas_por_prova.values()):
+                    cursor.execute(
+                        """
+                        SELECT n.id, n.prova_id, n.nota, a.nome_completo, a.matricula, a.cpf
+                        FROM provas_criadas_notas n
+                        JOIN alunos a ON a.id = n.aluno_id
+                        WHERE n.prova_id = ANY(%s)
+                        ORDER BY a.nome_completo
+                        """,
+                        (ids,),
+                    )
+                    for row in cursor.fetchall() or []:
+                        notas_por_prova.setdefault(row["prova_id"], []).append(dict(row))
             for prova in provas:
                 prova["notas"] = notas_por_prova.get(prova["id"], [])
             agendas_por_prova = {}
@@ -6365,29 +6506,51 @@ def detalhes_aluno(aluno_id):
                 """, (aluno_id,))
                 pessoas_autorizadas = cursor.fetchall()
 
-                cursor.execute("""
-                    SELECT id, turma_id, materia, trimestre, titulo_avaliacao, nota, arquivo_pdf,
-                           arquivo_midia_id, origem, justificativa, data_aplicacao, data_registro,
-                           prova_criada_id
-                    FROM provas_notas
-                    WHERE aluno_id = %s
-                    ORDER BY COALESCE(data_aplicacao, data_registro) DESC NULLS LAST, trimestre ASC, materia ASC;
-                """, (aluno_id,))
-                provas_notas = cursor.fetchall()
+                try:
+                    _backfill_notas_professor(cursor, aluno_id=aluno_id)
+                    conexao.commit()
+                except Exception:
+                    try:
+                        conexao.rollback()
+                    except Exception:
+                        pass
 
-                cursor.execute(
-                    """
-                    SELECT ag.id, ag.titulo, ag.materia, ag.data_aplicacao, ag.horario,
-                           ag.data_original, ag.justificativa, ag.origem, ag.prova_criada_id,
-                           ag.arquivo_id, t.nome AS turma_nome
-                    FROM prova_aluno_agenda ag
-                    LEFT JOIN turmas t ON t.id = ag.turma_id
-                    WHERE ag.aluno_id = %s
-                    ORDER BY ag.data_aplicacao DESC
-                    """,
-                    (aluno_id,),
-                )
-                provas_agenda = cursor.fetchall() or []
+                try:
+                    cursor.execute("""
+                        SELECT id, turma_id, materia, trimestre, titulo_avaliacao, nota, arquivo_pdf,
+                               arquivo_midia_id, origem, justificativa, data_aplicacao, data_registro,
+                               prova_criada_id
+                        FROM provas_notas
+                        WHERE aluno_id = %s
+                        ORDER BY COALESCE(data_aplicacao, data_registro) DESC NULLS LAST, trimestre ASC, materia ASC;
+                    """, (aluno_id,))
+                    provas_notas = cursor.fetchall()
+                except Exception:
+                    cursor.execute("""
+                        SELECT id, turma_id, materia, trimestre, titulo_avaliacao, nota, arquivo_pdf, data_registro
+                        FROM provas_notas
+                        WHERE aluno_id = %s
+                        ORDER BY trimestre ASC, materia ASC;
+                    """, (aluno_id,))
+                    provas_notas = cursor.fetchall()
+
+                provas_agenda = []
+                try:
+                    cursor.execute(
+                        """
+                        SELECT ag.id, ag.titulo, ag.materia, ag.data_aplicacao, ag.horario,
+                               ag.data_original, ag.justificativa, ag.origem, ag.prova_criada_id,
+                               ag.arquivo_id, t.nome AS turma_nome
+                        FROM prova_aluno_agenda ag
+                        LEFT JOIN turmas t ON t.id = ag.turma_id
+                        WHERE ag.aluno_id = %s
+                        ORDER BY ag.data_aplicacao DESC
+                        """,
+                        (aluno_id,),
+                    )
+                    provas_agenda = cursor.fetchall() or []
+                except Exception:
+                    provas_agenda = []
 
                 cursor.execute(
                     """
