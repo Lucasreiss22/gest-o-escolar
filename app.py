@@ -3603,7 +3603,7 @@ def _garantir_sala_professor():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:sala_prof"
+    chave = f"{schema}:sala_prof_v2"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -3659,7 +3659,7 @@ def _garantir_sala_professor():
             cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mensagem_prova TEXT")
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS provas_notas (
+                CREATE TABLE IF NOT EXISTS provas_criadas_notas (
                     id SERIAL PRIMARY KEY,
                     prova_id INT NOT NULL REFERENCES provas_criadas(id) ON DELETE CASCADE,
                     aluno_id INT NOT NULL,
@@ -3948,7 +3948,7 @@ def sala_professor():
                         raise ValueError("A nota pode ter no máximo 20 caracteres.")
                     cursor.execute(
                         """
-                        INSERT INTO provas_notas (prova_id, aluno_id, nota)
+                        INSERT INTO provas_criadas_notas (prova_id, aluno_id, nota)
                         VALUES (%s, %s, %s)
                         ON CONFLICT (prova_id, aluno_id)
                         DO UPDATE SET nota = EXCLUDED.nota
@@ -3964,7 +3964,7 @@ def sala_professor():
                     nota_id = request.form.get("nota_id", type=int)
                     cursor.execute(
                         """
-                        DELETE FROM provas_notas n
+                        DELETE FROM provas_criadas_notas n
                         USING provas_criadas p
                         WHERE n.id = %s AND n.prova_id = p.id AND p.funcionario_id = %s
                         """,
@@ -4001,7 +4001,7 @@ def sala_professor():
                 cursor.execute(
                     """
                     SELECT n.id, n.prova_id, n.nota, a.nome_completo, a.matricula, a.cpf
-                    FROM provas_notas n
+                    FROM provas_criadas_notas n
                     JOIN alunos a ON a.id = n.aluno_id
                     WHERE n.prova_id = ANY(%s)
                     ORDER BY a.nome_completo
