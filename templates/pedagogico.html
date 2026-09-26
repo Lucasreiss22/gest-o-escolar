@@ -82,6 +82,9 @@
 
     <div class="content">
         <h2 class="fw-bold text-dark mb-3">Pedagógico</h2>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <a class="btn btn-success btn-sm" href="{{ url_for('relatorio_turmas_pdf') }}">PDF das turmas</a>
+        </div>
         <ul class="nav nav-pills flex-wrap gap-2 mb-4">
             <li class="nav-item">
                 <a class="nav-link {% if aba == 'turmas' %}active{% endif %}" href="{{ url_for('pagina_pedagogico', aba='turmas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Turmas</a>

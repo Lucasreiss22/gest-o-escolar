@@ -15,6 +15,9 @@
         {% endwith %}
         <h2>Auditoria</h2>
         <p class="hint">Inclusões, alterações e exclusões de {{ escola_nome or "esta escola" }}. Visível apenas para o administrador.</p>
+        <p style="margin:0 0 12px;">
+            <a class="btn btn-primary" href="{{ url_for('relatorio_auditoria_pdf', tipo=tipo, busca=busca) }}">PDF da auditoria</a>
+        </p>
         <form class="audit-filtros" method="GET" action="{{ url_for('pagina_auditoria') }}">
             <div>
                 <label for="tipo">Movimento</label>

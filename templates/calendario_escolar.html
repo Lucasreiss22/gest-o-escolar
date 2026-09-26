@@ -90,9 +90,11 @@
         {% set pdf_origem = 'calendario' %}
         {% set pdf_turma_id = cal_params.get('turma_id') %}
         {% set pdf_aluno_id = cal_params.get('aluno_id') %}
+        {% set pdf_professor_id = filtro_professor if filtro_professor else None %}
         {% set pdf_extra = {} %}
         {% if pdf_turma_id %}{% set _ = pdf_extra.update({'turma_id': pdf_turma_id}) %}{% endif %}
         {% if pdf_aluno_id %}{% set _ = pdf_extra.update({'aluno_id': pdf_aluno_id}) %}{% endif %}
+        {% if pdf_professor_id %}{% set _ = pdf_extra.update({'professor_id': pdf_professor_id}) %}{% endif %}
         <div class="card-box">
             {% include '_pdf_periodo.html' %}
         </div>
@@ -214,7 +216,12 @@
                 <div class="header-flex" style="margin-bottom: 12px;">
                     <h3>Dia {{ dia_selecionado[8:10] }}/{{ dia_selecionado[5:7] }}/{{ dia_selecionado[0:4] }}</h3>
                     <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                        <a class="btn btn-success" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='dia', data=dia_selecionado, origem='calendario', **pdf_extra) }}">PDF do dia</a>
+                        <a class="btn btn-success" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='dia', data=dia_selecionado, origem='calendario', **pdf_extra) }}">PDF completo do dia</a>
+                        <a class="btn btn-success" href="{{ url_for('relatorio_pdf_periodo', tipo='eventos', periodo='dia', data=dia_selecionado, origem='calendario', **pdf_extra) }}">PDF agenda</a>
+                        {% if papel_atual == 'professor' or filtro_professor %}
+                        <a class="btn btn-success" href="{{ url_for('relatorio_pdf_periodo', tipo='rotina', periodo='dia', data=dia_selecionado, origem='calendario', **pdf_extra) }}">PDF rotina</a>
+                        {% endif %}
+                        <a class="btn btn-success" href="{{ url_for('relatorio_pdf_periodo', tipo='chamada', periodo='dia', data=dia_selecionado, origem='calendario', **pdf_extra) }}">PDF chamada</a>
                         <a class="btn btn-primary" href="{{ url_for('calendario_escolar', mes=mes_atual, ano=ano_atual, **cal_params) }}">Fechar</a>
                     </div>
                 </div>

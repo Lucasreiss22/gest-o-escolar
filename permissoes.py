@@ -20,6 +20,7 @@ MODULOS = {
 ENDPOINTS = {
     "dashboard": "dashboard",
     "pagina_alunos": "alunos",
+    "relatorio_alunos_pdf": "alunos",
     "cadastrar_aluno": "alunos",
     "cadastrar_aluno_rota": "alunos",
     "detalhes_aluno": "pedagogico",
@@ -29,9 +30,12 @@ ENDPOINTS = {
     "excluir_aluno_rota": "alunos",
     "lancar_frequencia_aluno": "pedagogico",
     "pagina_professores": "professores",
+    "relatorio_equipe_pdf": "professores",
     "sala_professor": "pedagogico",
     "prova_pdf": "pedagogico",
     "arquivo_professor": "pedagogico",
+    "pasta_professor_pdf": "pedagogico",
+    "relatorio_turmas_pdf": "pedagogico",
     "cadastrar_professor": "professores",
     "excluir_professor": "professores",
     "detalhes_professor": "professores",
@@ -45,6 +49,8 @@ ENDPOINTS = {
     "relatorio_pdf_custos": "financeiro",
     "calendario_escolar": "calendario",
     "cadastrar_evento": "calendario",
+    "relatorio_pdf_consulta": "calendario",
+    "relatorio_pdf_periodo": "calendario",
     "pagina_configuracoes": "configuracoes",
     "excluir_usuario_sistema": "usuarios",
     "gerenciar_usuarios": "usuarios",
@@ -67,6 +73,7 @@ ENDPOINTS = {
     "enviar_contracheques_mes": "financeiro",
     "aluno_vincular_turma": "pedagogico_cadastro",
     "pagina_auditoria": "auditoria",
+    "relatorio_auditoria_pdf": "auditoria",
     "pagina_notas_fiscais": "nfse",
     "nfse_emitir": "nfse",
     "nfse_cancelar": "nfse",
@@ -75,6 +82,7 @@ ENDPOINTS = {
     "nfse_lote": "nfse",
     "nfse_xml": "nfse",
     "nfse_danfse": "nfse",
+    "relatorio_nfse_pdf": "nfse",
 }
 
 

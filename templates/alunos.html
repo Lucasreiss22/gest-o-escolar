@@ -17,6 +17,7 @@
         <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
             <h2 class="fw-bold text-dark">👨‍🎓 Gestão de Alunos</h2>
             <div class="d-flex gap-2 flex-wrap">
+                <a class="btn btn-success btn-sm" href="{{ url_for('relatorio_alunos_pdf', q=termo_busca) }}">PDF dos alunos</a>
                 {% if pode_alterar('alunos') %}
                 <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalImportarAlunos">
                     <i class="bi bi-file-earmark-spreadsheet"></i> Importar planilha

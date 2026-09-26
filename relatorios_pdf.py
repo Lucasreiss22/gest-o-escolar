@@ -863,43 +863,329 @@ def pdf_boletim(escola, aluno, notas, faltas_resumo, turmas=None):
     return _saida(pdf)
 
 
-def pdf_historico_periodo(escola, periodo_label, contexto, incluir_chamada=True, incluir_eventos=True, chamada=None, eventos=None, provas=None, resumo_chamada=None):
-    pdf = RelatorioPDF("Histórico do período")
+def _hora(valor):
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%H:%M")
+    texto = str(valor or "").strip()
+    return texto[:5] if texto else "—"
+
+
+def _rotulo_tipo_evento(tipo):
+    mapa = {
+        "geral": "Evento",
+        "feriado": "Feriado",
+        "prova": "Prova",
+        "semana_prova": "Semana de provas",
+        "rotina": "Rotina",
+    }
+    return mapa.get((tipo or "").strip().lower(), tipo or "Evento")
+
+
+def _rotulo_status_chamada(status):
+    mapa = {"presente": "Presente", "falta": "Falta", "justificada": "Justificada"}
+    return mapa.get((status or "").strip().lower(), status or "—")
+
+
+def _abrangencia_rotina(row):
+    periodo = (row.get("periodo") or "dia").strip().lower()
+    data = _data_br(row.get("data_evento"))
+    if periodo == "semana":
+        return f"Semana de {data}"
+    if periodo == "mes":
+        return f"Mês de {data[3:]}" if len(data) >= 10 else f"Mês {data}"
+    return f"Dia {data}"
+
+
+def _secao_se_couber(pdf, titulo):
+    if pdf.get_y() > 250:
+        pdf.add_page()
+    pdf.secao(titulo)
+
+
+def _detalhes(pdf, itens, rotulo):
+    textos = []
+    for item in itens or []:
+        descricao = (item.get("descricao") or "").strip()
+        if not descricao:
+            continue
+        textos.append(f"{rotulo(item)} — {descricao}")
+    if not textos:
+        return
+    pdf.paragrafo("Detalhes")
+    for texto in textos:
+        pdf.paragrafo(texto, tamanho=9)
+
+
+def pdf_historico_periodo(
+    escola, periodo_label, contexto,
+    incluir_chamada=True, incluir_eventos=True, incluir_rotina=True, incluir_provas=True,
+    chamada=None, eventos=None, rotinas=None, provas=None, resumo_chamada=None,
+    aviso_rotina="", titulo="Histórico do período",
+):
+    from datetime import datetime as _dt
+
+    pdf = RelatorioPDF(titulo)
     pdf.add_page()
-    pdf.paragrafo(f"{escola} · {periodo_label}")
-    pdf.paragrafo(contexto or "")
-    if incluir_chamada:
-        pdf.secao("Chamada")
-        r = resumo_chamada or {}
-        pdf.linha("Presente", r.get("presente") or 0)
-        pdf.linha("Falta", r.get("falta") or 0)
-        pdf.linha("Justificada", r.get("justificada") or 0)
-        linhas = []
-        for row in chamada or []:
-            linhas.append([
-                str(row.get("data_aula") or "")[:10],
-                (row.get("nome_completo") or "")[:28],
-                row.get("status") or "",
-            ])
-        if linhas:
-            pdf.tabela(["Data", "Aluno", "Status"], linhas, [35, 100, 40])
+    pdf.paragrafo(f"{escola or 'Gestão Escolar'} · {periodo_label}")
+    pdf.paragrafo(contexto or "Escola")
+    pdf.paragrafo(f"Emitido em {_dt.now().strftime('%d/%m/%Y às %H:%M')}.")
+    pdf.paragrafo(
+        "Este relatório reúne as informações do período escolhido. "
+        "Cada bloco abaixo traz o resumo e a lista correspondente."
+    )
+    pdf.secao("Resumo do período")
     if incluir_eventos:
-        pdf.secao("Eventos")
+        pdf.linha("Eventos da escola", len(eventos or []))
+    if incluir_provas:
+        pdf.linha("Provas", len(provas or []))
+    if incluir_rotina:
+        pdf.linha("Rotinas do professor", len(rotinas or []))
+    if incluir_chamada:
+        r = resumo_chamada or {}
+        pdf.linha("Presenças", r.get("presente") or 0)
+        pdf.linha("Faltas", r.get("falta") or 0)
+        pdf.linha("Faltas justificadas", r.get("justificada") or 0)
+        pdf.linha("Lançamentos de chamada", len(chamada or []))
+
+    ordem = 0
+
+    def _titulo(bloco):
+        nonlocal ordem
+        ordem += 1
+        return f"{ordem}. {bloco}"
+
+    if incluir_eventos:
+        _secao_se_couber(pdf, _titulo("Eventos da escola"))
         linhas = []
         for row in eventos or []:
             linhas.append([
-                str(row.get("data_evento") or "")[:10],
-                (row.get("titulo") or "")[:40],
-                (row.get("tipo") or "")[:18],
+                _data_br(row.get("data_evento")),
+                _hora(row.get("horario")),
+                _rotulo_tipo_evento(row.get("tipo")),
+                row.get("titulo") or "—",
+                row.get("turma_nome") or "Escola",
             ])
         if linhas:
-            pdf.tabela(["Data", "Título", "Tipo"], linhas, [35, 110, 40])
+            pdf.tabela(["Data", "Horário", "Tipo", "Título", "Turma"], linhas, [28, 22, 36, 64, 40])
+            _detalhes(pdf, eventos, lambda row: f"{_data_br(row.get('data_evento'))} · {row.get('titulo') or 'Evento'}")
         else:
-            pdf.paragrafo("Nenhum evento no período.")
-        if provas:
-            pdf.secao("Provas")
-            linhas = [[str(p.get("data_prova") or "")[:10], (p.get("titulo") or "")[:50]] for p in provas]
-            pdf.tabela(["Data", "Prova"], linhas, [40, 150])
+            pdf.paragrafo("Nenhum evento da escola neste período.")
+
+    if incluir_provas:
+        _secao_se_couber(pdf, _titulo("Provas"))
+        linhas = []
+        for row in provas or []:
+            linhas.append([
+                _data_br(row.get("data_prova")),
+                _hora(row.get("horario")),
+                row.get("materia") or "—",
+                row.get("titulo") or "—",
+                row.get("turma_nome") or "—",
+            ])
+        if linhas:
+            pdf.tabela(["Data", "Horário", "Disciplina", "Prova", "Turma"], linhas, [28, 22, 36, 64, 40])
+            _detalhes(pdf, provas, lambda row: f"{_data_br(row.get('data_prova'))} · {row.get('titulo') or 'Prova'}")
+        else:
+            pdf.paragrafo("Nenhuma prova neste período.")
+
+    if incluir_rotina:
+        _secao_se_couber(pdf, _titulo("Rotina do professor"))
+        if aviso_rotina:
+            pdf.paragrafo(aviso_rotina)
+        linhas = []
+        for row in rotinas or []:
+            linhas.append([
+                _abrangencia_rotina(row),
+                row.get("professor_nome") or "—",
+                row.get("titulo") or "—",
+            ])
+        if linhas:
+            pdf.tabela(["Quando", "Professor", "Rotina"], linhas, [48, 52, 90])
+            _detalhes(pdf, rotinas, lambda row: f"{_abrangencia_rotina(row)} · {row.get('titulo') or 'Rotina'}")
+        elif not aviso_rotina:
+            pdf.paragrafo("Nenhuma rotina neste período.")
+
+    if incluir_chamada:
+        if pdf.get_y() > 180:
+            pdf.add_page()
+        pdf.secao(_titulo("Chamada"))
+        linhas = []
+        for row in chamada or []:
+            linhas.append([
+                _data_br(row.get("data_aula")),
+                row.get("nome_completo") or "—",
+                row.get("turma_nome") or "—",
+                row.get("disciplina") or "—",
+                _rotulo_status_chamada(row.get("status")),
+            ])
+        if linhas:
+            pdf.tabela(["Data", "Aluno", "Turma", "Disciplina", "Situação"], linhas, [28, 58, 36, 36, 32])
+        else:
+            pdf.paragrafo("Nenhum lançamento de chamada neste período.")
+    return _saida(pdf)
+
+
+def pdf_lista_alunos(escola, alunos, termo=""):
+    pdf = RelatorioPDF("Alunos")
+    pdf.add_page()
+    pdf.paragrafo(escola or "Gestão Escolar")
+    if termo:
+        pdf.paragrafo(f"Pesquisa: {termo}")
+    ativos = sum(1 for item in alunos or [] if (item.get("status") or "ativo") != "inativo")
+    pdf.secao("Resumo")
+    pdf.linha("Alunos nesta lista", len(alunos or []))
+    pdf.linha("Ativos", ativos)
+    pdf.linha("Inativos", len(alunos or []) - ativos)
+    pdf.secao("Cadastro")
+    linhas = []
+    for item in alunos or []:
+        linhas.append([
+            item.get("matricula") or "—",
+            item.get("nome_completo") or "—",
+            item.get("turma_nome") or "—",
+            "Inativo" if (item.get("status") or "") == "inativo" else "Ativo",
+            item.get("telefone_principal") or "—",
+        ])
+    if linhas:
+        pdf.tabela(["Matrícula", "Aluno", "Turma", "Situação", "Telefone"], linhas, [32, 62, 40, 24, 32])
+    else:
+        pdf.paragrafo("Nenhum aluno neste filtro.")
+    return _saida(pdf)
+
+
+def pdf_lista_equipe(escola, pessoas):
+    pdf = RelatorioPDF("Equipe")
+    pdf.add_page()
+    pdf.paragrafo(escola or "Gestão Escolar")
+    pdf.secao("Resumo")
+    pdf.linha("Pessoas", len(pessoas or []))
+    pdf.secao("Equipe")
+    linhas = []
+    for item in pessoas or []:
+        linhas.append([
+            item.get("nome_completo") or "—",
+            item.get("cargo") or item.get("papel") or "—",
+            item.get("disciplina") or "—",
+            item.get("turmas_lecionadas") or "—",
+            item.get("telefone") or "—",
+        ])
+    if linhas:
+        pdf.tabela(["Nome", "Cargo", "Disciplina", "Turmas", "Telefone"], linhas, [48, 36, 32, 42, 32])
+    else:
+        pdf.paragrafo("Nenhuma pessoa neste filtro.")
+    return _saida(pdf)
+
+
+def pdf_turmas(escola, turmas):
+    pdf = RelatorioPDF("Turmas")
+    pdf.add_page()
+    pdf.paragrafo(escola or "Gestão Escolar")
+    pdf.secao("Resumo")
+    pdf.linha("Turmas", len(turmas or []))
+    pdf.linha("Alunos vinculados", sum(len(item.get("alunos") or []) for item in turmas or []))
+    if not turmas:
+        pdf.paragrafo("Nenhuma turma cadastrada.")
+        return _saida(pdf)
+    for turma in turmas:
+        _secao_se_couber(pdf, turma.get("nome") or "Turma")
+        pdf.linha("Ano letivo", turma.get("ano_letivo") or "—")
+        pdf.linha("Turno", turma.get("turno") or "—")
+        pdf.linha("Professor responsável", turma.get("professor") or "—")
+        alunos = turma.get("alunos") or []
+        pdf.linha("Alunos", len(alunos))
+        linhas = [[item.get("matricula") or "—", item.get("nome") or "—"] for item in alunos]
+        if linhas:
+            pdf.tabela(["Matrícula", "Aluno"], linhas, [40, 150])
+        else:
+            pdf.paragrafo("Nenhum aluno vinculado.")
+    return _saida(pdf)
+
+
+def pdf_notas_fiscais(escola, mes_label, faturado, grupos):
+    pdf = RelatorioPDF("Notas fiscais")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola or 'Gestão Escolar'} · competência {mes_label}")
+    pdf.secao("Resumo")
+    total = sum(len(grupo.get("notas") or []) for grupo in grupos or [])
+    pdf.linha("Notas nesta lista", total)
+    pdf.linha("Faturamento fiscal do mês", _brl(faturado), negrito=True)
+    pdf.paragrafo("Entram no faturamento só as notas faturadas. Cancelada e substituída não entram de novo.")
+    if not grupos:
+        pdf.paragrafo("Nenhuma nota neste filtro.")
+        return _saida(pdf)
+    for grupo in grupos:
+        nome = grupo.get("aluno_nome") or "Sem aluno"
+        if grupo.get("matricula"):
+            nome = f"{nome} · {grupo.get('matricula')}"
+        _secao_se_couber(pdf, nome)
+        linhas = []
+        for nota in grupo.get("notas") or []:
+            vinculo = "Válida" if nota.get("status") == "FATURADA" else (nota.get("status") or "—")
+            if nota.get("status") == "SUBSTITUIDA":
+                vinculo = f"Substituída por {nota.get('substituta_numero') or '—'}"
+            elif nota.get("substituida_numero"):
+                vinculo = f"Substitui {nota.get('substituida_numero')}"
+            linhas.append([
+                nota.get("status") or "—",
+                nota.get("numero_nfse") or "—",
+                nota.get("periodo_competencia_original") or nota.get("periodo_competencia") or "—",
+                _brl(nota.get("valor")),
+                vinculo,
+            ])
+        if linhas:
+            pdf.tabela(["Situação", "Número", "Competência", "Valor", "Vínculo"], linhas, [28, 28, 32, 32, 70])
+    return _saida(pdf)
+
+
+def pdf_auditoria(escola, registros):
+    pdf = RelatorioPDF("Auditoria")
+    pdf.add_page()
+    pdf.paragrafo(escola or "Gestão Escolar")
+    pdf.secao("Resumo")
+    pdf.linha("Registros", len(registros or []))
+    pdf.secao("Movimentos")
+    linhas = []
+    for item in registros or []:
+        linhas.append([
+            item.get("quando") or _data_br(item.get("criado_em")),
+            item.get("usuario_nome") or item.get("usuario_email") or "—",
+            item.get("tipo_rotulo") or item.get("tipo") or "—",
+            item.get("modulo") or "—",
+            item.get("resumo") or "—",
+        ])
+    if linhas:
+        pdf.tabela(["Quando", "Quem", "Tipo", "Módulo", "Resumo"], linhas, [32, 36, 28, 28, 66])
+    else:
+        pdf.paragrafo("Nenhum movimento neste filtro.")
+    return _saida(pdf)
+
+
+def pdf_pasta_professor(escola, professor, arquivos, provas):
+    pdf = RelatorioPDF("Pasta do professor")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola or 'Gestão Escolar'} · {professor or 'Professor'}")
+    pdf.secao("Resumo")
+    pdf.linha("Arquivos PDF", len(arquivos or []))
+    pdf.linha("Provas criadas", len(provas or []))
+    pdf.secao("Arquivos")
+    rotulos = {"atestado": "Atestado", "prova_feita": "Prova feita", "prova_aplicar": "Prova a aplicar"}
+    linhas = []
+    for item in arquivos or []:
+        linhas.append([
+            rotulos.get(item.get("tipo"), item.get("tipo") or "—"),
+            item.get("titulo") or "—",
+            item.get("turma_nome") or "—",
+        ])
+    if linhas:
+        pdf.tabela(["Tipo", "Título", "Turma"], linhas, [40, 90, 60])
+    else:
+        pdf.paragrafo("Nenhum PDF guardado.")
+    pdf.secao("Provas criadas no sistema")
+    linhas = [[item.get("titulo") or "—", item.get("materia") or "—", item.get("turma_nome") or "—"] for item in provas or []]
+    if linhas:
+        pdf.tabela(["Prova", "Disciplina", "Turma"], linhas, [80, 55, 55])
+    else:
+        pdf.paragrafo("Nenhuma prova criada.")
     return _saida(pdf)
 
 

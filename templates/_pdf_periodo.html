@@ -1,5 +1,6 @@
 {% set pdf_data = pdf_data|default('') %}
 {% set pdf_origem = pdf_origem|default('calendario') %}
+{% set pdf_professor_id = pdf_professor_id|default(None) %}
 <form class="pdf-bar" method="GET" action="{{ url_for('relatorio_pdf_consulta') }}">
     <input type="hidden" name="data" value="{{ pdf_data }}">
     <input type="hidden" name="origem" value="{{ pdf_origem }}">
@@ -9,12 +10,16 @@
     {% if pdf_aluno_id %}
     <input type="hidden" name="aluno_id" value="{{ pdf_aluno_id }}">
     {% endif %}
+    {% if pdf_professor_id %}
+    <input type="hidden" name="professor_id" value="{{ pdf_professor_id }}">
+    {% endif %}
     <div class="form-group">
         <label>Baixar PDF</label>
         <select name="tipo">
+            <option value="completo">Completo (eventos, provas, rotina e chamada)</option>
+            <option value="eventos">Agenda e provas</option>
+            <option value="rotina">Rotina do professor</option>
             <option value="chamada">Chamada</option>
-            <option value="eventos">Eventos</option>
-            <option value="completo">Completo (chamada + eventos)</option>
         </select>
     </div>
     <div class="form-group">
@@ -25,7 +30,11 @@
             <option value="mes" selected>Mês</option>
         </select>
     </div>
-    <button class="btn btn-success" type="submit">Gerar</button>
+    <button class="btn btn-success" type="submit">Gerar PDF</button>
     <button class="btn btn-primary" type="submit" name="enviar" value="1" formaction="{{ url_for('relatorio_pdf_consulta') }}" formmethod="post">Enviar por e-mail</button>
 </form>
-<p class="pdf-bar-hint">Escolha o tipo e o período. Com turma ou aluno filtrado, o PDF usa esse recorte.</p>
+<p class="pdf-bar-hint">
+    O PDF sai organizado em resumo, eventos, provas, rotina e chamada.
+    {% if pdf_professor_id %}A rotina do professor filtrado entra no relatório.{% elif papel_atual == 'professor' %}Sua rotina entra no relatório; a de outro professor não.{% else %}Para incluir a rotina, filtre o professor no calendário.{% endif %}
+    {% if pdf_turma_id or pdf_aluno_id %}O filtro de turma ou aluno também vale neste PDF.{% endif %}
+</p>

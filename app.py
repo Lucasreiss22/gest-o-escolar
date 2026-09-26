@@ -110,6 +110,12 @@ from relatorios_pdf import (
     pdf_regime_apuracao,
     pdf_regime_detalhado,
     pdf_prova,
+    pdf_lista_alunos,
+    pdf_lista_equipe,
+    pdf_turmas,
+    pdf_notas_fiscais,
+    pdf_auditoria,
+    pdf_pasta_professor,
 )
 from folha import (
     calcular_folha_pessoa,
@@ -1076,6 +1082,7 @@ _ROTAS_NFSE = {
     "nfse_lote",
     "nfse_xml",
     "nfse_danfse",
+    "relatorio_nfse_pdf",
 }
 
 
@@ -4374,6 +4381,36 @@ def _periodo_intervalo(periodo, data_ref):
     return inicio, fim, f"{NOMES_MESES_PT.get(data_ref.month, 'Mês')} de {data_ref.year}"
 
 
+def _como_data(valor):
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    try:
+        return datetime.strptime(str(valor)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _rotina_no_intervalo(data_ev, periodo, inicio, fim):
+    data_ev = _como_data(data_ev)
+    if not data_ev:
+        return False
+    periodo = (periodo or "dia").strip().lower()
+    if periodo == "semana":
+        inicio_sem = data_ev - timedelta(days=(data_ev.weekday() + 1) % 7)
+        fim_sem = inicio_sem + timedelta(days=6)
+        return inicio_sem <= fim and fim_sem >= inicio
+    if periodo == "mes":
+        inicio_mes = date(data_ev.year, data_ev.month, 1)
+        if data_ev.month == 12:
+            fim_mes = date(data_ev.year, 12, 31)
+        else:
+            fim_mes = date(data_ev.year, data_ev.month + 1, 1) - timedelta(days=1)
+        return inicio_mes <= fim and fim_mes >= inicio
+    return inicio <= data_ev <= fim
+
+
 @app.route("/relatorio/pdf", methods=["GET", "POST"])
 def relatorio_pdf_consulta():
     return relatorio_pdf_periodo(request.values.get("tipo") or "chamada")
@@ -4384,7 +4421,7 @@ def relatorio_pdf_periodo(tipo):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
     tipo = (tipo or "").strip().lower()
-    if tipo not in ("chamada", "eventos", "completo"):
+    if tipo not in ("chamada", "eventos", "rotina", "completo"):
         flash("❌ Tipo de relatório inválido.", "danger")
         return redirect(url_for("calendario_escolar"))
 
@@ -4394,6 +4431,12 @@ def relatorio_pdf_periodo(tipo):
     aluno_id = request.values.get("aluno_id", type=int)
     origem = request.values.get("origem") or "calendario"
     destino_erro = url_for("calendario_escolar") if origem != "pedagogico" else url_for("pagina_pedagogico")
+    papel_pdf = normalizar_papel(session.get("usuario_papel"))
+    gestor_pdf = papel_pdf in {"admin", "direcao", "supervisor", "secretaria"}
+    meu_professor_pdf = _id_funcionario_da_sessao()
+    filtro_professor_pdf = request.values.get("professor_id", type=int)
+    if papel_pdf == "professor":
+        filtro_professor_pdf = meu_professor_pdf
 
     try:
         inicio, fim, periodo_label = _periodo_intervalo(periodo, data_str)
@@ -4449,15 +4492,29 @@ def relatorio_pdf_periodo(tipo):
                 cursor.execute(sql, params)
                 chamada = cursor.fetchall()
 
-            if tipo in ("eventos", "completo"):
+            if filtro_professor_pdf and papel_pdf != "professor":
+                cursor.execute(
+                    "SELECT nome_completo FROM funcionarios WHERE id = %s",
+                    (filtro_professor_pdf,),
+                )
+                dono = cursor.fetchone()
+                if dono:
+                    contexto_partes.append(f"Rotina de {dono.get('nome_completo')}")
+
+            if tipo in ("eventos", "rotina", "completo"):
+                cursor.execute(
+                    "ALTER TABLE calendario_eventos ADD COLUMN IF NOT EXISTS periodo VARCHAR(20)"
+                )
                 sql_ev = """
-                    SELECT c.data_evento, c.titulo, c.tipo, c.horario, c.descricao, t.nome AS turma_nome
+                    SELECT c.data_evento, c.titulo, c.tipo, c.horario, c.descricao, c.periodo,
+                           c.professor_id, t.nome AS turma_nome, f.nome_completo AS professor_nome
                     FROM calendario_eventos c
                     LEFT JOIN turmas t ON c.turma_id = t.id
+                    LEFT JOIN funcionarios f ON f.id = c.professor_id
                     WHERE c.data_evento BETWEEN %s AND %s
                       AND COALESCE(c.tipo, 'geral') <> 'aluno_vinculado_turma'
                 """
-                params_ev = [inicio, fim]
+                params_ev = [inicio - timedelta(days=31), fim + timedelta(days=6)]
                 if turma_id:
                     sql_ev += " AND (c.turma_id IS NULL OR c.turma_id = %s)"
                     params_ev.append(turma_id)
@@ -4465,6 +4522,7 @@ def relatorio_pdf_periodo(tipo):
                 cursor.execute(sql_ev, params_ev)
                 eventos = cursor.fetchall()
 
+            if tipo in ("eventos", "completo"):
                 sql_pv = """
                     SELECT p.data_prova, p.titulo, p.materia, p.horario, p.descricao, t.nome AS turma_nome
                     FROM provas_turma p
@@ -4490,16 +4548,56 @@ def relatorio_pdf_periodo(tipo):
         if st in resumo:
             resumo[st] += 1
 
+    def _mesmo_professor(valor):
+        try:
+            return int(valor) == int(filtro_professor_pdf)
+        except (TypeError, ValueError):
+            return False
+
+    escolares = []
+    rotinas = []
+    for ev in eventos:
+        eh_rotina = str(ev.get("tipo") or "").startswith("rotina")
+        if eh_rotina:
+            if aluno_id or not _rotina_no_intervalo(ev.get("data_evento"), ev.get("periodo"), inicio, fim):
+                continue
+            if papel_pdf == "professor" and _mesmo_professor(ev.get("professor_id")):
+                rotinas.append(ev)
+            elif gestor_pdf and filtro_professor_pdf and _mesmo_professor(ev.get("professor_id")):
+                rotinas.append(ev)
+            continue
+        data_ev = _como_data(ev.get("data_evento"))
+        if data_ev and inicio <= data_ev <= fim:
+            escolares.append(ev)
+
+    aviso_rotina = ""
+    if tipo in ("rotina", "completo") and not aluno_id and not rotinas:
+        if papel_pdf == "professor" and not meu_professor_pdf:
+            aviso_rotina = "Seu usuário não está ligado a um professor, então a rotina não entra neste PDF."
+        elif papel_pdf != "professor" and not filtro_professor_pdf:
+            aviso_rotina = "A rotina de cada professor fica de fora. No calendário, filtre o professor para incluir só a rotina dele."
+
+    titulos_pdf = {
+        "chamada": "Chamada",
+        "eventos": "Agenda da escola",
+        "rotina": "Rotina do professor",
+        "completo": "Histórico do período",
+    }
     buffer = pdf_historico_periodo(
         escola,
         periodo_label,
         " · ".join(contexto_partes) if contexto_partes else "Escola (geral)",
         incluir_chamada=tipo in ("chamada", "completo"),
         incluir_eventos=tipo in ("eventos", "completo"),
+        incluir_rotina=tipo in ("rotina", "completo") or (tipo == "eventos" and bool(rotinas)),
+        incluir_provas=tipo in ("eventos", "completo"),
         chamada=chamada,
-        eventos=eventos,
+        eventos=escolares,
+        rotinas=rotinas,
         provas=provas,
         resumo_chamada=resumo,
+        aviso_rotina=aviso_rotina if tipo != "chamada" else "",
+        titulo=titulos_pdf.get(tipo, "Histórico do período"),
     )
     nome_arq = f"{tipo}_{periodo}_{inicio.isoformat()}_{fim.isoformat()}.pdf"
     if request.args.get("enviar") or request.method == "POST":
@@ -4958,6 +5056,201 @@ def pagina_alunos():
         abrir_cadastro=abrir_cadastro,
         voltar_turma=turma_pre if request.args.get("voltar") else "",
     )
+
+
+def _nome_da_escola(cursor):
+    cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+    row = cursor.fetchone() or {}
+    if isinstance(row, dict):
+        return row.get("nome_escola") or "Gestão Escolar"
+    return (row[0] if row else None) or "Gestão Escolar"
+
+
+@app.route("/alunos/pdf")
+def relatorio_alunos_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    termo = (request.args.get("q") or "").strip()
+    alunos = listar_alunos(termo)
+    escola = "Gestão Escolar"
+    conexao = obter_conexao()
+    if conexao:
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                escola = _nome_da_escola(cursor)
+        finally:
+            conexao.close()
+    buffer = pdf_lista_alunos(escola, alunos, termo)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="alunos.pdf")
+
+
+@app.route("/professores/pdf")
+def relatorio_equipe_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    termo = (request.args.get("q") or "").strip().lower()
+    pessoas = []
+    escola = "Gestão Escolar"
+    conexao = obter_conexao()
+    if conexao:
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                escola = _nome_da_escola(cursor)
+                cursor.execute(
+                    """
+                    SELECT f.nome_completo, f.especialidade AS disciplina, f.telefone, f.cargo, u.papel,
+                           STRING_AGG(t.nome, ', ') AS turmas_lecionadas
+                    FROM funcionarios f
+                    LEFT JOIN turmas t ON t.professor_responsavel_id = f.id
+                    LEFT JOIN LATERAL (
+                        SELECT papel FROM usuarios
+                        WHERE id = f.usuario_id OR LOWER(COALESCE(email, '')) = LOWER(COALESCE(f.email, ''))
+                        ORDER BY CASE WHEN id = f.usuario_id THEN 0 ELSE 1 END
+                        LIMIT 1
+                    ) u ON TRUE
+                    WHERE COALESCE(f.ativo, TRUE) = TRUE
+                    GROUP BY f.id, f.nome_completo, f.especialidade, f.telefone, f.cargo, u.papel
+                    ORDER BY f.nome_completo
+                    """
+                )
+                pessoas = cursor.fetchall() or []
+        finally:
+            conexao.close()
+    if termo:
+        pessoas = [
+            item for item in pessoas
+            if termo in (item.get("nome_completo") or "").lower()
+            or termo in (item.get("cargo") or "").lower()
+            or termo in (item.get("disciplina") or "").lower()
+            or termo in (item.get("turmas_lecionadas") or "").lower()
+        ]
+    buffer = pdf_lista_equipe(escola, pessoas)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="equipe.pdf")
+
+
+@app.route("/pedagogico/turmas/pdf")
+def relatorio_turmas_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    turmas = []
+    escola = "Gestão Escolar"
+    conexao = obter_conexao()
+    if conexao:
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                escola = _nome_da_escola(cursor)
+                cursor.execute(
+                    """
+                    SELECT t.id, t.nome, t.ano_letivo, t.turno, f.nome_completo AS professor,
+                           a.nome_completo AS aluno_nome, a.matricula
+                    FROM turmas t
+                    LEFT JOIN funcionarios f ON f.id = t.professor_responsavel_id
+                    LEFT JOIN turma_alunos ta ON ta.turma_id = t.id
+                    LEFT JOIN alunos a ON a.id = ta.aluno_id
+                    ORDER BY t.nome, a.nome_completo
+                    """
+                )
+                grupos = {}
+                for row in cursor.fetchall() or []:
+                    item = grupos.get(row["id"])
+                    if not item:
+                        item = {
+                            "nome": row.get("nome"),
+                            "ano_letivo": row.get("ano_letivo"),
+                            "turno": row.get("turno"),
+                            "professor": row.get("professor"),
+                            "alunos": [],
+                        }
+                        grupos[row["id"]] = item
+                        turmas.append(item)
+                    if row.get("aluno_nome"):
+                        item["alunos"].append({"nome": row.get("aluno_nome"), "matricula": row.get("matricula")})
+        finally:
+            conexao.close()
+    buffer = pdf_turmas(escola, turmas)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="turmas.pdf")
+
+
+@app.route("/notas-fiscais/pdf")
+def relatorio_nfse_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    status = (request.args.get("status") or "").strip()
+    aluno = request.args.get("aluno", type=int)
+    mes = (request.args.get("mes") or datetime.now().strftime("%Y-%m"))[:7]
+    grupos = []
+    faturado = 0
+    escola = "Gestão Escolar"
+    conexao = obter_conexao()
+    if conexao:
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                escola = _nome_da_escola(cursor)
+                grupos = listar_notas_escola(cursor, status or None, aluno)
+                faturado = faturamento_das_notas(cursor, mes)
+        finally:
+            conexao.close()
+    buffer = pdf_notas_fiscais(escola, mes, faturado, grupos)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=f"notas_fiscais_{mes}.pdf")
+
+
+@app.route("/auditoria/pdf")
+def relatorio_auditoria_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if session.get("usuario_papel") != "admin":
+        flash("A auditoria fica disponível apenas para o administrador da escola.", "danger")
+        return redirect(url_for("dashboard"))
+    tipo = (request.args.get("tipo") or "").strip()
+    busca = (request.args.get("busca") or "").strip()
+    registros = listar_auditoria(session.get("escola_id"), tipo, busca)
+    buffer = pdf_auditoria(session.get("escola_nome") or "Gestão Escolar", registros)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="auditoria.pdf")
+
+
+@app.route("/minhas-provas/pdf")
+def pasta_professor_pdf():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    funcionario_id = _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("sala_professor"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            _garantir_sala_professor(cursor)
+            pessoa, _turmas = _professor_da_sessao(cursor, funcionario_id)
+            if not pessoa:
+                flash("Seu usuário não está ligado a um professor da equipe.", "danger")
+                return redirect(url_for("dashboard"))
+            escola = _nome_da_escola(cursor)
+            cursor.execute(
+                """
+                SELECT a.tipo, a.titulo, t.nome AS turma_nome
+                FROM professor_arquivos a
+                LEFT JOIN turmas t ON t.id = a.turma_id
+                WHERE a.funcionario_id = %s
+                ORDER BY a.criado_em DESC
+                """,
+                (pessoa["id"],),
+            )
+            arquivos = cursor.fetchall() or []
+            cursor.execute(
+                """
+                SELECT p.titulo, p.materia, t.nome AS turma_nome
+                FROM provas_criadas p
+                LEFT JOIN turmas t ON t.id = p.turma_id
+                WHERE p.funcionario_id = %s
+                ORDER BY p.criado_em DESC
+                """,
+                (pessoa["id"],),
+            )
+            provas = cursor.fetchall() or []
+    finally:
+        conexao.close()
+    buffer = pdf_pasta_professor(escola, pessoa.get("nome_completo"), arquivos, provas)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="pasta_professor.pdf")
 
 
 @app.route("/alunos/modelo.csv")

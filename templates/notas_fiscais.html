@@ -46,6 +46,9 @@
     <div class="content">
         <h2>Notas fiscais</h2>
         <p class="hint">Escolha o aluno e a mensalidade para emitir. A lista abaixo mostra o que já saiu: faturada está válida, cancelada saiu da base, e a substituída aponta a nota nova. O XML e a DANFSe ficam na nota autorizada. Se a troca acontecer em mês posterior, o valor continua no mês da nota original.</p>
+        <p style="margin:0 0 12px;">
+            <a class="btn btn-primary" href="{{ url_for('relatorio_nfse_pdf', mes=mes, status=status, aluno=aluno_id) }}">PDF das notas</a>
+        </p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}

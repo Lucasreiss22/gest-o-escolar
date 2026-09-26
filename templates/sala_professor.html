@@ -29,6 +29,7 @@
     <div class="content">
         <h2>Provas e atestados</h2>
         <p style="color:#64748b;">{{ pessoa.nome_completo }}. A prova gerada leva a logo da escola, o nome e a data em branco para o aluno preencher, e a turma já preenchida.</p>
+        <p style="margin:0 0 16px;"><a class="btn btn-primary" href="{{ url_for('pasta_professor_pdf') }}">PDF da pasta</a></p>
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
