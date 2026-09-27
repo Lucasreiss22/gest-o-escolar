@@ -174,8 +174,7 @@ body {
     color: #fda4af;
 }
 
-.sidebar .nav-logout:hover,
-.sidebar .nav-bloquear:hover {
+.sidebar .nav-logout:hover {
     background: rgba(244, 63, 94, 0.16);
     color: #fecdd3;
 }

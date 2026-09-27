@@ -5,7 +5,7 @@
     {% if origem_plataforma %}
     <a href="{{ url_for('plataforma_voltar') }}" class="app-topbar-logout">Voltar</a>
     {% elif session.get('usuario_id') %}
-    <a href="{{ url_for('logout') }}" class="app-topbar-logout">Bloquear</a>
+    <a href="{{ url_for('logout') }}" class="app-topbar-logout">Sair</a>
     {% endif %}
 </header>
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -157,11 +157,11 @@
         </a>
         {% endif %}
         {% if session.get('usuario_id') %}
-        <a href="{{ url_for('logout') }}" class="nav-logout nav-bloquear">
+        <a href="{{ url_for('logout') }}" class="nav-logout">
             <span class="nav-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
             </span>
-            <span>Bloquear</span>
+            <span>Sair</span>
         </a>
         {% endif %}
     </div>

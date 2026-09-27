@@ -214,6 +214,8 @@ except Exception:
 app = Flask(__name__)
 app.secret_key = _CFG["SECRET_KEY"]
 app.config["PREFERRED_URL_SCHEME"] = _CFG["PREFERRED_URL_SCHEME"]
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 if ambiente_producao():
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config["SESSION_COOKIE_SECURE"] = True
@@ -2226,6 +2228,25 @@ def _id_funcionario_da_sessao(email=None):
         conexao.close()
 
 
+def _flag_permanecer_logado():
+    """Lê o checkbox do formulário ou o flag já guardado na sessão de login."""
+    if request.method == "POST":
+        # Checkbox marcado envia "1"; desmarcado não envia o campo.
+        if "permanecer_logado" in request.form or request.form.get("form_login") in {"email", "senha"}:
+            return request.form.get("permanecer_logado") == "1"
+    return bool(session.get("permanecer_logado"))
+
+
+def _aplicar_permanecer_logado(manter=None):
+    if manter is None:
+        manter = _flag_permanecer_logado()
+    session.permanent = bool(manter)
+    if manter:
+        session["permanecer_logado"] = True
+    else:
+        session.pop("permanecer_logado", None)
+
+
 def _iniciar_sessao(usuario, email):
     session["usuario_id"] = usuario["id"]
     session["usuario_nome"] = usuario.get("nome") or usuario.get("nome_completo") or email
@@ -2236,15 +2257,18 @@ def _iniciar_sessao(usuario, email):
 
 
 def _entrar_plataforma(admin):
+    manter = _flag_permanecer_logado()
     session.clear()
     session["usuario_id"] = admin["id"]
     session["usuario_nome"] = admin.get("nome") or admin.get("email")
     session["usuario_email"] = admin.get("email")
     session["usuario_papel"] = "plataforma"
     session["super_admin"] = True
+    _aplicar_permanecer_logado(manter)
 
 
 def _entrar_escola(usuario, email, escola, origem_plataforma=False, plataforma_email=None):
+    manter = _flag_permanecer_logado()
     session.clear()
     session["escola_db"] = escola["db_nome"]
     session["escola_id"] = escola["id"]
@@ -2261,6 +2285,7 @@ def _entrar_escola(usuario, email, escola, origem_plataforma=False, plataforma_e
     else:
         session["escola_telas"] = telas
     _iniciar_sessao(usuario, email)
+    _aplicar_permanecer_logado(manter)
 
 
 def _usuario_admin_escola(escola):
@@ -2383,8 +2408,12 @@ def login():
             email = exigencia_email(request.form.get("email"), "E-mail")
         except ValueError as e:
             flash(str(e), "danger")
-            return render_template("login.html")
+            return render_template(
+                "login.html",
+                permanecer_logado=request.form.get("permanecer_logado") == "1",
+            )
         session["login_email"] = email
+        session["permanecer_logado"] = request.form.get("permanecer_logado") == "1"
         acoes = request.form.getlist("acao")
         quer_codigo = "codigo" in acoes
         if eh_super_admin(email):
@@ -2396,14 +2425,14 @@ def login():
         if escola:
             if not escola.get("ativo", True):
                 flash("Esta escola está pausada. O acesso de todos os usuários dessa escola está bloqueado.", "danger")
-                return render_template("login.html")
+                return render_template("login.html", permanecer_logado=session.get("permanecer_logado"))
             email_admin = (escola.get("email_admin") or "").strip().lower()
             if not escola.get("senha_definida") and email_admin == email.strip().lower():
                 flash("Esta escola ainda precisa ativar o acesso. O código foi enviado ao e-mail cadastrado.", "danger")
                 return redirect(url_for("ativar_escola", token=escola.get("convite_token")))
             if not escola.get("senha_definida"):
                 flash("A escola ainda não ativou o acesso. Peça ao administrador da plataforma para concluir o cadastro.", "danger")
-                return render_template("login.html")
+                return render_template("login.html", permanecer_logado=session.get("permanecer_logado"))
             login_novo = garantir_login_colaborador(email, escola)
             if quer_codigo or login_novo:
                 return _enviar_codigo_acesso(email, "login_escola")
@@ -2413,7 +2442,8 @@ def login():
             "e use o mesmo e-mail iCloud. Não crie uma escola nova para o professor.",
             "danger",
         )
-    return render_template("login.html")
+        return render_template("login.html", permanecer_logado=session.get("permanecer_logado"))
+    return render_template("login.html", permanecer_logado=session.get("permanecer_logado"))
 
 
 @app.route("/login/conectar-gmail", methods=["GET", "POST"])
@@ -2530,7 +2560,12 @@ def login_senha():
         return _login_senha(email)
     except Exception as e:
         flash(f"Não foi possível entrar: {e}", "danger")
-        return render_template("login_senha.html", email=email, criar=False)
+        return render_template(
+            "login_senha.html",
+            email=email,
+            criar=False,
+            permanecer_logado=session.get("permanecer_logado"),
+        )
 
 
 def _login_senha(email):
@@ -2547,16 +2582,23 @@ def _login_senha(email):
             flash("Confirme o código enviado ao e-mail antes de redefinir a senha.", "danger")
             return redirect(url_for("login_conectar_gmail"))
     if request.method != "POST":
-        return render_template("login_senha.html", email=email, criar=criar)
+        return render_template(
+            "login_senha.html",
+            email=email,
+            criar=criar,
+            permanecer_logado=session.get("permanecer_logado"),
+        )
+    # Atualiza a preferência a partir do formulário de senha
+    session["permanecer_logado"] = request.form.get("permanecer_logado") == "1"
     senha = (request.form.get("senha") or "").strip()
     senha2 = (request.form.get("senha2") or "").strip()
     if criar and eh_super_admin(email):
         if senha != senha2:
             flash("As senhas não coincidem.", "danger")
-            return render_template("login_senha.html", email=email, criar=True)
+            return render_template("login_senha.html", email=email, criar=True, permanecer_logado=session.get("permanecer_logado"))
         if len(senha) < 6:
             flash("A senha deve ter pelo menos 6 caracteres.", "danger")
-            return render_template("login_senha.html", email=email, criar=True)
+            return render_template("login_senha.html", email=email, criar=True, permanecer_logado=session.get("permanecer_logado"))
         admin = salvar_senha_plataforma(email, senha)
         session.pop("otp_ok", None)
         session.pop("redefinir_senha", None)
@@ -2565,10 +2607,10 @@ def _login_senha(email):
     if criar and session.get("redefinir_senha_escola"):
         if senha != senha2:
             flash("As senhas não coincidem.", "danger")
-            return render_template("login_senha.html", email=email, criar=True)
+            return render_template("login_senha.html", email=email, criar=True, permanecer_logado=session.get("permanecer_logado"))
         if len(senha) < 6:
             flash("A senha deve ter pelo menos 6 caracteres.", "danger")
-            return render_template("login_senha.html", email=email, criar=True)
+            return render_template("login_senha.html", email=email, criar=True, permanecer_logado=session.get("permanecer_logado"))
         escola = buscar_escola_por_email(email) or localizar_escola_do_email(email)
         if not escola:
             flash("E-mail não encontrado.", "danger")
@@ -2602,11 +2644,11 @@ def _login_senha(email):
             _entrar_plataforma(admin)
             return redirect(url_for("plataforma_escolas"))
         flash("Senha incorreta. Use a senha que você criou neste sistema (não a do Gmail e não 123456, a menos que tenha escolhido essa).", "danger")
-        return render_template("login_senha.html", email=email, criar=False)
+        return render_template("login_senha.html", email=email, criar=False, permanecer_logado=session.get("permanecer_logado"))
     escola = buscar_escola_por_email(email) or localizar_escola_do_email(email)
     if not escola:
         flash("E-mail ou senha incorretos.", "danger")
-        return render_template("login_senha.html", email=email, criar=False)
+        return render_template("login_senha.html", email=email, criar=False, permanecer_logado=session.get("permanecer_logado"))
     if not escola.get("ativo", True):
         flash("Esta escola está pausada. O acesso está bloqueado.", "danger")
         return redirect(url_for("login"))
@@ -2615,7 +2657,7 @@ def _login_senha(email):
         _entrar_escola(usuario, email, escola)
         return redirect(url_for("dashboard"))
     flash("Senha incorreta.", "danger")
-    return render_template("login_senha.html", email=email, criar=False)
+    return render_template("login_senha.html", email=email, criar=False, permanecer_logado=session.get("permanecer_logado"))
 
 
 def _enviar_convite_escola(escola, access_token=None, link=None):
