@@ -71,6 +71,7 @@
 
         <div class="tabs-ancora">
             {% if pessoa %}<a class="btn btn-secondary" href="#meu-ponto">Meu ponto</a>{% endif %}
+            {% if pessoa %}<a class="btn btn-secondary" href="#banco-horas">Banco de horas</a>{% endif %}
             {% if gestao %}<a class="btn btn-primary" href="#gestao">Gestão da escola</a>{% endif %}
         </div>
 
@@ -118,7 +119,7 @@
         <div class="card-box">
             <h3 style="margin-top:0;">Batidas de hoje</h3>
             <p class="hora-agora">{{ hora_agora }}</p>
-            <p class="hint">Data: {{ data_ref[8:10] }}/{{ data_ref[5:7] }}/{{ data_ref[0:4] }}</p>
+            <p class="hint">Data: {{ data_ref[8:10] }}/{{ data_ref[5:7] }}/{{ data_ref[0:4] }}. Café é opcional. Depois da entrada você pode almoçar, sair mais cedo ou tirar o café — o que fizer sentido no dia.</p>
             <div class="chips">
                 <span class="chip">Cheguei: {{ registro.entrada or '—' }}</span>
                 <span class="chip">Café↓: {{ registro.cafe_ida or '—' }}</span>
@@ -128,22 +129,25 @@
                 <span class="chip">Saí: {{ registro.saida or '—' }}</span>
             </div>
             {% for tipo, rotulo in rotulos.items() %}
+            {% set pode_bater = tipo in batidas_ok %}
             <form method="POST">
                 <input type="hidden" name="acao" value="bater_ponto">
                 <input type="hidden" name="tipo" value="{{ tipo }}">
-                <button class="btn btn-batida {% if proxima == tipo %}btn-success{% else %}btn-secondary{% endif %}"
+                <button class="btn btn-batida {% if pode_bater %}btn-success{% else %}btn-secondary{% endif %}"
                         type="submit"
-                        {% if registro[tipo] or proxima != tipo %}disabled{% endif %}>
+                        {% if registro[tipo] or not pode_bater %}disabled{% endif %}>
                     {% if registro[tipo] %}
                         {{ rotulo }} — {{ registro[tipo] }}
                     {% else %}
-                        {{ rotulo }}
+                        {{ rotulo }}{% if pode_bater and tipo == 'cafe_ida' %} (opcional){% endif %}
                     {% endif %}
                 </button>
             </form>
             {% endfor %}
-            {% if not proxima %}
-            <p class="hint">Todas as batidas de hoje já foram registradas.</p>
+            {% if registro.saida %}
+            <p class="hint">Dia encerrado com a saída.</p>
+            {% elif not batidas_ok %}
+            <p class="hint">Nenhuma batida disponível no momento.</p>
             {% endif %}
         </div>
 
@@ -192,6 +196,58 @@
             </div>
         </div>
         {% endif %}
+
+        <div class="card-box" id="banco-horas">
+            <h3 style="margin-top:0;">Banco de horas — {{ mes_filtro[5:7] }}/{{ mes_filtro[0:4] }}</h3>
+            <p class="hint">
+                Jornada esperada: {{ jornada_minutos }} min/dia ({{ (jornada_minutos // 60) }}h{% if jornada_minutos % 60 %}+{{ jornada_minutos % 60 }}min{% endif %}).
+                Horas trabalhadas = saída − entrada − café − almoço. Positivo = crédito; negativo = você deve à escola.
+            </p>
+            <form method="GET" class="acoes" action="{{ url_for('ponto') }}#banco-horas" style="margin-bottom:14px;">
+                <label class="form-group" style="margin:0;">
+                    <span style="font-size:.82rem;font-weight:700;">Mês</span>
+                    <input type="month" name="mes" value="{{ mes_filtro }}">
+                </label>
+                <button class="btn btn-primary" type="submit">Ver mês</button>
+            </form>
+            <div class="chips" style="margin-bottom:14px;">
+                <span class="chip" style="background:#dcfce7;color:#166534;">Positivas: {{ banco_positivo_fmt }}</span>
+                <span class="chip" style="background:#fee2e2;color:#991b1b;">Negativas: {{ banco_negativo_fmt }}</span>
+                <span class="chip" style="background:#e0f2fe;color:#075985;">Saldo líquido: {{ banco_liquido_fmt }}</span>
+            </div>
+            {% if banco_dias %}
+            <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Entrada</th>
+                        <th>Saída</th>
+                        <th>Trabalhado</th>
+                        <th>Esperado</th>
+                        <th>Saldo do dia</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for d in banco_dias %}
+                <tr>
+                    <td>{{ d.data_ref.strftime('%d/%m/%Y') if d.data_ref.strftime is defined else d.data_ref }}</td>
+                    <td>{{ d.entrada }}</td>
+                    <td>{{ d.saida }}</td>
+                    <td>{{ d.trabalhado }}</td>
+                    <td>{{ d.esperado }}</td>
+                    <td style="{% if d.saldo_min > 0 %}color:#166534;font-weight:700{% elif d.saldo_min < 0 %}color:#991b1b;font-weight:700{% endif %}">
+                        {{ d.saldo }}{% if d.tipo == 'falta' %} (falta){% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <p class="hint">Nenhum dia com ponto ou falta confirmada neste mês.</p>
+            {% endif %}
+        </div>
 
         {% if faltas %}
         <div class="card-box">
@@ -313,8 +369,8 @@
             </div>
 
             <div class="card-box">
-                <h3 style="margin-top:0;">Tempos de café e almoço por colaborador</h3>
-                <p class="hint">Selecione o colaborador e defina o tempo dele. Almoço comum: 1h, 1h30 ou 2h. Em branco = padrão da escola (café {{ padrao_cafe }} min · almoço {{ padrao_almoco }} min).</p>
+                <h3 style="margin-top:0;">Tempos e jornada por colaborador</h3>
+                <p class="hint">Selecione o colaborador. Café é opcional no dia a dia. Jornada diária alimenta o banco de horas (padrão: {{ (padrao_jornada // 60) }}h{% if padrao_jornada % 60 %}{{ '%02d' % (padrao_jornada % 60) }}{% else %}00{% endif %}).</p>
                 <form method="POST" class="form-grid" id="form-tempos">
                     <input type="hidden" name="acao" value="salvar_tempos_funcionario">
                     <div class="form-group" style="grid-column:1/-1;">
@@ -324,13 +380,9 @@
                             {% for p in equipe %}
                             <option value="{{ p.id }}"
                                     data-cafe="{{ p.ponto_minutos_cafe if p.ponto_minutos_cafe is not none else '' }}"
-                                    data-almoco="{{ p.ponto_minutos_almoco if p.ponto_minutos_almoco is not none else '' }}">
+                                    data-almoco="{{ p.ponto_minutos_almoco if p.ponto_minutos_almoco is not none else '' }}"
+                                    data-jornada="{{ p.ponto_jornada_minutos if p.ponto_jornada_minutos is not none else '' }}">
                                 {{ p.nome_completo }}
-                                {% if p.ponto_minutos_cafe is not none or p.ponto_minutos_almoco is not none %}
-                                    — café {{ p.ponto_minutos_cafe or 'padrão' }} min · almoço {{ p.ponto_minutos_almoco or 'padrão' }} min
-                                {% else %}
-                                    — ainda no padrão da escola
-                                {% endif %}
                             </option>
                             {% endfor %}
                         </select>
@@ -354,6 +406,15 @@
                             <button type="button" data-min="120">2 horas</button>
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label>Jornada diária (minutos)</label>
+                        <input type="number" name="ponto_jornada_minutos" id="inp-jornada" min="60" max="720" placeholder="Padrão {{ padrao_jornada }}">
+                        <div class="preset-row" data-target="inp-jornada">
+                            <button type="button" data-min="360">6h</button>
+                            <button type="button" data-min="440">7h20</button>
+                            <button type="button" data-min="480">8h</button>
+                        </div>
+                    </div>
                     <div class="form-group" style="justify-content:end;">
                         <button class="btn btn-primary" type="submit">Salvar tempos deste colaborador</button>
                     </div>
@@ -368,6 +429,7 @@
                             <th>Colaborador</th>
                             <th>Café</th>
                             <th>Almoço</th>
+                            <th>Jornada</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -377,6 +439,7 @@
                         <td>{{ p.nome_completo }}</td>
                         <td>{% if p.ponto_minutos_cafe is not none %}{{ p.ponto_minutos_cafe }} min{% else %}padrão ({{ padrao_cafe }}){% endif %}</td>
                         <td>{% if p.ponto_minutos_almoco is not none %}{{ p.ponto_minutos_almoco }} min{% else %}padrão ({{ padrao_almoco }}){% endif %}</td>
+                        <td>{% if p.ponto_jornada_minutos is not none %}{{ p.ponto_jornada_minutos }} min{% else %}padrão ({{ padrao_jornada }}){% endif %}</td>
                         <td>
                             <button type="button" class="btn btn-secondary btn-escolher-func"
                                     data-id="{{ p.id }}">Selecionar</button>
@@ -559,12 +622,14 @@
         var sel = document.getElementById('sel-tempos-func');
         var cafe = document.getElementById('inp-cafe');
         var almoco = document.getElementById('inp-almoco');
+        var jornada = document.getElementById('inp-jornada');
         function preencherTempos() {
             if (!sel || !cafe || !almoco) return;
             var opt = sel.options[sel.selectedIndex];
             if (!opt) return;
             cafe.value = opt.getAttribute('data-cafe') || '';
             almoco.value = opt.getAttribute('data-almoco') || '';
+            if (jornada) jornada.value = opt.getAttribute('data-jornada') || '';
         }
         if (sel) sel.addEventListener('change', preencherTempos);
 

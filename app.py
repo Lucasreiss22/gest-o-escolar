@@ -10182,7 +10182,7 @@ def _garantir_ponto():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ponto_v4"
+    chave = f"{schema}:ponto_v5"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -10270,14 +10270,17 @@ def _garantir_ponto():
             for sql in (
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT DEFAULT 15",
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT DEFAULT 60",
+                "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_jornada_minutos INT DEFAULT 480",
                 "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT",
                 "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT",
+                "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS ponto_jornada_minutos INT",
             ):
                 cursor.execute(sql)
         conexao.commit()
         _tabelas_ok.discard(f"{schema}:ponto_v1")
         _tabelas_ok.discard(f"{schema}:ponto_v2")
         _tabelas_ok.discard(f"{schema}:ponto_v3")
+        _tabelas_ok.discard(f"{schema}:ponto_v4")
         _tabelas_ok.add(chave)
     except Exception:
         try:
@@ -10334,10 +10337,117 @@ def _mapa_registro_ponto(row):
 
 
 def _proxima_batida(registro):
-    for chave in _ordem_batidas_ponto():
-        if not (registro or {}).get(chave):
+    """Compat: sugere uma batida; use _batidas_permitidas para a regra real."""
+    permitidas = _batidas_permitidas(registro)
+    return _batida_sugerida(permitidas)
+
+
+def _batidas_permitidas(registro):
+    """
+    Entrada e saída são o eixo do dia. Café é opcional.
+    Almoço também pode ser pulado (ex.: saída antecipada).
+    Se abriu café ou almoço, precisa registrar a volta antes de outra batida.
+    """
+    r = registro or {}
+    if not r.get("entrada"):
+        return {"entrada"}
+    if r.get("saida"):
+        return set()
+    if r.get("cafe_ida") and not r.get("cafe_volta"):
+        return {"cafe_volta"}
+    if r.get("almoco") and not r.get("almoco_volta"):
+        return {"almoco_volta"}
+    permitidas = {"saida"}
+    if not r.get("cafe_ida"):
+        permitidas.add("cafe_ida")
+    if not r.get("almoco"):
+        permitidas.add("almoco")
+    return permitidas
+
+
+def _batida_sugerida(permitidas):
+    for chave in ("entrada", "cafe_volta", "almoco_volta", "almoco", "saida", "cafe_ida"):
+        if chave in (permitidas or set()):
             return chave
     return None
+
+
+def _fmt_minutos_banco(minutos):
+    minutos = int(minutos or 0)
+    sinal = "-" if minutos < 0 else ("+" if minutos > 0 else "")
+    m = abs(minutos)
+    return f"{sinal}{m // 60}h{m % 60:02d}"
+
+
+def _minutos_entre_ponto(hora_ini, hora_fim, data_ref, agora):
+    inicio = _parse_hora_ponto_hoje(hora_ini, data_ref, agora)
+    fim = _parse_hora_ponto_hoje(hora_fim, data_ref, agora)
+    if not inicio or not fim:
+        return None
+    return max(0, int((fim - inicio).total_seconds() // 60))
+
+
+def _ler_jornada_ponto(cursor, funcionario_id=None):
+    jornada = 480
+    try:
+        cursor.execute(
+            "SELECT ponto_jornada_minutos FROM configuracoes WHERE id = 1"
+        )
+        row = cursor.fetchone() or {}
+        jornada = int((row.get("ponto_jornada_minutos") if isinstance(row, dict) else None) or 480)
+    except Exception:
+        jornada = 480
+    if funcionario_id:
+        try:
+            cursor.execute(
+                "SELECT ponto_jornada_minutos FROM funcionarios WHERE id = %s",
+                (funcionario_id,),
+            )
+            frow = cursor.fetchone() or {}
+            if isinstance(frow, dict) and frow.get("ponto_jornada_minutos") is not None:
+                jornada = int(frow["ponto_jornada_minutos"])
+        except Exception:
+            pass
+    return max(60, jornada)
+
+
+def _saldo_dia_ponto(registro, jornada_min, data_ref, agora, falta=None):
+    """
+    Horas trabalhadas = (saída - entrada) − café − almoço.
+    Saldo = trabalhado − jornada esperada.
+    Falta confirmada sem trabalho conta jornada negativa.
+    """
+    jornada_min = max(60, int(jornada_min or 480))
+    r = registro or {}
+    if falta and falta.get("status") == "confirmada" and not (r.get("entrada") and r.get("saida")):
+        return {
+            "incompleto": False,
+            "trabalhado_min": 0,
+            "esperado_min": jornada_min,
+            "saldo_min": -jornada_min,
+            "tipo": "falta",
+        }
+    if not r.get("entrada") or not r.get("saida"):
+        return {
+            "incompleto": True,
+            "trabalhado_min": 0,
+            "esperado_min": jornada_min,
+            "saldo_min": 0,
+            "tipo": "incompleto",
+        }
+    total = _minutos_entre_ponto(r.get("entrada"), r.get("saida"), data_ref, agora) or 0
+    if r.get("cafe_ida") and r.get("cafe_volta"):
+        total -= _minutos_entre_ponto(r.get("cafe_ida"), r.get("cafe_volta"), data_ref, agora) or 0
+    if r.get("almoco") and r.get("almoco_volta"):
+        total -= _minutos_entre_ponto(r.get("almoco"), r.get("almoco_volta"), data_ref, agora) or 0
+    total = max(0, total)
+    return {
+        "incompleto": False,
+        "trabalhado_min": total,
+        "esperado_min": jornada_min,
+        "saldo_min": total - jornada_min,
+        "tipo": "ponto",
+    }
 
 
 def _parse_hora_ponto_hoje(hora_txt, data_ref, agora):
@@ -10510,6 +10620,13 @@ def ponto():
     padrao_cafe, padrao_almoco = 15, 60
     excesso_cafe_hoje = 0
     excesso_almoco_hoje = 0
+    jornada_minutos = 480
+    padrao_jornada = 480
+    banco_dias = []
+    banco_positivo = 0
+    banco_negativo = 0
+    banco_liquido = 0
+    batidas_ok = set()
     contadores = []
     atestados_pendentes = []
     faltas_pendentes = []
@@ -10656,25 +10773,31 @@ def ponto():
                         fid = request.form.get("funcionario_id", type=int)
                         cafe_raw = (request.form.get("ponto_minutos_cafe") or "").strip()
                         almoco_raw = (request.form.get("ponto_minutos_almoco") or "").strip()
+                        jornada_raw = (request.form.get("ponto_jornada_minutos") or "").strip()
                         if not fid:
                             raise ValueError("Selecione o colaborador.")
                         cafe = int(cafe_raw) if cafe_raw != "" else None
                         almoco = int(almoco_raw) if almoco_raw != "" else None
+                        jornada = int(jornada_raw) if jornada_raw != "" else None
                         if cafe is not None and cafe < 1:
                             raise ValueError("Tempo de café inválido.")
                         if almoco is not None and almoco < 1:
                             raise ValueError("Tempo de almoço inválido.")
+                        if jornada is not None and jornada < 60:
+                            raise ValueError("Jornada diária deve ter ao menos 60 minutos.")
                         cursor.execute(
                             """
                             UPDATE funcionarios
-                            SET ponto_minutos_cafe = %s, ponto_minutos_almoco = %s
+                            SET ponto_minutos_cafe = %s,
+                                ponto_minutos_almoco = %s,
+                                ponto_jornada_minutos = %s
                             WHERE id = %s
                             """,
-                            (cafe, almoco, fid),
+                            (cafe, almoco, jornada, fid),
                         )
                         if cursor.rowcount == 0:
                             raise ValueError("Colaborador não encontrado.")
-                        flash("Tempos de café e almoço salvos para o colaborador.", "success")
+                        flash("Tempos e jornada salvos para o colaborador.", "success")
                     conexao.commit()
                     return redirect(url_for("ponto", mes=mes_filtro) + "#gestao")
 
@@ -10702,14 +10825,23 @@ def ponto():
                     )
                     row_atual = cursor.fetchone()
                     atual_map = _mapa_registro_ponto(row_atual)
-                    proxima = _proxima_batida(atual_map)
-                    if proxima != tipo:
+                    permitidas = _batidas_permitidas(atual_map)
+                    if tipo not in permitidas:
                         rotulos = _rotulos_batida_ponto()
                         if atual_map.get(tipo):
                             raise ValueError(f"“{rotulos[tipo]}” já foi registrado hoje às {atual_map[tipo]}.")
-                        if proxima:
-                            raise ValueError(f"Agora registre: {rotulos[proxima]}.")
-                        raise ValueError("Todas as batidas de hoje já foram registradas.")
+                        if atual_map.get("cafe_ida") and not atual_map.get("cafe_volta"):
+                            raise ValueError("Registre a volta do café antes de outra batida.")
+                        if atual_map.get("almoco") and not atual_map.get("almoco_volta"):
+                            raise ValueError("Registre a volta do almoço antes de outra batida.")
+                        if not atual_map.get("entrada"):
+                            raise ValueError("Registre primeiro: Cheguei na escola.")
+                        if atual_map.get("saida"):
+                            raise ValueError("O dia já foi encerrado com a saída.")
+                        opcoes = ", ".join(rotulos[k] for k in ("cafe_ida", "almoco", "saida", "cafe_volta", "almoco_volta") if k in permitidas)
+                        raise ValueError(
+                            f"Batida não disponível agora. Opções: {opcoes or 'nenhuma'}."
+                        )
                     vals = {k: None for k in _ordem_batidas_ponto()}
                     vals[tipo] = hora
                     cafe_lim, almoco_lim = _ler_tempos_ponto(cursor, funcionario_id)
@@ -10829,10 +10961,13 @@ def ponto():
                     flash("Cadastro da equipe não encontrado.", "danger")
                     return redirect(url_for("dashboard"))
                 minutos_cafe, minutos_almoco = _ler_tempos_ponto(cursor, funcionario_id)
+                jornada_minutos = _ler_jornada_ponto(cursor, funcionario_id)
             else:
                 minutos_cafe, minutos_almoco = _ler_tempos_ponto(cursor)
+                jornada_minutos = _ler_jornada_ponto(cursor)
 
             padrao_cafe, padrao_almoco = _ler_tempos_ponto(cursor)
+            padrao_jornada = _ler_jornada_ponto(cursor)
 
             if funcionario_id and pessoa:
                 cursor.execute(
@@ -10855,6 +10990,7 @@ def ponto():
                 contadores = _contadores_intervalo_ponto(
                     registro, minutos_cafe, minutos_almoco, agora, agora.date()
                 )
+                batidas_ok = _batidas_permitidas(registro)
                 cursor.execute(
                     """
                     SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida,
@@ -10922,6 +11058,74 @@ def ponto():
                 )
                 faltas = [dict(item) for item in (cursor.fetchall() or [])]
 
+                # Banco de horas do mês filtrado
+                cursor.execute(
+                    """
+                    SELECT data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+                    FROM ponto_registros
+                    WHERE funcionario_id = %s
+                      AND EXTRACT(YEAR FROM data_ref) = %s
+                      AND EXTRACT(MONTH FROM data_ref) = %s
+                    ORDER BY data_ref
+                    """,
+                    (funcionario_id, ano, mes),
+                )
+                regs_mes = {}
+                for item in cursor.fetchall() or []:
+                    dref = item["data_ref"]
+                    if hasattr(dref, "isoformat"):
+                        chave_d = dref
+                    else:
+                        chave_d = datetime.strptime(str(dref)[:10], "%Y-%m-%d").date()
+                    regs_mes[chave_d] = _mapa_registro_ponto(item)
+                cursor.execute(
+                    """
+                    SELECT data_ref, tipo, status, descontar
+                    FROM ponto_faltas
+                    WHERE funcionario_id = %s
+                      AND EXTRACT(YEAR FROM data_ref) = %s
+                      AND EXTRACT(MONTH FROM data_ref) = %s
+                      AND status = 'confirmada'
+                    """,
+                    (funcionario_id, ano, mes),
+                )
+                faltas_mes_map = {}
+                for item in cursor.fetchall() or []:
+                    dref = item["data_ref"]
+                    if not hasattr(dref, "isoformat"):
+                        dref = datetime.strptime(str(dref)[:10], "%Y-%m-%d").date()
+                    faltas_mes_map[dref] = dict(item)
+                dias_chaves = sorted(set(regs_mes.keys()) | set(faltas_mes_map.keys()))
+                banco_dias = []
+                banco_positivo = 0
+                banco_negativo = 0
+                for dia in dias_chaves:
+                    mapa = regs_mes.get(dia) or {}
+                    calc = _saldo_dia_ponto(
+                        mapa, jornada_minutos, dia, agora, faltas_mes_map.get(dia)
+                    )
+                    saldo = int(calc["saldo_min"])
+                    if saldo > 0:
+                        banco_positivo += saldo
+                    elif saldo < 0:
+                        banco_negativo += abs(saldo)
+                    banco_dias.append(
+                        {
+                            "data_ref": dia,
+                            "entrada": mapa.get("entrada") or "—",
+                            "saida": mapa.get("saida") or "—",
+                            "trabalhado": _fmt_minutos_banco(calc["trabalhado_min"])
+                            if not calc["incompleto"] or calc.get("tipo") == "falta"
+                            else "—",
+                            "esperado": _fmt_minutos_banco(calc["esperado_min"]),
+                            "saldo": _fmt_minutos_banco(saldo) if not calc["incompleto"] else "pendente",
+                            "saldo_min": saldo,
+                            "incompleto": calc["incompleto"],
+                            "tipo": calc.get("tipo"),
+                        }
+                    )
+                banco_liquido = banco_positivo - banco_negativo
+
             if gestao:
                 cursor.execute(
                     """
@@ -10957,7 +11161,7 @@ def ponto():
                 faltas_mes = [dict(r) for r in (cursor.fetchall() or [])]
                 cursor.execute(
                     """
-                    SELECT id, nome_completo, ponto_minutos_cafe, ponto_minutos_almoco
+                    SELECT id, nome_completo, ponto_minutos_cafe, ponto_minutos_almoco, ponto_jornada_minutos
                     FROM funcionarios
                     WHERE COALESCE(ativo, TRUE) = TRUE
                     ORDER BY nome_completo
@@ -10982,7 +11186,8 @@ def ponto():
         data_ref=data_hoje,
         hora_agora=agora.strftime("%H:%M"),
         registro=registro,
-        proxima=_proxima_batida(registro) if pessoa else None,
+        proxima=_batida_sugerida(batidas_ok) if pessoa else None,
+        batidas_ok=list(batidas_ok),
         rotulos=_rotulos_batida_ponto(),
         historico=historico,
         atestados=atestados,
@@ -10990,11 +11195,20 @@ def ponto():
         gestao=gestao,
         minutos_cafe=minutos_cafe,
         minutos_almoco=minutos_almoco,
+        jornada_minutos=jornada_minutos,
         padrao_cafe=padrao_cafe,
         padrao_almoco=padrao_almoco,
+        padrao_jornada=padrao_jornada,
         excesso_cafe_hoje=excesso_cafe_hoje,
         excesso_almoco_hoje=excesso_almoco_hoje,
         contadores=contadores,
+        banco_dias=banco_dias,
+        banco_positivo=banco_positivo,
+        banco_negativo=banco_negativo,
+        banco_liquido=banco_liquido,
+        banco_positivo_fmt=_fmt_minutos_banco(banco_positivo),
+        banco_negativo_fmt=_fmt_minutos_banco(-banco_negativo if banco_negativo else 0),
+        banco_liquido_fmt=_fmt_minutos_banco(banco_liquido),
         mes_filtro=mes_filtro,
         atestados_pendentes=atestados_pendentes,
         faltas_pendentes=faltas_pendentes,
