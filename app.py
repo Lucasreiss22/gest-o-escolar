@@ -10799,7 +10799,13 @@ def ponto():
                             raise ValueError("Colaborador não encontrado.")
                         flash("Tempos e jornada salvos para o colaborador.", "success")
                     conexao.commit()
-                    return redirect(url_for("ponto", mes=mes_filtro) + "#gestao")
+                    painel_retorno = {
+                        "confirmar_atestado": "painel-atestados-pend",
+                        "lancar_falta": "painel-lancar-falta",
+                        "confirmar_falta": "painel-faltas-pend",
+                        "salvar_tempos_funcionario": "painel-tempos",
+                    }.get(acao, "painel-pdfs-gestao")
+                    return redirect(url_for("ponto", mes=mes_filtro, abrir=painel_retorno))
 
                 if not funcionario_id:
                     raise ValueError(
@@ -10896,7 +10902,7 @@ def ponto():
                         "warning" if msg_extra else "success",
                     )
                     conexao.commit()
-                    return redirect(url_for("ponto"))
+                    return redirect(url_for("ponto", abrir="painel-batidas"))
                 elif acao == "excluir_ponto":
                     cursor.execute(
                         "DELETE FROM ponto_registros WHERE id = %s AND funcionario_id = %s",
@@ -10904,7 +10910,7 @@ def ponto():
                     )
                     flash("Registro de ponto removido.", "success")
                     conexao.commit()
-                    return redirect(url_for("ponto"))
+                    return redirect(url_for("ponto", abrir="painel-historico"))
                 elif acao == "enviar_atestado":
                     midia_id = _salvar_midia("arquivo", {"pdf"})
                     if not midia_id:
@@ -10927,7 +10933,7 @@ def ponto():
                     )
                     flash("Atestado enviado. A secretaria precisa confirmar.", "success")
                     conexao.commit()
-                    return redirect(url_for("ponto"))
+                    return redirect(url_for("ponto", abrir="painel-atestados"))
                 elif acao == "excluir_atestado":
                     atestado_id = request.form.get("atestado_id", type=int)
                     origem = (request.form.get("origem") or "ponto").strip()
@@ -10949,7 +10955,7 @@ def ponto():
                         )
                     flash("Atestado removido.", "success")
                     conexao.commit()
-                    return redirect(url_for("ponto"))
+                    return redirect(url_for("ponto", abrir="painel-atestados"))
 
             if funcionario_id:
                 cursor.execute(
@@ -11254,7 +11260,7 @@ def ponto_relatorio_pdf():
         funcionario_id = meu_id
     if not funcionario_id:
         flash("Selecione o colaborador para gerar o PDF.", "warning")
-        return redirect(url_for("ponto") + "#gestao")
+        return redirect(url_for("ponto", abrir="painel-pdfs-gestao"))
 
     conexao = obter_conexao()
     if not conexao:
