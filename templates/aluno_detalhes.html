@@ -110,6 +110,10 @@
             </div>
         </div>
 
+        {% with docs_lista=documentos_aluno, docs_tipos=tipos_doc_aluno, docs_pessoa_tipo='aluno', docs_pessoa_id=aluno.id, docs_titulo='Documentos do aluno (RG, CPF, contrato…)' %}
+            {% include '_documentos_pessoa.html' %}
+        {% endwith %}
+
         <div class="row g-4">
             <!-- RESPONSÁVEIS LEGAIS -->
             <div class="col-md-6">
@@ -137,6 +141,9 @@
                                             </div>
                                             <small class="text-muted d-block"><i class="bi bi-telephone"></i> Telefone: {{ resp.telefone or 'Sem fone' }} | <i class="bi bi-envelope"></i> {{ resp.email or 'Sem email' }}</small>
                                             <small class="text-muted d-block"><i class="bi bi-briefcase"></i> Trabalho: {{ resp.local_trabalho or 'N/A' }} ({{ resp.telefone_trabalho or '-' }})</small>
+                                            {% with docs_lista=documentos_resp.get(resp_id, []), docs_tipos=tipos_doc_resp, docs_pessoa_tipo='responsavel', docs_pessoa_id=resp_id, docs_titulo='Documentos deste responsável' %}
+                                                {% include '_documentos_pessoa.html' %}
+                                            {% endwith %}
                                             </div>
                                         </div>
                                         <div>

@@ -136,11 +136,15 @@ ACOES_ACESSO = ("acessar", "ver", "alterar", "excluir")
 
 TELAS_PLANO = [
     ("alunos", "Alunos"),
-    ("pedagogico", "Pedagógico"),
+    ("pedagogico", "Pedagógico (visão geral)"),
+    ("pedagogico_cadastro", "Função: turmas e matrículas"),
     ("professores", "Equipe"),
     ("financeiro", "Financeiro"),
-    ("calendario", "Calendário"),
+    ("nfse", "Função: notas fiscais (NFS-e)"),
+    ("calendario", "Calendário / chamada"),
     ("contracheque", "Contra-cheque"),
+    ("ponto", "Ponto"),
+    ("auditoria", "Auditoria"),
 ]
 
 MODULO_PARA_TELA = {
@@ -149,13 +153,14 @@ MODULO_PARA_TELA = {
     "usuarios": None,
     "alunos": "alunos",
     "pedagogico": "pedagogico",
-    "pedagogico_cadastro": "pedagogico",
+    "pedagogico_cadastro": "pedagogico_cadastro",
     "professores": "professores",
     "financeiro": "financeiro",
     "calendario": "calendario",
     "contracheque": "contracheque",
-    "ponto": None,
-    "nfse": "financeiro",
+    "ponto": "ponto",
+    "nfse": "nfse",
+    "auditoria": "auditoria",
 }
 
 PACOTES_INICIAIS = [
@@ -169,12 +174,12 @@ PACOTES_INICIAIS = [
         "pedagogico",
         "Pedagógico",
         "Alunos, turmas, chamada, equipe e calendário.",
-        ["alunos", "pedagogico", "professores", "calendario"],
+        ["alunos", "pedagogico", "pedagogico_cadastro", "professores", "calendario"],
     ),
     (
         "completo",
         "Completo",
-        "Todas as telas do sistema.",
+        "Todas as telas e funções do sistema.",
         [codigo for codigo, _rotulo in TELAS_PLANO],
     ),
 ]
@@ -193,14 +198,18 @@ _TELA_EXTRA = {
     "boletim_pdf": "pedagogico",
     "anexar_boletim": "pedagogico",
     "ajustar_contracheque": "contracheque",
-    "pagina_notas_fiscais": "financeiro",
-    "nfse_emitir": "financeiro",
-    "nfse_cancelar": "financeiro",
-    "nfse_substituir": "financeiro",
-    "nfse_consultar": "financeiro",
-    "nfse_lote": "financeiro",
-    "nfse_xml": "financeiro",
-    "nfse_danfse": "financeiro",
+    "pagina_notas_fiscais": "nfse",
+    "nfse_emitir": "nfse",
+    "nfse_cancelar": "nfse",
+    "nfse_substituir": "nfse",
+    "nfse_consultar": "nfse",
+    "nfse_lote": "nfse",
+    "nfse_xml": "nfse",
+    "nfse_danfse": "nfse",
+    "pagina_auditoria": "auditoria",
+    "relatorio_auditoria_pdf": "auditoria",
+    "ponto": "ponto",
+    "ponto_gestao": "ponto",
 }
 
 _POST_SO_LEITURA = {"pdf_contracheque_rota", "relatorio_pdf_consulta", "relatorio_tributario", "relatorio_pdf_custos"}
@@ -348,7 +357,15 @@ def modulo_no_plano(modulo, telas):
     tela = MODULO_PARA_TELA.get(modulo)
     if tela is None:
         return True
-    return tela in telas
+    if tela in telas:
+        return True
+    # Pacotes antigos: "pedagogico" libera as funções do módulo
+    if tela.startswith("pedagogico") and "pedagogico" in telas:
+        return True
+    # Pacotes antigos: NFS-e vinha junto com financeiro
+    if tela == "nfse" and "financeiro" in telas:
+        return True
+    return False
 
 
 def endpoint_no_plano(endpoint, telas, acao_form=None):
@@ -465,6 +482,7 @@ CARGOS_ESCOLA = [
             "Manutenção",
             "Jardineiro(a)",
             "Estagiário(a)",
+            "Jovem aprendiz",
             "Voluntário(a)",
             "Prestador(a) de serviço",
         ],

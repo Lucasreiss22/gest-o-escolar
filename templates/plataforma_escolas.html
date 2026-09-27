@@ -504,6 +504,26 @@
                     </select>
                     <button class="btn-sm btn-verde" type="submit">Aplicar pacote</button>
                 </form>
+                    {% set liberadas = e.telas_liberadas if e.telas_liberadas is defined else none %}
+                    <form method="POST" style="margin-top:14px; border-top:1px solid #e2e8f0; padding-top:12px;">
+                        <input type="hidden" name="acao" value="salvar_telas_escola">
+                        <input type="hidden" name="aba" value="escolas">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        <h5 style="margin:0 0 6px;">Módulos e funções liberados</h5>
+                        <p class="hint">Marque o que esta escola pode usar. Funções (turmas, NFS-e, ponto, auditoria) podem ser liberadas à parte do módulo.{% if e.telas_escola is not none %} <strong>Override ativo</strong> (não usa só o pacote).{% endif %}</p>
+                        <div class="telas">
+                            {% for codigo, rotulo in telas_plano %}
+                            <label>
+                                <input type="checkbox" name="telas" value="{{ codigo }}" {% if liberadas is none or codigo in liberadas %}checked{% endif %}>
+                                {{ rotulo }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                        <div class="acoes" style="margin-top:8px;">
+                            <button class="btn-sm btn-azul" type="submit">Salvar módulos/funções</button>
+                            <button class="btn-sm btn-cinza" type="submit" name="usar_pacote" value="1">Usar só o pacote</button>
+                        </div>
+                    </form>
                     <form method="POST" class="js-calculo" style="margin-top:12px;">
                         <input type="hidden" name="acao" value="salvar_cobranca_escola">
                         <input type="hidden" name="aba" value="escolas">

@@ -190,6 +190,7 @@ def garantir_plataforma():
                 ("nfse_codigo_municipio", "VARCHAR(10)"),
                 ("nfse_uf", "CHAR(2)"),
                 ("nfse_cep", "VARCHAR(9)"),
+                ("telas_escola", "JSONB"),
             ):
                 cursor.execute(
                     f"ALTER TABLE plataforma_escolas ADD COLUMN IF NOT EXISTS {coluna} {spec}"
@@ -1258,12 +1259,64 @@ def painel_financeiro_plataforma(competencia, status="", busca=""):
 
 
 def telas_contratadas(escola):
-    if not escola or not escola.get("pacote"):
+    """Telas/funções liberadas: override por escola (telas_escola) ou pacote. None = todas."""
+    if not escola:
+        return None
+    extras = escola.get("telas_escola")
+    if extras is not None:
+        if isinstance(extras, str):
+            try:
+                extras = json.loads(extras)
+            except Exception:
+                extras = None
+        if isinstance(extras, list):
+            return _telas_validas(extras)
+    if not escola.get("pacote"):
         return None
     for pacote in listar_pacotes():
         if pacote["codigo"] == escola.get("pacote"):
             return pacote["telas"]
     return None
+
+
+def salvar_telas_escola(escola_id, telas):
+    """Define módulos/funções liberados para a escola (override do pacote). Lista vazia = nenhuma tela comercial."""
+    garantir_plataforma()
+    escola = buscar_escola_por_id(escola_id)
+    if not escola:
+        raise ValueError("Escola não encontrada.")
+    telas_ok = _telas_validas(telas)
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "UPDATE plataforma_escolas SET telas_escola = %s::jsonb WHERE id = %s",
+                (json.dumps(telas_ok), escola_id),
+            )
+        conexao.commit()
+    finally:
+        conexao.close()
+    return buscar_escola_por_id(escola_id)
+
+
+def limpar_telas_escola(escola_id):
+    """Volta a usar só o pacote (remove o override)."""
+    garantir_plataforma()
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "UPDATE plataforma_escolas SET telas_escola = NULL WHERE id = %s",
+                (escola_id,),
+            )
+        conexao.commit()
+    finally:
+        conexao.close()
+    return buscar_escola_por_id(escola_id)
 
 
 def buscar_escola_por_id(escola_id):

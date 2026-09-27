@@ -14,6 +14,7 @@
         .card-resumo.atrasado { border-left-color: #e74c3c; }
         .card-resumo.folha { border-left-color: #9b59b6; }
         .card-resumo.tributos { border-left-color: #e67e22; }
+        .card-resumo.isencao { border-left-color: #0f766e; background: #f0fdfa; }
         .card-resumo.liquido { border-left-color: #1abc9c; }
         .card-resumo h4 { font-size: 0.75rem; color: #7f8c8d; text-transform: uppercase; margin-bottom: 8px; }
         .card-resumo .valor { font-size: 1.3rem; font-weight: 700; color: #2c3e50; }
@@ -304,6 +305,48 @@
                 <span class="hint" style="color: #e67e22;">Abrir relatório</span>
                 {% endif %}
             </a>
+            {% if isencao_aprendiz and isencao_aprendiz.valor > 0 %}
+            <button type="button" class="card-resumo isencao" data-abre="dlg-isencao-aprendiz" style="text-align:left; cursor:pointer; border:none; width:100%;">
+                <h4>Isenção de imposto / encargos</h4>
+                <div class="valor">R$ {{ isencao_aprendiz.valor|moeda }}</div>
+                <span class="hint" style="color:#0f766e;">Jovem aprendiz · toque para o detalhe</span>
+            </button>
+            <dialog id="dlg-isencao-aprendiz" class="calc-painel">
+                <form method="dialog" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+                    <div>
+                        <h3 style="margin:0 0 6px;">{{ isencao_aprendiz.titulo }}</h3>
+                        <p class="hint" style="margin:0;">Economia de FGTS neste mês: R$ {{ isencao_aprendiz.valor|moeda }} · {{ isencao_aprendiz.qtd }} aprendiz(es)</p>
+                    </div>
+                    <button class="btn" value="cancel">Fechar</button>
+                </form>
+                <p style="margin:14px 0; line-height:1.5; color:#334155; font-size:0.9rem;">{{ isencao_aprendiz.base_legal }}</p>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Colaborador</th><th>Cargo</th><th>Bruto</th><th>FGTS (2%)</th><th>Economia</th></tr>
+                        </thead>
+                        <tbody>
+                        {% for item in isencao_aprendiz.itens %}
+                            <tr>
+                                <td>{{ item.nome }}</td>
+                                <td>{{ item.cargo or '—' }}</td>
+                                <td>R$ {{ item.bruto|moeda }}</td>
+                                <td>R$ {{ item.fgts|moeda }}</td>
+                                <td>R$ {{ item.reducao|moeda }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </dialog>
+            <script>
+            (function () {
+                var btn = document.querySelector('[data-abre="dlg-isencao-aprendiz"]');
+                var dlg = document.getElementById('dlg-isencao-aprendiz');
+                if (btn && dlg) btn.addEventListener('click', function () { dlg.showModal(); });
+            })();
+            </script>
+            {% endif %}
             <a href="{{ url_for('relatorio_cartao_financeiro', tipo='compras', mes=mes_atual) }}" class="card-resumo compras">
                 <h4>Compras e custos fixos</h4>
                 <div class="valor">R$ {{ (totais.custos_compras or 0)|moeda }}</div>
@@ -693,16 +736,18 @@
                             <select name="tipo_contrato" data-contrato-select>
                                 <option value="clt_mensalista" {% if prof.tipo_contrato == 'clt_mensalista' %}selected{% endif %}>CLT mensalista (salário fixo)</option>
                                 <option value="clt_horista" {% if prof.tipo_contrato in ['clt_horista','horista'] %}selected{% endif %}>CLT horista (hora-aula)</option>
+                                <option value="jovem_aprendiz" {% if prof.tipo_contrato in ['jovem_aprendiz','aprendiz'] %}selected{% endif %}>Jovem aprendiz (FGTS 2%)</option>
                                 <option value="pj" {% if prof.tipo_contrato == 'pj' %}selected{% endif %}>PJ / NFS-e</option>
                                 <option value="rpa" {% if prof.tipo_contrato in ['rpa','autonomo','extra_pf'] %}selected{% endif %}>RPA / Extra PF</option>
                             </select>
                         </div>
                         <p class="fin-item-meta" data-contratos="clt_mensalista" style="grid-column:1/-1;">Salário fixo. Líquido = bruto − INSS progressivo − IRRF. Encargos: FGTS, 13º, férias+1/3{% if regime_atual == 'simples_nacional' %}; Simples: INSS patronal e RAT zerados{% else %}; Presumido/Real: INSS 20%, RAT e Sistema S{% endif %}.</p>
+                        <p class="fin-item-meta" data-contratos="jovem_aprendiz" style="grid-column:1/-1;">Contrato de aprendizagem (Lei 10.097/2000). FGTS 2% em vez de 8% — válido no Simples e no Lucro Presumido. INSS/IRRF do empregado como CLT; no Presumido o INSS patronal continua (STJ Tema 1342).</p>
                         <p class="fin-item-meta" data-contratos="clt_horista" style="grid-column:1/-1;">Informe hora-aula e horas do mês. DSR entra no bruto. Encargos CLT sobre horas + DSR.</p>
                         <p class="fin-item-meta" data-contratos="pj" style="grid-column:1/-1;">Sem encargos CLT. Pagamento por NFS-e. Retenções federais e ISS só se ativadas.</p>
                         <p class="fin-item-meta" data-contratos="rpa" style="grid-column:1/-1;">INSS do autônomo + IRRF no líquido. Escola recolhe INSS 20% e RAT.</p>
-                        <div class="form-group" data-contratos="clt_mensalista pj rpa">
-                            <label data-contratos="clt_mensalista">Salário mensal bruto</label>
+                        <div class="form-group" data-contratos="clt_mensalista jovem_aprendiz pj rpa">
+                            <label data-contratos="clt_mensalista jovem_aprendiz">Salário mensal bruto</label>
                             <label data-contratos="pj">Valor da NFS-e</label>
                             <label data-contratos="rpa">Valor bruto do RPA</label>
                             <input name="salario" data-obrigatorio data-moeda placeholder="Digite o valor" value="{{ prof.salario|moeda_campo }}">

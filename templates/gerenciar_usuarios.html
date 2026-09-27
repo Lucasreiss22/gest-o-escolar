@@ -215,6 +215,7 @@
                         <select name="tipo_contrato" id="tipoContrato" data-contrato-select>
                             <option value="clt_mensalista" {% if tc == 'clt_mensalista' %}selected{% endif %}>CLT mensalista (salário fixo)</option>
                             <option value="clt_horista" {% if tc in ['clt_horista','horista'] %}selected{% endif %}>CLT horista (hora-aula)</option>
+                            <option value="jovem_aprendiz" {% if tc in ['jovem_aprendiz','aprendiz'] %}selected{% endif %}>Jovem aprendiz (FGTS 2%)</option>
                             <option value="pj" {% if tc == 'pj' %}selected{% endif %}>PJ / NFS-e</option>
                             <option value="rpa" {% if tc in ['rpa','autonomo','extra_pf'] %}selected{% endif %}>RPA / Extra PF (autônomo)</option>
                         </select>
@@ -225,13 +226,17 @@
                         Encargos da escola: FGTS 8%, 13º (1/12), férias + 1/3. No Lucro Presumido/Real entram ainda INSS patronal 20%, RAT e Sistema S.
                         No Simples Nacional esses três últimos ficam zerados.
                     </div>
-                    <div class="form-group" data-contratos="clt_mensalista rpa pj">
-                        <label data-contratos="clt_mensalista">Salário mensal bruto (R$)</label>
+                    <div class="regra-box" data-contratos="jovem_aprendiz">
+                        <strong>Jovem aprendiz</strong> (Lei 10.097/2000 / CLT art. 428). FGTS 2% em vez de 8% — vale no Simples e no Lucro Presumido.
+                        INSS e IRRF do empregado como CLT. No Presumido/Real o INSS patronal continua (STJ Tema 1342/2025).
+                    </div>
+                    <div class="form-group" data-contratos="clt_mensalista jovem_aprendiz rpa pj">
+                        <label data-contratos="clt_mensalista jovem_aprendiz">Salário mensal bruto (R$)</label>
                         <label data-contratos="pj">Valor da NFS-e (R$)</label>
                         <label data-contratos="rpa">Valor bruto do RPA (R$)</label>
                         <input name="salario" data-obrigatorio data-moeda placeholder="Digite o valor" value="{{ cadastro.salario|moeda_campo }}">
                     </div>
-                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa">
+                    <div class="form-group" data-contratos="clt_mensalista jovem_aprendiz clt_horista rpa">
                         <label>PIS / NIT</label>
                         <input name="pis_nit" value="{{ cadastro.pis_nit or '' }}">
                     </div>
@@ -281,7 +286,7 @@
                         A escola recolhe INSS patronal 20% e RAT sobre o bruto do RPA.
                     </div>
 
-                    <div class="form-group" data-contratos="clt_mensalista clt_horista pj rpa">
+                    <div class="form-group" data-contratos="clt_mensalista jovem_aprendiz clt_horista pj rpa">
                         <label>Início do contrato</label>
                         <input type="date" name="data_inicio_contrato" value="{{ cadastro.data_inicio_contrato or cadastro.data_contratacao or '' }}">
                     </div>

@@ -1,0 +1,55 @@
+{# Espera: docs_lista, docs_tipos, docs_pessoa_tipo, docs_pessoa_id, docs_titulo #}
+<details class="card border-0 shadow-sm mb-3" open>
+    <summary class="card-header bg-white fw-bold py-3" style="cursor:pointer;">{{ docs_titulo or 'Documentos (PDF)' }}</summary>
+    <div class="card-body">
+        {% if docs_lista %}
+        <ul class="list-group list-group-flush mb-3">
+            {% for doc in docs_lista %}
+            <li class="list-group-item px-0 d-flex justify-content-between align-items-center gap-2">
+                <div>
+                    <strong>{{ doc.titulo or doc.tipo_doc }}</strong>
+                    <small class="text-muted d-block">{{ doc.tipo_doc }}{% if doc.criado_em %} · {{ doc.criado_em }}{% endif %}</small>
+                </div>
+                <div class="d-flex gap-1">
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('servir_midia', midia_id=doc.midia_id) }}" target="_blank">Abrir</a>
+                    {% if pode_alterar('alunos') or pode_alterar('professores') %}
+                    <form method="POST" action="{{ url_for('excluir_documento_pessoa', doc_id=doc.id) }}" onsubmit="return confirm('Excluir este documento?');">
+                        <input type="hidden" name="voltar" value="{{ request.path }}">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Excluir</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="hint">Nenhum PDF anexado ainda.</p>
+        {% endif %}
+        {% if pode_alterar('alunos') or pode_alterar('professores') %}
+        <form method="POST" action="{{ url_for('anexar_documento_pessoa') }}" enctype="multipart/form-data" class="row g-2 align-items-end">
+            <input type="hidden" name="pessoa_tipo" value="{{ docs_pessoa_tipo }}">
+            <input type="hidden" name="pessoa_id" value="{{ docs_pessoa_id }}">
+            <input type="hidden" name="voltar" value="{{ request.path }}">
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Tipo</label>
+                <select name="tipo_doc" class="form-select form-select-sm" required>
+                    {% for codigo, rotulo in docs_tipos %}
+                    <option value="{{ codigo }}">{{ rotulo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Título (opcional)</label>
+                <input type="text" name="titulo" class="form-control form-control-sm" placeholder="Ex.: RG frente">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small fw-bold">Arquivo PDF</label>
+                <input type="file" name="documento_pdf" accept=".pdf,application/pdf" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-2 d-grid">
+                <button class="btn btn-sm btn-primary" type="submit">Anexar</button>
+            </div>
+        </form>
+        {% endif %}
+    </div>
+</details>

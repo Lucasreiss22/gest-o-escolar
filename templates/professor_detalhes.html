@@ -76,6 +76,10 @@
                 <div class="form-group"><label>Salário</label><input value="R$ {{ '%.2f'|format(salario_base) }}" disabled></div>
             </div>
 
+            {% with docs_lista=documentos_func, docs_tipos=tipos_doc_func, docs_pessoa_tipo='funcionario', docs_pessoa_id=professor.id, docs_titulo='Documentos do colaborador (CTPS, RG, CPF, contrato…)' %}
+                {% include '_documentos_pessoa.html' %}
+            {% endwith %}
+
                 <!-- Bloco Dinâmico de Encargos baseados no Regime Tributário -->
                 <div class="encargos-box">
                     <h4 style="margin-bottom: 12px; color: #2c3e50; font-size: 0.95rem;">

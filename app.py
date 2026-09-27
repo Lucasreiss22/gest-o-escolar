@@ -178,6 +178,8 @@ from plataforma import (
     criar_custo_plataforma,
     excluir_custo_plataforma,
     telas_contratadas,
+    salvar_telas_escola,
+    limpar_telas_escola,
     eh_super_admin,
     email_super_admin,
     enviar_codigo,
@@ -634,6 +636,86 @@ def _salvar_midia(campo, extensoes):
     finally:
         conexao.close()
     return mid
+
+
+TIPOS_DOC_ALUNO = [
+    ("rg", "RG"),
+    ("cpf", "CPF"),
+    ("contrato", "Contrato / matrícula"),
+    ("comprovante_residencia", "Comprovante de residência"),
+    ("certidao", "Certidão de nascimento"),
+    ("outro", "Outro"),
+]
+TIPOS_DOC_RESP = [
+    ("rg", "RG"),
+    ("cpf", "CPF"),
+    ("comprovante_residencia", "Comprovante de residência"),
+    ("outro", "Outro"),
+]
+TIPOS_DOC_FUNC = [
+    ("ctps", "Carteira de trabalho (CTPS)"),
+    ("rg", "RG"),
+    ("cpf", "CPF"),
+    ("contrato", "Contrato"),
+    ("outro", "Outro"),
+]
+
+
+def _garantir_documentos_pessoa(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS documentos_pessoa (
+            id SERIAL PRIMARY KEY,
+            pessoa_tipo VARCHAR(30) NOT NULL,
+            pessoa_id INT NOT NULL,
+            tipo_doc VARCHAR(40) NOT NULL,
+            titulo VARCHAR(180),
+            midia_id INT NOT NULL,
+            criado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS documentos_pessoa_idx
+        ON documentos_pessoa (pessoa_tipo, pessoa_id, criado_em DESC)
+        """
+    )
+
+
+def _listar_documentos(cursor, pessoa_tipo, pessoa_id):
+    _garantir_documentos_pessoa(cursor)
+    cursor.execute(
+        """
+        SELECT id, tipo_doc, titulo, midia_id, criado_em
+        FROM documentos_pessoa
+        WHERE pessoa_tipo = %s AND pessoa_id = %s
+        ORDER BY criado_em DESC, id DESC
+        """,
+        (pessoa_tipo, int(pessoa_id)),
+    )
+    return list(cursor.fetchall() or [])
+
+
+def _salvar_documento_pessoa(cursor, pessoa_tipo, pessoa_id, tipo_doc, titulo, campo_arquivo="documento_pdf"):
+    midia_id = _salvar_midia(campo_arquivo, {"pdf"})
+    if not midia_id:
+        raise ValueError("Envie um PDF do documento.")
+    _garantir_documentos_pessoa(cursor)
+    cursor.execute(
+        """
+        INSERT INTO documentos_pessoa (pessoa_tipo, pessoa_id, tipo_doc, titulo, midia_id)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (
+            pessoa_tipo,
+            int(pessoa_id),
+            (tipo_doc or "outro")[:40],
+            (titulo or tipo_doc or "Documento")[:180],
+            midia_id,
+        ),
+    )
 
 
 def _garantir_pessoas_autorizadas(cursor=None):
@@ -1781,6 +1863,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         "custo_escola": 0.0,
         "inss_patronal": 0.0,
         "fgts": 0.0,
+        "reducao_fgts_aprendiz": 0.0,
     }
     for row in funcionarios:
         dados = aplicar_ajuste_competencia(dict(row), ajustes.get(row.get("id")))
@@ -1813,6 +1896,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         totais["custo_escola"] += calc["custo_escola"]
         totais["inss_patronal"] += calc["inss_patronal"]
         totais["fgts"] += calc["fgts"]
+        totais["reducao_fgts_aprendiz"] += calc.get("reducao_fgts_aprendiz") or 0
     for chave in totais:
         totais[chave] = round(totais[chave], 2)
     return itens, totais
@@ -3103,6 +3187,23 @@ def plataforma_escolas():
                     )
             except Exception as e:
                 flash(f"Não foi possível aplicar o pacote: {e}", "danger")
+        elif acao == "salvar_telas_escola":
+            try:
+                escola_id = request.form.get("escola_id")
+                if request.form.get("usar_pacote") == "1":
+                    escola = limpar_telas_escola(escola_id)
+                    flash(
+                        f"A escola {escola['nome']} voltou a usar só o pacote. Quem já está logado precisa entrar de novo.",
+                        "success",
+                    )
+                else:
+                    escola = salvar_telas_escola(escola_id, request.form.getlist("telas"))
+                    flash(
+                        f"Módulos e funções da escola {escola['nome']} salvos. Quem já está logado precisa entrar de novo.",
+                        "success",
+                    )
+            except Exception as e:
+                flash(f"Não foi possível salvar os módulos da escola: {e}", "danger")
         elif acao == "salvar_cobranca_escola":
             try:
                 mes = (request.form.get("mes") or datetime.now().strftime("%Y-%m"))[:7]
@@ -3327,6 +3428,20 @@ def plataforma_escolas():
             escolas = preparar_cobranca_escolas(escolas, pacotes, mes_atual)
         except Exception as e:
             flash(f"Não foi possível calcular a cobrança das escolas: {e}", "danger")
+        enriquecidas = []
+        for raw in escolas or []:
+            e = dict(raw) if not isinstance(raw, dict) else dict(raw)
+            liberadas = telas_contratadas(e)
+            e["telas_liberadas"] = liberadas
+            extras = e.get("telas_escola")
+            if isinstance(extras, str):
+                try:
+                    extras = json.loads(extras)
+                except Exception:
+                    extras = None
+            e["telas_escola"] = extras
+            enriquecidas.append(e)
+        escolas = enriquecidas
     if aba == "financeiro":
         try:
             painel = painel_financeiro_plataforma(mes_atual, status_fin, busca_fin)
@@ -4514,11 +4629,14 @@ def _professor_da_sessao(cursor, funcionario_id):
     pessoa = cursor.fetchone()
     cursor.execute(
         """
-        SELECT id, nome FROM turmas
-        WHERE professor_responsavel_id = %s
-        ORDER BY nome
+        SELECT DISTINCT t.id, t.nome
+        FROM turmas t
+        LEFT JOIN turma_professores tp ON tp.turma_id = t.id
+        WHERE t.professor_responsavel_id = %s
+           OR tp.funcionario_id = %s
+        ORDER BY t.nome
         """,
-        (funcionario_id,),
+        (funcionario_id, funcionario_id),
     )
     return pessoa, cursor.fetchall() or []
 
@@ -6929,6 +7047,83 @@ def cadastrar_aluno_rota():
     return pagina_alunos()
 
 
+@app.route("/documentos/anexar", methods=["POST"])
+def anexar_documento_pessoa():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    pessoa_tipo = (request.form.get("pessoa_tipo") or "").strip().lower()
+    pessoa_id = request.form.get("pessoa_id", type=int)
+    voltar = (request.form.get("voltar") or "").strip() or url_for("dashboard")
+    if pessoa_tipo not in {"aluno", "responsavel", "funcionario"} or not pessoa_id:
+        flash("Dados do documento inválidos.", "danger")
+        return redirect(voltar)
+    if pessoa_tipo in {"aluno", "responsavel"} and not pode_acao(session.get("usuario_papel"), "alunos", "alterar", session.get("permissoes")):
+        flash("Sem permissão para anexar documentos.", "danger")
+        return redirect(voltar)
+    if pessoa_tipo == "funcionario" and not pode_acao(session.get("usuario_papel"), "professores", "alterar", session.get("permissoes")):
+        flash("Sem permissão para anexar documentos.", "danger")
+        return redirect(voltar)
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(voltar)
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            _salvar_documento_pessoa(
+                cursor,
+                pessoa_tipo,
+                pessoa_id,
+                request.form.get("tipo_doc"),
+                request.form.get("titulo"),
+            )
+        conexao.commit()
+        flash("Documento PDF anexado.", "success")
+    except Exception as e:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        flash(f"Não foi possível anexar o documento: {e}", "danger")
+    finally:
+        conexao.close()
+    return redirect(voltar)
+
+
+@app.route("/documentos/<int:doc_id>/excluir", methods=["POST"])
+def excluir_documento_pessoa(doc_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    voltar = (request.form.get("voltar") or "").strip() or url_for("dashboard")
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(voltar)
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            _garantir_documentos_pessoa(cursor)
+            cursor.execute("SELECT pessoa_tipo FROM documentos_pessoa WHERE id = %s", (doc_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Documento não encontrado.")
+            tipo = (row.get("pessoa_tipo") if isinstance(row, dict) else row[0]) or ""
+            if tipo in {"aluno", "responsavel"} and not pode_acao(session.get("usuario_papel"), "alunos", "alterar", session.get("permissoes")):
+                raise ValueError("Sem permissão.")
+            if tipo == "funcionario" and not pode_acao(session.get("usuario_papel"), "professores", "alterar", session.get("permissoes")):
+                raise ValueError("Sem permissão.")
+            cursor.execute("DELETE FROM documentos_pessoa WHERE id = %s", (doc_id,))
+        conexao.commit()
+        flash("Documento excluído.", "success")
+    except Exception as e:
+        try:
+            conexao.rollback()
+        except Exception:
+            pass
+        flash(f"Não foi possível excluir: {e}", "danger")
+    finally:
+        conexao.close()
+    return redirect(voltar)
+
+
 @app.route("/alunos/<int:aluno_id>")
 def detalhes_aluno(aluno_id):
     if "usuario_id" not in session:
@@ -6941,6 +7136,8 @@ def detalhes_aluno(aluno_id):
     disciplinas_por_turma = {}
     todas_turmas = []
     resumo_frequencia = {"presente": 0, "falta": 0, "justificada": 0}
+    documentos_aluno = []
+    documentos_resp = {}
 
     garantir_tabelas_folha()
     garantir_tabelas_pedagogicas()
@@ -7099,6 +7296,19 @@ def detalhes_aluno(aluno_id):
                     anexar_ultima_nota(cursor, financeiro_aluno)
                 except Exception:
                     conexao.rollback()
+                documentos_aluno = []
+                documentos_resp = {}
+                try:
+                    documentos_aluno = _listar_documentos(cursor, "aluno", aluno_id)
+                    for resp in responsaveis or []:
+                        rid = resp.get("id") if hasattr(resp, "get") else None
+                        if rid:
+                            documentos_resp[rid] = _listar_documentos(cursor, "responsavel", rid)
+                except Exception:
+                    try:
+                        conexao.rollback()
+                    except Exception:
+                        pass
         finally:
             conexao.close()
 
@@ -7127,6 +7337,10 @@ def detalhes_aluno(aluno_id):
         resumo_frequencia=resumo_frequencia,
         boletins_anexos=boletins_anexos,
         disciplinas_por_turma=disciplinas_por_turma,
+        documentos_aluno=documentos_aluno,
+        documentos_resp=documentos_resp,
+        tipos_doc_aluno=TIPOS_DOC_ALUNO,
+        tipos_doc_resp=TIPOS_DOC_RESP,
         disciplinas_aluno=disciplinas_aluno,
         hoje=date.today().isoformat(),
         todas_turmas=todas_turmas,
@@ -8108,6 +8322,7 @@ def detalhes_professor(professor_id):
     turmas = []
     eventos = []
     config = None
+    documentos_func = []
 
     if conexao:
         try:
@@ -8116,11 +8331,12 @@ def detalhes_professor(professor_id):
                 professor = cursor.fetchone()
 
                 cursor.execute("""
-                    SELECT t.id, t.nome, t.ano_letivo, t.turno,
+                    SELECT DISTINCT t.id, t.nome, t.ano_letivo, t.turno,
                            (SELECT COUNT(*) FROM turma_alunos ta WHERE ta.turma_id = t.id) as total_alunos
                     FROM turmas t
-                    WHERE t.professor_responsavel_id = %s;
-                """, (professor_id,))
+                    LEFT JOIN turma_professores tp ON tp.turma_id = t.id
+                    WHERE t.professor_responsavel_id = %s OR tp.funcionario_id = %s;
+                """, (professor_id, professor_id))
                 turmas = cursor.fetchall()
 
                 cursor.execute("""
@@ -8133,6 +8349,10 @@ def detalhes_professor(professor_id):
                 # Busca configurações da escola para extrair o regime tributário
                 cursor.execute("SELECT * FROM configuracoes LIMIT 1;")
                 config = cursor.fetchone()
+                try:
+                    documentos_func = _listar_documentos(cursor, "funcionario", professor_id)
+                except Exception:
+                    documentos_func = []
         finally:
             conexao.close()
 
@@ -8173,6 +8393,8 @@ def detalhes_professor(professor_id):
         provisao_13=provisao_13,
         provisao_ferias=provisao_ferias,
         reflexos_fgts=reflexos_fgts,
+        documentos_func=documentos_func,
+        tipos_doc_func=TIPOS_DOC_FUNC,
         inss_patronal=inss_patronal,
         rat=rat,
         sistema_s=sistema_s,
@@ -8223,18 +8445,72 @@ def pagina_pedagogico():
             try:
                 with conexao.cursor() as cursor:
                     if acao in ["criar_turma", "nova_turma"]:
+                        etapa = (limpar_campo("etapa_ensino") or "FUNDAMENTAL").upper()
+                        if etapa not in ("INFANTIL", "FUNDAMENTAL", "MEDIO", "AMBOS"):
+                            etapa = "FUNDAMENTAL"
+                        prof_resp = limpar_campo("professor_id") or None
                         cursor.execute(
                             """
-                            INSERT INTO turmas (nome, ano_letivo, turno, professor_responsavel_id)
-                            VALUES (%s, %s, %s, %s);
+                            INSERT INTO turmas (nome, ano_letivo, turno, professor_responsavel_id, etapa_ensino)
+                            VALUES (%s, %s, %s, %s, %s)
+                            RETURNING id;
                             """,
                             (
                                 limpar_campo("nome_turma") or limpar_campo("nome"),
                                 limpar_campo("ano_letivo") or "2026",
                                 limpar_campo("turno"),
-                                limpar_campo("professor_id"),
+                                prof_resp,
+                                etapa,
                             ),
                         )
+                        turma_nova = cursor.fetchone()
+                        turma_id_nova = turma_nova[0] if isinstance(turma_nova, (list, tuple)) else (turma_nova or {}).get("id")
+                        # Professores extras (fundamental/médio com várias matérias)
+                        profs_extra = [p for p in request.form.getlist("professor_ids") if str(p).strip()]
+                        if prof_resp and str(prof_resp) not in [str(p) for p in profs_extra]:
+                            profs_extra.insert(0, prof_resp)
+                        for fid in profs_extra:
+                            cursor.execute(
+                                """
+                                INSERT INTO turma_professores (turma_id, funcionario_id, papel)
+                                SELECT %s, %s, %s
+                                WHERE NOT EXISTS (
+                                    SELECT 1 FROM turma_professores
+                                    WHERE turma_id = %s AND funcionario_id = %s
+                                      AND disciplina_id IS NULL
+                                )
+                                """,
+                                (
+                                    turma_id_nova,
+                                    fid,
+                                    "responsavel" if str(fid) == str(prof_resp or "") else "professor",
+                                    turma_id_nova,
+                                    fid,
+                                ),
+                            )
+                        # Vincular matérias BNCC da etapa
+                        disc_ids = [d for d in request.form.getlist("disciplina_ids") if str(d).strip()]
+                        if not disc_ids and etapa in ("FUNDAMENTAL", "MEDIO"):
+                            cursor.execute(
+                                """
+                                SELECT id FROM disciplinas
+                                WHERE COALESCE(ativo, TRUE) = TRUE
+                                  AND COALESCE(is_custom, FALSE) = FALSE
+                                  AND (UPPER(COALESCE(etapa_ensino,'')) IN (%s, 'AMBOS', '') OR etapa_ensino IS NULL)
+                                ORDER BY nome
+                                """,
+                                (etapa,),
+                            )
+                            disc_ids = [row[0] if isinstance(row, (list, tuple)) else row.get("id") for row in (cursor.fetchall() or [])]
+                        for did in disc_ids:
+                            cursor.execute(
+                                """
+                                INSERT INTO turma_disciplinas (turma_id, disciplina_id)
+                                VALUES (%s, %s)
+                                ON CONFLICT (turma_id, disciplina_id) DO NOTHING
+                                """,
+                                (turma_id_nova, did),
+                            )
                         conexao.commit()
                         flash("✅ Turma cadastrada com sucesso!", "success")
 
@@ -8795,6 +9071,7 @@ def pagina_pedagogico():
         alunos_cadastrados=alunos_cadastrados,
         alunos_por_turma=alunos_por_turma,
         disciplinas=disciplinas,
+        disciplinas_bncc=[d for d in (disciplinas or []) if not d.get("is_custom")],
         disciplinas_ativas=disciplinas_ativas,
         disciplinas_por_turma=disciplinas_por_turma,
         quadros_por_turma=quadros_por_turma,
@@ -9440,7 +9717,15 @@ def pagina_financeiro():
     }
     regime_apuracao = "competencia"
     recebimentos_caixa = []
-    totais_folha = {"bruto": 0.0, "liquido": 0.0, "encargos": 0.0, "custo_escola": 0.0, "inss_patronal": 0.0, "fgts": 0.0}
+    totais_folha = {
+        "bruto": 0.0,
+        "liquido": 0.0,
+        "encargos": 0.0,
+        "custo_escola": 0.0,
+        "inss_patronal": 0.0,
+        "fgts": 0.0,
+        "reducao_fgts_aprendiz": 0.0,
+    }
     apuracao_simples = None
     apuracao_pis_cofins = None
     apuracao_presumido = None
@@ -9678,6 +9963,37 @@ def pagina_financeiro():
         ]
     colaborador_sel = next((p for p in (professores_detalhes or []) if p.get("id") == colab_id), None)
 
+    aprendizes_folha = [
+        p for p in (professores_detalhes or [])
+        if (p.get("tipo_contrato") or "").lower() in ("jovem_aprendiz", "aprendiz")
+        or p.get("jovem_aprendiz")
+    ]
+    isencao_aprendiz = {
+        "codigo": "fgts_jovem_aprendiz",
+        "titulo": "Isenção / redução — Jovem aprendiz",
+        "valor": float((totais_folha or {}).get("reducao_fgts_aprendiz") or 0),
+        "qtd": len(aprendizes_folha),
+        "regime": regime_tributario,
+        "itens": [
+            {
+                "nome": p.get("nome_completo"),
+                "cargo": p.get("cargo"),
+                "bruto": p.get("bruto"),
+                "fgts": p.get("fgts"),
+                "reducao": p.get("reducao_fgts_aprendiz") or 0,
+                "aliquota": p.get("aliquota_fgts") or 0.02,
+            }
+            for p in aprendizes_folha
+        ],
+        "base_legal": (
+            "Lei nº 10.097/2000 e art. 428 da CLT (contrato de aprendizagem); "
+            "alíquota de FGTS de 2% (art. 15 da Lei nº 8.036/1990). "
+            "Válido no Simples Nacional e no Lucro Presumido/Real. "
+            "INSS patronal: no Simples já é substituído pelo DAS; no Lucro Presumido/Real "
+            "incide normalmente (STJ Tema 1.342/2025)."
+        ),
+    }
+
     return render_template(
         "financeiro.html",
         lancamentos=lancamentos,
@@ -9686,6 +10002,7 @@ def pagina_financeiro():
         turmas_simples=turmas_simples,
         professores_detalhes=professores_detalhes,
         totais_folha=totais_folha,
+        isencao_aprendiz=isencao_aprendiz,
         custos_mes=custos_mes,
         aba=aba,
         totais=totais,

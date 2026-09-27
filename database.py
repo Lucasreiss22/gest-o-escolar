@@ -548,7 +548,7 @@ def garantir_tabelas_pedagogicas():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ped_bncc_v2"
+    chave = f"{schema}:ped_bncc_v3"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -668,8 +668,40 @@ def garantir_tabelas_pedagogicas():
                 ("provas_notas", "origem", "VARCHAR(40)"),
                 ("provas_notas", "justificativa", "TEXT"),
                 ("provas_notas", "data_aplicacao", "DATE"),
+                ("turmas", "etapa_ensino", "VARCHAR(30) DEFAULT 'FUNDAMENTAL'"),
             ):
                 _garantir_coluna(cursor, tabela, coluna, spec, mapa)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS documentos_pessoa (
+                    id SERIAL PRIMARY KEY,
+                    pessoa_tipo VARCHAR(30) NOT NULL,
+                    pessoa_id INT NOT NULL,
+                    tipo_doc VARCHAR(40) NOT NULL,
+                    titulo VARCHAR(180),
+                    midia_id INT NOT NULL,
+                    criado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS documentos_pessoa_idx
+                ON documentos_pessoa (pessoa_tipo, pessoa_id, criado_em DESC)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS turma_professores (
+                    id SERIAL PRIMARY KEY,
+                    turma_id INT NOT NULL REFERENCES turmas(id) ON DELETE CASCADE,
+                    funcionario_id INT NOT NULL,
+                    disciplina_id INT,
+                    papel VARCHAR(40) DEFAULT 'professor',
+                    UNIQUE (turma_id, funcionario_id, disciplina_id)
+                )
+                """
+            )
             try:
                 cursor.execute(
                     """

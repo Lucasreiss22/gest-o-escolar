@@ -83,7 +83,7 @@
     <div class="content">
         <h2 class="fw-bold text-dark mb-3">Pedagógico</h2>
         <div class="d-flex flex-wrap gap-2 mb-3">
-            <a class="btn btn-success btn-sm" href="{{ url_for('relatorio_turmas_pdf') }}">PDF das turmas</a>
+            <a class="btn btn-outline-primary btn-sm" href="{{ url_for('calendario_escolar') }}">Abrir calendário / chamada</a>
         </div>
         <ul class="nav nav-pills flex-wrap gap-2 mb-4">
             <li class="nav-item">
@@ -99,16 +99,6 @@
                 <a class="nav-link" href="{{ url_for('calendario_escolar') }}">Calendário da escola</a>
             </li>
         </ul>
-
-        {% set pdf_data = data_chamada %}
-        {% set pdf_origem = 'pedagogico' %}
-        {% set pdf_turma_id = turma_sel %}
-        {% set pdf_aluno_id = None %}
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-body py-3">
-                {% include '_pdf_periodo.html' %}
-            </div>
-        </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -384,11 +374,19 @@
                             <label class="form-label small fw-bold">Nome da Turma / Série</label>
                             <input type="text" name="nome_turma" class="form-control" placeholder="Ex: 1º Ano ou Turma 12" required>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="form-label small fw-bold">Ano Letivo</label>
                             <input type="text" name="ano_letivo" class="form-control" value="2026" required>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Etapa (BNCC)</label>
+                            <select name="etapa_ensino" class="form-select" id="turmaEtapa" required>
+                                <option value="INFANTIL">Educação infantil</option>
+                                <option value="FUNDAMENTAL" selected>Ensino fundamental</option>
+                                <option value="MEDIO">Ensino médio</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
                             <label class="form-label small fw-bold">Turno</label>
                             <select name="turno" class="form-select" required>
                                 <option value="">Selecione...</option>
@@ -399,13 +397,35 @@
                             </select>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label small fw-bold">Professor Responsável</label>
+                            <label class="form-label small fw-bold">Professor responsável</label>
                             <select name="professor_id" class="form-select">
                                 <option value="">Selecione...</option>
                                 {% for prof in professores %}
                                     <option value="{{ prof.id }}">{{ prof.nome_completo }}</option>
                                 {% endfor %}
                             </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Professores da turma</label>
+                        <p class="hint mb-1">No fundamental com um professor, marque só o responsável. No fundamental/médio com várias matérias, marque quantos forem necessários.</p>
+                        <div class="d-flex flex-wrap gap-2">
+                            {% for prof in professores %}
+                            <label class="border rounded px-2 py-1 small" style="cursor:pointer;">
+                                <input type="checkbox" name="professor_ids" value="{{ prof.id }}"> {{ prof.nome_completo }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Matérias BNCC nesta turma</label>
+                        <p class="hint mb-1">Se nada for marcado no fundamental/médio, o sistema aplica as matérias BNCC da etapa (como na aba Matérias).</p>
+                        <div class="d-flex flex-wrap gap-2" style="max-height:140px;overflow:auto;">
+                            {% for mat in disciplinas_bncc|default(disciplinas)|default([]) %}
+                            <label class="border rounded px-2 py-1 small" style="cursor:pointer;">
+                                <input type="checkbox" name="disciplina_ids" value="{{ mat.id }}"> {{ mat.nome }}{% if mat.codigo %} ({{ mat.codigo }}){% endif %}
+                            </label>
+                            {% endfor %}
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary btn-sm px-4">Cadastrar Turma</button>
@@ -733,9 +753,6 @@
                             <button class="btn btn-sm btn-outline-danger" type="submit" name="status" value="falta">Todos faltaram</button>
                         </form>
                         {% endif %}
-                        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='chamada', periodo='dia', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF chamada do dia</a>
-                        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='semana', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF da semana</a>
-                        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('relatorio_pdf_periodo', tipo='completo', periodo='mes', data=data_chamada, turma_id=turma.id, origem='pedagogico') }}">PDF do mês</a>
                     </div>
                 </div>
 

@@ -25,6 +25,7 @@ FAIXAS_IRRF = [
 ALIQUOTA_INSS_AUTONOMO = 0.11
 ALIQUOTA_INSS_PATRONAL = 0.20
 ALIQUOTA_FGTS = 0.08
+ALIQUOTA_FGTS_APRENDIZ = 0.02  # Lei 10.097/2000 + art. 15 Lei 8.036/1990
 ALIQUOTA_RAT = 0.01
 ALIQUOTA_SISTEMA_S = 0.058
 RETENCAO_IRRF_PJ = 0.015
@@ -84,12 +85,23 @@ def dsr_horista(valor_horas, ano=None, mes=None):
     return round(horas / 6.0, 2)
 
 
-def encargos_clt(base, regime):
+def _eh_aprendiz(tipo_contrato):
+    return (tipo_contrato or "").strip().lower() in ("jovem_aprendiz", "aprendiz")
+
+
+def encargos_clt(base, regime, tipo_contrato=None):
+    """Encargos patronais CLT. Aprendiz: FGTS 2% (Lei 10.097/2000); INSS patronal segue o regime
+    (zerado no Simples; integral no Presumido/Real — STJ Tema 1342/2025)."""
     salario = _num(base)
-    fgts = round(salario * ALIQUOTA_FGTS, 2)
+    aprendiz = _eh_aprendiz(tipo_contrato)
+    aliq_fgts = ALIQUOTA_FGTS_APRENDIZ if aprendiz else ALIQUOTA_FGTS
+    fgts = round(salario * aliq_fgts, 2)
+    fgts_cheio = round(salario * ALIQUOTA_FGTS, 2)
     provisao_13 = round(salario / 12.0, 2)
     ferias_terco = round((salario + salario / 3.0) / 12.0, 2)
-    reflexos_fgts = round((provisao_13 + ferias_terco) * ALIQUOTA_FGTS, 2)
+    reflexos_fgts = round((provisao_13 + ferias_terco) * aliq_fgts, 2)
+    reflexos_fgts_cheio = round((provisao_13 + ferias_terco) * ALIQUOTA_FGTS, 2)
+    reducao_fgts = round(max((fgts_cheio + reflexos_fgts_cheio) - (fgts + reflexos_fgts), 0.0), 2)
     simples = (regime or "").lower() in ("simples_nacional", "simples")
     if simples:
         inss_patronal = 0.0
@@ -110,6 +122,10 @@ def encargos_clt(base, regime):
         "sistema_s": sistema_s,
         "encargos": round(encargos, 2),
         "custo_escola": round(salario + encargos, 2),
+        "aliquota_fgts": aliq_fgts,
+        "fgts_cheio": fgts_cheio,
+        "reducao_fgts_aprendiz": reducao_fgts if aprendiz else 0.0,
+        "jovem_aprendiz": aprendiz,
     }
 
 
@@ -171,7 +187,14 @@ def hora_normal_clt(func):
 
 
 def _contrato_clt(tipo):
-    return (tipo or "clt_mensalista").strip().lower() in ("clt_mensalista", "clt_horista", "horista", "")
+    return (tipo or "clt_mensalista").strip().lower() in (
+        "clt_mensalista",
+        "clt_horista",
+        "horista",
+        "jovem_aprendiz",
+        "aprendiz",
+        "",
+    )
 
 
 def detalhe_horas_extras(func):
@@ -263,6 +286,10 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         "adicional_he_100": he["adicional_he_100"],
         "adicional_he": adicional_he,
         "dia_pagamento": dia_pagamento_valido(func.get("dia_pagamento")),
+        "aliquota_fgts": ALIQUOTA_FGTS,
+        "fgts_cheio": 0.0,
+        "reducao_fgts_aprendiz": 0.0,
+        "jovem_aprendiz": False,
     }
 
     if tipo in ("pj", "pessoa_juridica"):
@@ -322,6 +349,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         )
         return resultado
 
+    aprendiz = _eh_aprendiz(tipo)
     if tipo in ("clt_horista", "horista"):
         valor_hora = _num(func.get("valor_hora"))
         horas = _num(func.get("horas_mes"))
@@ -332,7 +360,13 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
     else:
         bruto = round(_num(func.get("salario")) + adicional_he + dsr_he, 2)
         dsr = 0.0
-        resultado["observacao"] = "CLT mensalista: salário fixo. INSS progressivo e IRRF sobre o bruto."
+        if aprendiz:
+            resultado["observacao"] = (
+                "Jovem aprendiz (CLT art. 428 / Lei 10.097/2000): salário do contrato. "
+                "INSS e IRRF do empregado como CLT. FGTS patronal 2%."
+            )
+        else:
+            resultado["observacao"] = "CLT mensalista: salário fixo. INSS progressivo e IRRF sobre o bruto."
     if adicional_he or dsr_he:
         partes = []
         if he["adicional_he_50"]:
@@ -359,12 +393,20 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
             + (f" + DSR de {semanas_dsr} semana(s) ({br_money(desconto_dsr_faltas)})" if desconto_dsr_faltas else "")
             + " — Lei 605/1949."
         )
-    patronal = encargos_clt(bruto, regime)
+    patronal = encargos_clt(bruto, regime, tipo)
     simples = (regime or "").lower() in ("simples_nacional", "simples")
+    if aprendiz:
+        resultado["observacao"] += (
+            f" Redução de FGTS: {(ALIQUOTA_FGTS - ALIQUOTA_FGTS_APRENDIZ) * 100:.0f} p.p. "
+            f"(economia R$ {br_money(patronal.get('reducao_fgts_aprendiz') or 0)} neste mês)."
+        )
     if simples:
-        resultado["observacao"] += " Simples Nacional: INSS patronal e RAT zerados; permanecem FGTS e provisões."
+        resultado["observacao"] += " Simples Nacional: INSS patronal e RAT zerados (DAS); permanecem FGTS e provisões."
     else:
-        resultado["observacao"] += " Lucro Presumido/Real: FGTS, 13º, férias+1/3, INSS 20%, RAT e Sistema S."
+        resultado["observacao"] += (
+            " Lucro Presumido/Real: FGTS, 13º, férias+1/3, INSS 20%, RAT e Sistema S"
+            + (" — INSS patronal também sobre aprendiz (STJ Tema 1342)." if aprendiz else ".")
+        )
     resultado.update(patronal)
     resultado.update(
         {
@@ -425,6 +467,8 @@ def rotulo_contrato(tipo):
         "clt_mensalista": "CLT mensalista",
         "clt_horista": "CLT horista",
         "horista": "CLT horista",
+        "jovem_aprendiz": "Jovem aprendiz",
+        "aprendiz": "Jovem aprendiz",
         "pj": "PJ / NFS-e",
         "pessoa_juridica": "PJ / NFS-e",
         "rpa": "RPA / Autônomo",
