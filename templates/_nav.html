@@ -39,9 +39,6 @@
     {% if pode('ponto') %}
     <a href="{{ url_for('ponto') }}" class="{% if nav_active == 'ponto' %}active{% endif %}">Ponto</a>
     {% endif %}
-    {% if pode('ponto') and papel_atual in ['admin', 'direcao', 'supervisor', 'secretaria', 'financeiro'] %}
-    <a href="{{ url_for('ponto_gestao') }}" class="{% if nav_active == 'ponto' %}active{% endif %}">Gestão ponto</a>
-    {% endif %}
     {% if pode('usuarios') %}
     <a href="{{ url_for('gerenciar_usuarios') }}" class="{% if nav_active == 'usuarios' %}active{% endif %}">Gerenciar Usuários</a>
     {% endif %}

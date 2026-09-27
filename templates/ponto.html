@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
     <style>
         h2 { font-weight: 600; color: #1e293b; }
+        h3 { color: #0f172a; }
         .card-box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,.05); margin-bottom: 16px; }
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
         .form-group { display: flex; flex-direction: column; gap: 4px; }
@@ -25,12 +26,13 @@
         .alert-danger { background: #fee2e2; color: #991b1b; }
         .alert-warning { background: #fef9c3; color: #854d0e; }
         table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-        th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+        th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
         .hint { color: #64748b; font-size: .88rem; margin: 0 0 14px; }
         .hora-agora { font-size: 1.6rem; font-weight: 700; color: #0f172a; margin: 0 0 8px; }
         .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
         .chip { background: #f1f5f9; border-radius: 999px; padding: 6px 12px; font-size: .78rem; font-weight: 700; color: #334155; }
         .acoes-topo { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         .contador {
             border: 1px solid #cbd5e1; border-radius: 12px; padding: 14px 16px; margin-bottom: 10px;
             background: #f8fafc;
@@ -39,6 +41,8 @@
         .contador .titulo { font-weight: 700; color: #0f172a; margin-bottom: 4px; }
         .contador .tempo { font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; }
         .contador .meta { color: #64748b; font-size: .85rem; margin-top: 4px; }
+        .sec-gestao { border-top: 2px solid #e2e8f0; margin-top: 28px; padding-top: 8px; }
+        .tabs-ancora { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
     </style>
 </head>
 <body>
@@ -46,25 +50,35 @@
     {% include '_nav.html' %}
     <div class="content">
         <h2>Ponto</h2>
+        {% if pessoa %}
         <p class="hint">{{ pessoa.nome_completo }}. Clique no botão na hora certa — o sistema grava o horário automaticamente.</p>
+        {% elif gestao %}
+        <p class="hint">Gestão da escola: confirme atestados/faltas e defina o tempo de café e almoço de cada colaborador. Para bater o próprio ponto, vincule seu login em Equipe / Professores.</p>
+        {% endif %}
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
 
+        <div class="tabs-ancora">
+            {% if pessoa %}<a class="btn btn-secondary" href="#meu-ponto">Meu ponto</a>{% endif %}
+            {% if gestao %}<a class="btn btn-primary" href="#gestao">Gestão da escola</a>{% endif %}
+        </div>
+
         <div class="acoes-topo">
-            {% if gestao %}
-            <a class="btn btn-primary" href="{{ url_for('ponto_gestao') }}">Gestão do ponto (secretaria)</a>
-            {% endif %}
+            {% if pessoa %}
             <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='dia', data=data_ref) }}">PDF do dia</a>
             <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='semana', data=data_ref) }}">PDF da semana</a>
             <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='mes', data=data_ref) }}">PDF do mês</a>
+            {% endif %}
         </div>
 
+        {% if pessoa %}
+        <div id="meu-ponto">
         {% if contadores %}
         <div class="card-box">
             <h3 style="margin-top:0;">Tempo restante</h3>
-            <p class="hint">Limites da escola: café {{ minutos_cafe }} min · almoço {{ minutos_almoco }} min.</p>
+            <p class="hint">Seus limites: café {{ minutos_cafe }} min · almoço {{ minutos_almoco }} min.</p>
             {% for c in contadores %}
             <div class="contador {% if c.esgotado %}esgotado{% endif %}" data-restante="{{ c.restante_seg }}">
                 <div class="titulo">{{ c.rotulo }}</div>
@@ -251,6 +265,190 @@
             </table>
             {% endif %}
         </div>
+        </div>
+        {% endif %}
+
+        {% if gestao %}
+        <div id="gestao" class="sec-gestao">
+            <h2>Gestão da escola</h2>
+            <p class="hint">Confirme atestados e faltas. Falta não justificada confirmada com desconto entra na folha (dia + DSR da semana — Lei 605/1949). Defina também o tempo de café e almoço de cada colaborador.</p>
+
+            <div class="card-box">
+                <form method="GET" class="acoes" action="{{ url_for('ponto') }}#gestao">
+                    <label class="form-group" style="margin:0;">
+                        <span style="font-size:.82rem;font-weight:700;">Mês (faltas / atestados)</span>
+                        <input type="month" name="mes" value="{{ mes_filtro }}">
+                    </label>
+                    <button class="btn btn-primary" type="submit">Filtrar</button>
+                    {% if pessoa %}
+                    <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='mes', data=mes_filtro + '-01') }}">PDF mensal (meu)</a>
+                    {% endif %}
+                </form>
+            </div>
+
+            <div class="card-box">
+                <h3 style="margin-top:0;">Tempos de café e almoço por colaborador</h3>
+                <p class="hint">Deixe em branco para usar o padrão da escola (café {{ padrao_cafe }} min · almoço {{ padrao_almoco }} min nas Configurações). Exemplos: 60, 90 ou 120 minutos de almoço.</p>
+                <form method="POST" class="form-grid">
+                    <input type="hidden" name="acao" value="salvar_tempos_funcionario">
+                    <div class="form-group">
+                        <label>Colaborador</label>
+                        <select name="funcionario_id" id="sel-tempos-func" required>
+                            <option value="">Selecione</option>
+                            {% for p in equipe %}
+                            <option value="{{ p.id }}"
+                                    data-cafe="{{ p.ponto_minutos_cafe if p.ponto_minutos_cafe is not none else '' }}"
+                                    data-almoco="{{ p.ponto_minutos_almoco if p.ponto_minutos_almoco is not none else '' }}">
+                                {{ p.nome_completo }}
+                                {% if p.ponto_minutos_cafe is not none or p.ponto_minutos_almoco is not none %}
+                                    (café {{ p.ponto_minutos_cafe or 'padrão' }} · almoço {{ p.ponto_minutos_almoco or 'padrão' }})
+                                {% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Café (minutos)</label>
+                        <input type="number" name="ponto_minutos_cafe" id="inp-cafe" min="1" max="180" placeholder="Padrão da escola">
+                    </div>
+                    <div class="form-group">
+                        <label>Almoço (minutos)</label>
+                        <input type="number" name="ponto_minutos_almoco" id="inp-almoco" min="1" max="300" placeholder="Ex.: 60, 90, 120">
+                    </div>
+                    <div class="form-group" style="justify-content:end;">
+                        <button class="btn btn-primary" type="submit">Salvar tempos</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card-box">
+                <h3 style="margin-top:0;">Atestados aguardando confirmação</h3>
+                {% if atestados_pendentes %}
+                <table>
+                    <thead><tr><th>Colaborador</th><th>Período</th><th>Título</th><th>PDF</th><th>Decisão</th></tr></thead>
+                    <tbody>
+                    {% for a in atestados_pendentes %}
+                    <tr>
+                        <td>{{ a.nome_completo }}</td>
+                        <td>
+                            {% if a.data_inicio %}
+                                {{ a.data_inicio.strftime('%d/%m/%Y') if a.data_inicio.strftime is defined else a.data_inicio }}
+                                — {{ a.data_fim.strftime('%d/%m/%Y') if a.data_fim and a.data_fim.strftime is defined else (a.data_fim or a.data_inicio) }}
+                            {% else %}—{% endif %}
+                        </td>
+                        <td>{{ a.titulo or 'Atestado' }}{% if a.justificativa %}<div class="hint">{{ a.justificativa }}</div>{% endif %}</td>
+                        <td><a class="btn btn-primary" href="{{ url_for('atestado_ponto', atestado_id=a.id) }}" target="_blank">Abrir</a></td>
+                        <td>
+                            <form method="POST" class="acoes">
+                                <input type="hidden" name="acao" value="confirmar_atestado">
+                                <input type="hidden" name="atestado_id" value="{{ a.id }}">
+                                <input type="text" name="observacao_admin" placeholder="Obs. (opcional)" style="min-width:140px;">
+                                <button class="btn btn-success" type="submit" name="decisao" value="aprovado">Aprovar</button>
+                                <button class="btn btn-danger" type="submit" name="decisao" value="rejeitado">Rejeitar</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="hint">Nenhum atestado pendente.</p>
+                {% endif %}
+            </div>
+
+            <div class="card-box">
+                <h3 style="margin-top:0;">Faltas aguardando confirmação</h3>
+                {% if faltas_pendentes %}
+                <table>
+                    <thead><tr><th>Colaborador</th><th>Data</th><th>Tipo</th><th>Motivo</th><th>Confirmar</th></tr></thead>
+                    <tbody>
+                    {% for f in faltas_pendentes %}
+                    <tr>
+                        <td>{{ f.nome_completo }}</td>
+                        <td>{{ f.data_ref.strftime('%d/%m/%Y') if f.data_ref.strftime is defined else f.data_ref }}</td>
+                        <td>{% if f.tipo == 'nao_justificada' %}Não justificada{% else %}Justificada{% endif %}</td>
+                        <td>{{ f.motivo or '—' }}</td>
+                        <td>
+                            <form method="POST" class="acoes">
+                                <input type="hidden" name="acao" value="confirmar_falta">
+                                <input type="hidden" name="falta_id" value="{{ f.id }}">
+                                {% if f.tipo == 'nao_justificada' %}
+                                <label style="font-size:.82rem;display:flex;gap:6px;align-items:center;">
+                                    <input type="checkbox" name="descontar" value="1" checked>
+                                    Descontar na folha (dia + DSR)
+                                </label>
+                                {% endif %}
+                                <button class="btn btn-success" type="submit" name="decisao" value="confirmada">Confirmar</button>
+                                <button class="btn btn-danger" type="submit" name="decisao" value="rejeitada">Rejeitar</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="hint">Nenhuma falta pendente.</p>
+                {% endif %}
+            </div>
+
+            <div class="card-box">
+                <h3 style="margin-top:0;">Lançar falta</h3>
+                <form method="POST" class="form-grid">
+                    <input type="hidden" name="acao" value="lancar_falta">
+                    <div class="form-group">
+                        <label>Colaborador</label>
+                        <select name="funcionario_id" required>
+                            <option value="">Selecione</option>
+                            {% for p in equipe %}
+                            <option value="{{ p.id }}">{{ p.nome_completo }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Data</label>
+                        <input type="date" name="data_ref" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Tipo</label>
+                        <select name="tipo" required>
+                            <option value="nao_justificada">Não justificada</option>
+                            <option value="justificada">Justificada</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="grid-column:1/-1;">
+                        <label>Motivo</label>
+                        <input type="text" name="motivo" placeholder="Opcional">
+                    </div>
+                    <div class="form-group" style="justify-content:end;">
+                        <button class="btn btn-primary" type="submit">Lançar (fica pendente de confirmação)</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card-box">
+                <h3 style="margin-top:0;">Faltas do mês {{ mes_filtro[5:7] }}/{{ mes_filtro[0:4] }}</h3>
+                {% if faltas_mes %}
+                <table>
+                    <thead><tr><th>Data</th><th>Colaborador</th><th>Tipo</th><th>Status</th><th>Desconto</th><th>Motivo</th></tr></thead>
+                    <tbody>
+                    {% for f in faltas_mes %}
+                    <tr>
+                        <td>{{ f.data_ref.strftime('%d/%m/%Y') if f.data_ref.strftime is defined else f.data_ref }}</td>
+                        <td>{{ f.nome_completo }}</td>
+                        <td>{% if f.tipo == 'nao_justificada' %}Não justificada{% else %}Justificada{% endif %}</td>
+                        <td>{{ f.status }}</td>
+                        <td>{% if f.descontar and f.status == 'confirmada' and f.tipo == 'nao_justificada' %}Sim{% else %}Não{% endif %}</td>
+                        <td>{{ f.motivo or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="hint">Nenhuma falta neste mês.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
     <script>
     (function () {
@@ -281,6 +479,17 @@
         }
         tick();
         setInterval(tick, 1000);
+
+        var sel = document.getElementById('sel-tempos-func');
+        var cafe = document.getElementById('inp-cafe');
+        var almoco = document.getElementById('inp-almoco');
+        if (sel && cafe && almoco) {
+            sel.addEventListener('change', function () {
+                var opt = sel.options[sel.selectedIndex];
+                cafe.value = opt.getAttribute('data-cafe') || '';
+                almoco.value = opt.getAttribute('data-almoco') || '';
+            });
+        }
     })();
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

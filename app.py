@@ -10268,6 +10268,8 @@ def _garantir_ponto():
             for sql in (
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT DEFAULT 15",
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT DEFAULT 60",
+                "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT",
+                "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT",
             ):
                 cursor.execute(sql)
         conexao.commit()
@@ -10388,7 +10390,8 @@ def _contadores_intervalo_ponto(registro, minutos_cafe, minutos_almoco, agora, d
     return contadores
 
 
-def _ler_tempos_ponto(cursor):
+def _ler_tempos_ponto(cursor, funcionario_id=None):
+    cafe, almoco = 15, 60
     try:
         cursor.execute(
             """
@@ -10397,11 +10400,28 @@ def _ler_tempos_ponto(cursor):
             """
         )
         row = cursor.fetchone() or {}
-        cafe = row.get("ponto_minutos_cafe") if isinstance(row, dict) else None
-        almoco = row.get("ponto_minutos_almoco") if isinstance(row, dict) else None
-        return int(cafe or 15), int(almoco or 60)
+        cafe = int((row.get("ponto_minutos_cafe") if isinstance(row, dict) else None) or 15)
+        almoco = int((row.get("ponto_minutos_almoco") if isinstance(row, dict) else None) or 60)
     except Exception:
-        return 15, 60
+        cafe, almoco = 15, 60
+    if funcionario_id:
+        try:
+            cursor.execute(
+                """
+                SELECT ponto_minutos_cafe, ponto_minutos_almoco
+                FROM funcionarios WHERE id = %s
+                """,
+                (funcionario_id,),
+            )
+            frow = cursor.fetchone() or {}
+            if isinstance(frow, dict):
+                if frow.get("ponto_minutos_cafe") is not None:
+                    cafe = int(frow["ponto_minutos_cafe"])
+                if frow.get("ponto_minutos_almoco") is not None:
+                    almoco = int(frow["ponto_minutos_almoco"])
+        except Exception:
+            pass
+    return max(1, cafe), max(1, almoco)
 
 
 def _pode_gestao_ponto():
@@ -10439,10 +10459,11 @@ def ponto():
         flash(f"Não foi possível preparar o ponto: {e}", "danger")
         return redirect(url_for("dashboard"))
 
+    gestao = _pode_gestao_ponto()
     funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
     if funcionario_id:
         session["funcionario_id"] = funcionario_id
-    if not funcionario_id:
+    if not funcionario_id and not gestao:
         flash(
             "Seu usuário não está ligado a um cadastro da equipe. "
             "Peça à secretaria para vincular seu login em Equipe / Professores.",
@@ -10452,6 +10473,13 @@ def ponto():
 
     agora = _agora_ponto_br()
     data_hoje = agora.date().isoformat()
+    mes_filtro = (request.values.get("mes") or date.today().strftime("%Y-%m")).strip()[:7]
+    try:
+        ano, mes = parse_mes(mes_filtro)
+    except Exception:
+        mes_filtro = date.today().strftime("%Y-%m")
+        ano, mes = parse_mes(mes_filtro)
+
     conexao = obter_conexao()
     if not conexao:
         flash("Sem conexão com o banco.", "danger")
@@ -10463,21 +10491,181 @@ def ponto():
     atestados = []
     faltas = []
     minutos_cafe, minutos_almoco = 15, 60
+    padrao_cafe, padrao_almoco = 15, 60
     contadores = []
+    atestados_pendentes = []
+    faltas_pendentes = []
+    faltas_mes = []
+    equipe = []
+    admin_id = funcionario_id
+
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(
-                "SELECT id, nome_completo FROM funcionarios WHERE id = %s",
-                (funcionario_id,),
-            )
-            pessoa = cursor.fetchone()
-            if not pessoa:
-                flash("Cadastro da equipe não encontrado.", "danger")
-                return redirect(url_for("dashboard"))
-            minutos_cafe, minutos_almoco = _ler_tempos_ponto(cursor)
-
             if request.method == "POST":
                 acao = request.form.get("acao")
+                acoes_gestao = {
+                    "confirmar_atestado",
+                    "lancar_falta",
+                    "confirmar_falta",
+                    "salvar_tempos_funcionario",
+                }
+                if acao in acoes_gestao:
+                    if not gestao:
+                        raise ValueError("Sem permissão para gestão do ponto.")
+                    if acao == "confirmar_atestado":
+                        atestado_id = request.form.get("atestado_id", type=int)
+                        decisao = (request.form.get("decisao") or "").strip()
+                        obs = (request.form.get("observacao_admin") or "").strip() or None
+                        if decisao not in {"aprovado", "rejeitado"}:
+                            raise ValueError("Escolha aprovar ou rejeitar o atestado.")
+                        cursor.execute(
+                            "SELECT * FROM ponto_atestados WHERE id = %s",
+                            (atestado_id,),
+                        )
+                        at = cursor.fetchone()
+                        if not at:
+                            raise ValueError("Atestado não encontrado.")
+                        cursor.execute(
+                            """
+                            UPDATE ponto_atestados
+                            SET status = %s, confirmado_em = NOW(), confirmado_por = %s, observacao_admin = %s
+                            WHERE id = %s
+                            """,
+                            (decisao, admin_id, obs, atestado_id),
+                        )
+                        if decisao == "aprovado" and at.get("data_inicio") and at.get("data_fim"):
+                            d0 = at["data_inicio"]
+                            d1 = at["data_fim"]
+                            if not hasattr(d0, "isoformat"):
+                                d0 = datetime.strptime(str(d0)[:10], "%Y-%m-%d").date()
+                                d1 = datetime.strptime(str(d1)[:10], "%Y-%m-%d").date()
+                            dia = d0
+                            while dia <= d1:
+                                cursor.execute(
+                                    """
+                                    INSERT INTO ponto_faltas
+                                        (funcionario_id, data_ref, tipo, motivo, atestado_id, status, descontar,
+                                         confirmado_em, confirmado_por)
+                                    VALUES (%s, %s, 'justificada', %s, %s, 'confirmada', FALSE, NOW(), %s)
+                                    ON CONFLICT (funcionario_id, data_ref)
+                                    DO UPDATE SET
+                                        tipo = 'justificada',
+                                        motivo = EXCLUDED.motivo,
+                                        atestado_id = EXCLUDED.atestado_id,
+                                        status = 'confirmada',
+                                        descontar = FALSE,
+                                        confirmado_em = NOW(),
+                                        confirmado_por = EXCLUDED.confirmado_por
+                                    """,
+                                    (
+                                        at["funcionario_id"],
+                                        dia,
+                                        at.get("titulo") or "Atestado aprovado",
+                                        atestado_id,
+                                        admin_id,
+                                    ),
+                                )
+                                dia += timedelta(days=1)
+                        flash(
+                            "Atestado aprovado e faltas justificadas lançadas no mês (sem desconto)."
+                            if decisao == "aprovado"
+                            else "Atestado rejeitado.",
+                            "success" if decisao == "aprovado" else "warning",
+                        )
+                    elif acao == "lancar_falta":
+                        fid = request.form.get("funcionario_id", type=int)
+                        data_ref = (request.form.get("data_ref") or "").strip()
+                        tipo = (request.form.get("tipo") or "").strip()
+                        motivo = (request.form.get("motivo") or "").strip() or None
+                        if not fid or not data_ref:
+                            raise ValueError("Informe o colaborador e a data.")
+                        if tipo not in {"justificada", "nao_justificada"}:
+                            raise ValueError("Tipo de falta inválido.")
+                        datetime.strptime(data_ref[:10], "%Y-%m-%d")
+                        cursor.execute(
+                            """
+                            INSERT INTO ponto_faltas
+                                (funcionario_id, data_ref, tipo, motivo, status, descontar)
+                            VALUES (%s, %s, %s, %s, 'pendente', %s)
+                            ON CONFLICT (funcionario_id, data_ref)
+                            DO UPDATE SET
+                                tipo = EXCLUDED.tipo,
+                                motivo = EXCLUDED.motivo,
+                                status = 'pendente',
+                                descontar = EXCLUDED.descontar,
+                                confirmado_em = NULL,
+                                confirmado_por = NULL
+                            """,
+                            (
+                                fid,
+                                data_ref[:10],
+                                tipo,
+                                motivo,
+                                True if tipo == "nao_justificada" else False,
+                            ),
+                        )
+                        flash("Falta lançada. Confirme se haverá desconto na folha.", "success")
+                    elif acao == "confirmar_falta":
+                        falta_id = request.form.get("falta_id", type=int)
+                        decisao = (request.form.get("decisao") or "").strip()
+                        descontar = request.form.get("descontar") == "1"
+                        if decisao not in {"confirmada", "rejeitada"}:
+                            raise ValueError("Escolha confirmar ou rejeitar a falta.")
+                        cursor.execute(
+                            """
+                            UPDATE ponto_faltas
+                            SET status = %s,
+                                descontar = CASE
+                                    WHEN tipo = 'nao_justificada' AND %s = 'confirmada' THEN %s
+                                    ELSE FALSE
+                                END,
+                                confirmado_em = NOW(),
+                                confirmado_por = %s
+                            WHERE id = %s
+                            """,
+                            (decisao, decisao, descontar, admin_id, falta_id),
+                        )
+                        if decisao == "confirmada" and descontar:
+                            flash(
+                                "Falta confirmada com desconto na folha (dia + DSR da semana, Lei 605/1949).",
+                                "warning",
+                            )
+                        elif decisao == "confirmada":
+                            flash("Falta confirmada sem desconto na folha.", "success")
+                        else:
+                            flash("Falta rejeitada.", "success")
+                    elif acao == "salvar_tempos_funcionario":
+                        fid = request.form.get("funcionario_id", type=int)
+                        cafe_raw = (request.form.get("ponto_minutos_cafe") or "").strip()
+                        almoco_raw = (request.form.get("ponto_minutos_almoco") or "").strip()
+                        if not fid:
+                            raise ValueError("Selecione o colaborador.")
+                        cafe = int(cafe_raw) if cafe_raw != "" else None
+                        almoco = int(almoco_raw) if almoco_raw != "" else None
+                        if cafe is not None and cafe < 1:
+                            raise ValueError("Tempo de café inválido.")
+                        if almoco is not None and almoco < 1:
+                            raise ValueError("Tempo de almoço inválido.")
+                        cursor.execute(
+                            """
+                            UPDATE funcionarios
+                            SET ponto_minutos_cafe = %s, ponto_minutos_almoco = %s
+                            WHERE id = %s
+                            """,
+                            (cafe, almoco, fid),
+                        )
+                        if cursor.rowcount == 0:
+                            raise ValueError("Colaborador não encontrado.")
+                        flash("Tempos de café e almoço salvos para o colaborador.", "success")
+                    conexao.commit()
+                    return redirect(url_for("ponto", mes=mes_filtro) + "#gestao")
+
+                if not funcionario_id:
+                    raise ValueError(
+                        "Seu usuário não está ligado a um cadastro da equipe. "
+                        "Vincule o login em Equipe / Professores para bater ponto."
+                    )
+
                 if acao == "bater_ponto":
                     tipo = (request.form.get("tipo") or "").strip()
                     if tipo not in _ordem_batidas_ponto():
@@ -10587,82 +10775,141 @@ def ponto():
                     conexao.commit()
                     return redirect(url_for("ponto"))
 
-            cursor.execute(
-                """
-                SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
-                FROM ponto_registros
-                WHERE funcionario_id = %s AND data_ref = %s
-                """,
-                (funcionario_id, data_hoje),
-            )
-            row = cursor.fetchone()
-            if row:
-                registro = _mapa_registro_ponto(row)
-            contadores = _contadores_intervalo_ponto(
-                registro, minutos_cafe, minutos_almoco, agora, agora.date()
-            )
-            cursor.execute(
-                """
-                SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
-                FROM ponto_registros
-                WHERE funcionario_id = %s
-                ORDER BY data_ref DESC
-                LIMIT 60
-                """,
-                (funcionario_id,),
-            )
-            historico = []
-            for item in cursor.fetchall() or []:
-                m = _mapa_registro_ponto(item)
-                historico.append(
-                    {
-                        "id": item["id"],
-                        "data_ref": item["data_ref"],
-                        "entrada": m["entrada"] or "—",
-                        "cafe_ida": m["cafe_ida"] or "—",
-                        "cafe_volta": m["cafe_volta"] or "—",
-                        "almoco": m["almoco"] or "—",
-                        "almoco_volta": m["almoco_volta"] or "—",
-                        "saida": m["saida"] or "—",
-                    }
+            if funcionario_id:
+                cursor.execute(
+                    "SELECT id, nome_completo FROM funcionarios WHERE id = %s",
+                    (funcionario_id,),
                 )
-            cursor.execute(
-                """
-                SELECT id, titulo, justificativa, criado_em, status, data_inicio, data_fim, 'ponto' AS origem
-                FROM ponto_atestados
-                WHERE funcionario_id = %s
-                ORDER BY criado_em DESC
-                """,
-                (funcionario_id,),
-            )
-            atestados = [dict(item) for item in (cursor.fetchall() or [])]
-            try:
+                pessoa = cursor.fetchone()
+                if not pessoa and not gestao:
+                    flash("Cadastro da equipe não encontrado.", "danger")
+                    return redirect(url_for("dashboard"))
+                minutos_cafe, minutos_almoco = _ler_tempos_ponto(cursor, funcionario_id)
+            else:
+                minutos_cafe, minutos_almoco = _ler_tempos_ponto(cursor)
+
+            padrao_cafe, padrao_almoco = _ler_tempos_ponto(cursor)
+
+            if funcionario_id and pessoa:
                 cursor.execute(
                     """
-                    SELECT id, titulo, NULL AS justificativa, criado_em, 'aprovado' AS status,
-                           NULL AS data_inicio, NULL AS data_fim, 'legado' AS origem
-                    FROM professor_arquivos
-                    WHERE funcionario_id = %s AND tipo = 'atestado'
+                    SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+                    FROM ponto_registros
+                    WHERE funcionario_id = %s AND data_ref = %s
+                    """,
+                    (funcionario_id, data_hoje),
+                )
+                row = cursor.fetchone()
+                if row:
+                    registro = _mapa_registro_ponto(row)
+                contadores = _contadores_intervalo_ponto(
+                    registro, minutos_cafe, minutos_almoco, agora, agora.date()
+                )
+                cursor.execute(
+                    """
+                    SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+                    FROM ponto_registros
+                    WHERE funcionario_id = %s
+                    ORDER BY data_ref DESC
+                    LIMIT 60
+                    """,
+                    (funcionario_id,),
+                )
+                historico = []
+                for item in cursor.fetchall() or []:
+                    m = _mapa_registro_ponto(item)
+                    historico.append(
+                        {
+                            "id": item["id"],
+                            "data_ref": item["data_ref"],
+                            "entrada": m["entrada"] or "—",
+                            "cafe_ida": m["cafe_ida"] or "—",
+                            "cafe_volta": m["cafe_volta"] or "—",
+                            "almoco": m["almoco"] or "—",
+                            "almoco_volta": m["almoco_volta"] or "—",
+                            "saida": m["saida"] or "—",
+                        }
+                    )
+                cursor.execute(
+                    """
+                    SELECT id, titulo, justificativa, criado_em, status, data_inicio, data_fim, 'ponto' AS origem
+                    FROM ponto_atestados
+                    WHERE funcionario_id = %s
                     ORDER BY criado_em DESC
                     """,
                     (funcionario_id,),
                 )
-                for item in cursor.fetchall() or []:
-                    atestados.append(dict(item))
-                atestados.sort(key=lambda x: str(x.get("criado_em") or ""), reverse=True)
-            except Exception:
-                pass
-            cursor.execute(
-                """
-                SELECT id, data_ref, tipo, motivo, status, descontar
-                FROM ponto_faltas
-                WHERE funcionario_id = %s
-                ORDER BY data_ref DESC
-                LIMIT 40
-                """,
-                (funcionario_id,),
-            )
-            faltas = [dict(item) for item in (cursor.fetchall() or [])]
+                atestados = [dict(item) for item in (cursor.fetchall() or [])]
+                try:
+                    cursor.execute(
+                        """
+                        SELECT id, titulo, NULL AS justificativa, criado_em, 'aprovado' AS status,
+                               NULL AS data_inicio, NULL AS data_fim, 'legado' AS origem
+                        FROM professor_arquivos
+                        WHERE funcionario_id = %s AND tipo = 'atestado'
+                        ORDER BY criado_em DESC
+                        """,
+                        (funcionario_id,),
+                    )
+                    for item in cursor.fetchall() or []:
+                        atestados.append(dict(item))
+                    atestados.sort(key=lambda x: str(x.get("criado_em") or ""), reverse=True)
+                except Exception:
+                    pass
+                cursor.execute(
+                    """
+                    SELECT id, data_ref, tipo, motivo, status, descontar
+                    FROM ponto_faltas
+                    WHERE funcionario_id = %s
+                    ORDER BY data_ref DESC
+                    LIMIT 40
+                    """,
+                    (funcionario_id,),
+                )
+                faltas = [dict(item) for item in (cursor.fetchall() or [])]
+
+            if gestao:
+                cursor.execute(
+                    """
+                    SELECT a.*, f.nome_completo
+                    FROM ponto_atestados a
+                    JOIN funcionarios f ON f.id = a.funcionario_id
+                    WHERE COALESCE(a.status, 'pendente') = 'pendente'
+                    ORDER BY a.criado_em DESC
+                    """
+                )
+                atestados_pendentes = [dict(r) for r in (cursor.fetchall() or [])]
+                cursor.execute(
+                    """
+                    SELECT fa.*, f.nome_completo
+                    FROM ponto_faltas fa
+                    JOIN funcionarios f ON f.id = fa.funcionario_id
+                    WHERE fa.status = 'pendente'
+                    ORDER BY fa.data_ref DESC
+                    """
+                )
+                faltas_pendentes = [dict(r) for r in (cursor.fetchall() or [])]
+                cursor.execute(
+                    """
+                    SELECT fa.*, f.nome_completo
+                    FROM ponto_faltas fa
+                    JOIN funcionarios f ON f.id = fa.funcionario_id
+                    WHERE EXTRACT(YEAR FROM fa.data_ref) = %s
+                      AND EXTRACT(MONTH FROM fa.data_ref) = %s
+                    ORDER BY fa.data_ref DESC, f.nome_completo
+                    """,
+                    (ano, mes),
+                )
+                faltas_mes = [dict(r) for r in (cursor.fetchall() or [])]
+                cursor.execute(
+                    """
+                    SELECT id, nome_completo, ponto_minutos_cafe, ponto_minutos_almoco
+                    FROM funcionarios
+                    WHERE COALESCE(ativo, TRUE) = TRUE
+                    ORDER BY nome_completo
+                    """
+                )
+                equipe = [dict(r) for r in (cursor.fetchall() or [])]
     except Exception as e:
         try:
             conexao.rollback()
@@ -10670,7 +10917,7 @@ def ponto():
             pass
         flash(str(e), "danger")
         if request.method == "POST":
-            return redirect(url_for("ponto"))
+            return redirect(url_for("ponto", mes=mes_filtro))
         return redirect(url_for("dashboard"))
     finally:
         conexao.close()
@@ -10681,235 +10928,29 @@ def ponto():
         data_ref=data_hoje,
         hora_agora=agora.strftime("%H:%M"),
         registro=registro,
-        proxima=_proxima_batida(registro),
+        proxima=_proxima_batida(registro) if pessoa else None,
         rotulos=_rotulos_batida_ponto(),
         historico=historico,
         atestados=atestados,
         faltas=faltas,
-        gestao=_pode_gestao_ponto(),
+        gestao=gestao,
         minutos_cafe=minutos_cafe,
         minutos_almoco=minutos_almoco,
+        padrao_cafe=padrao_cafe,
+        padrao_almoco=padrao_almoco,
         contadores=contadores,
-    )
-
-
-@app.route("/ponto/gestao", methods=["GET", "POST"])
-def ponto_gestao():
-    if "usuario_id" not in session:
-        return redirect(url_for("login"))
-    if not _pode_gestao_ponto():
-        flash("Somente secretaria ou administração da escola gerencia o ponto da equipe.", "danger")
-        return redirect(url_for("ponto"))
-    try:
-        _garantir_ponto()
-    except Exception as e:
-        flash(f"Não foi possível preparar o ponto: {e}", "danger")
-        return redirect(url_for("dashboard"))
-
-    mes_filtro = (request.values.get("mes") or date.today().strftime("%Y-%m")).strip()[:7]
-    try:
-        ano, mes = parse_mes(mes_filtro)
-    except Exception:
-        mes_filtro = date.today().strftime("%Y-%m")
-        ano, mes = parse_mes(mes_filtro)
-
-    conexao = obter_conexao()
-    if not conexao:
-        flash("Sem conexão com o banco.", "danger")
-        return redirect(url_for("dashboard"))
-
-    atestados_pendentes = []
-    faltas_pendentes = []
-    faltas_mes = []
-    equipe = []
-    admin_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
-    try:
-        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            if request.method == "POST":
-                acao = request.form.get("acao")
-                if acao == "confirmar_atestado":
-                    atestado_id = request.form.get("atestado_id", type=int)
-                    decisao = (request.form.get("decisao") or "").strip()
-                    obs = (request.form.get("observacao_admin") or "").strip() or None
-                    if decisao not in {"aprovado", "rejeitado"}:
-                        raise ValueError("Escolha aprovar ou rejeitar o atestado.")
-                    cursor.execute(
-                        "SELECT * FROM ponto_atestados WHERE id = %s",
-                        (atestado_id,),
-                    )
-                    at = cursor.fetchone()
-                    if not at:
-                        raise ValueError("Atestado não encontrado.")
-                    cursor.execute(
-                        """
-                        UPDATE ponto_atestados
-                        SET status = %s, confirmado_em = NOW(), confirmado_por = %s, observacao_admin = %s
-                        WHERE id = %s
-                        """,
-                        (decisao, admin_id, obs, atestado_id),
-                    )
-                    if decisao == "aprovado" and at.get("data_inicio") and at.get("data_fim"):
-                        d0 = at["data_inicio"]
-                        d1 = at["data_fim"]
-                        if hasattr(d0, "isoformat"):
-                            pass
-                        else:
-                            d0 = datetime.strptime(str(d0)[:10], "%Y-%m-%d").date()
-                            d1 = datetime.strptime(str(d1)[:10], "%Y-%m-%d").date()
-                        dia = d0
-                        while dia <= d1:
-                            cursor.execute(
-                                """
-                                INSERT INTO ponto_faltas
-                                    (funcionario_id, data_ref, tipo, motivo, atestado_id, status, descontar,
-                                     confirmado_em, confirmado_por)
-                                VALUES (%s, %s, 'justificada', %s, %s, 'confirmada', FALSE, NOW(), %s)
-                                ON CONFLICT (funcionario_id, data_ref)
-                                DO UPDATE SET
-                                    tipo = 'justificada',
-                                    motivo = EXCLUDED.motivo,
-                                    atestado_id = EXCLUDED.atestado_id,
-                                    status = 'confirmada',
-                                    descontar = FALSE,
-                                    confirmado_em = NOW(),
-                                    confirmado_por = EXCLUDED.confirmado_por
-                                """,
-                                (
-                                    at["funcionario_id"],
-                                    dia,
-                                    at.get("titulo") or "Atestado aprovado",
-                                    atestado_id,
-                                    admin_id,
-                                ),
-                            )
-                            dia += timedelta(days=1)
-                    flash(
-                        "Atestado aprovado e faltas justificadas lançadas no mês (sem desconto)."
-                        if decisao == "aprovado"
-                        else "Atestado rejeitado.",
-                        "success" if decisao == "aprovado" else "warning",
-                    )
-                elif acao == "lancar_falta":
-                    fid = request.form.get("funcionario_id", type=int)
-                    data_ref = (request.form.get("data_ref") or "").strip()
-                    tipo = (request.form.get("tipo") or "").strip()
-                    motivo = (request.form.get("motivo") or "").strip() or None
-                    if not fid or not data_ref:
-                        raise ValueError("Informe o colaborador e a data.")
-                    if tipo not in {"justificada", "nao_justificada"}:
-                        raise ValueError("Tipo de falta inválido.")
-                    datetime.strptime(data_ref[:10], "%Y-%m-%d")
-                    cursor.execute(
-                        """
-                        INSERT INTO ponto_faltas
-                            (funcionario_id, data_ref, tipo, motivo, status, descontar)
-                        VALUES (%s, %s, %s, %s, 'pendente', %s)
-                        ON CONFLICT (funcionario_id, data_ref)
-                        DO UPDATE SET
-                            tipo = EXCLUDED.tipo,
-                            motivo = EXCLUDED.motivo,
-                            status = 'pendente',
-                            descontar = EXCLUDED.descontar,
-                            confirmado_em = NULL,
-                            confirmado_por = NULL
-                        """,
-                        (
-                            fid,
-                            data_ref[:10],
-                            tipo,
-                            motivo,
-                            True if tipo == "nao_justificada" else False,
-                        ),
-                    )
-                    flash("Falta lançada. Confirme se haverá desconto na folha.", "success")
-                elif acao == "confirmar_falta":
-                    falta_id = request.form.get("falta_id", type=int)
-                    decisao = (request.form.get("decisao") or "").strip()
-                    descontar = request.form.get("descontar") == "1"
-                    if decisao not in {"confirmada", "rejeitada"}:
-                        raise ValueError("Escolha confirmar ou rejeitar a falta.")
-                    cursor.execute(
-                        """
-                        UPDATE ponto_faltas
-                        SET status = %s,
-                            descontar = CASE
-                                WHEN tipo = 'nao_justificada' AND %s = 'confirmada' THEN %s
-                                ELSE FALSE
-                            END,
-                            confirmado_em = NOW(),
-                            confirmado_por = %s
-                        WHERE id = %s
-                        """,
-                        (decisao, decisao, descontar, admin_id, falta_id),
-                    )
-                    if decisao == "confirmada" and descontar:
-                        flash("Falta confirmada com desconto na folha (dia + DSR da semana, Lei 605/1949).", "warning")
-                    elif decisao == "confirmada":
-                        flash("Falta confirmada sem desconto na folha.", "success")
-                    else:
-                        flash("Falta rejeitada.", "success")
-                conexao.commit()
-                return redirect(url_for("ponto_gestao", mes=mes_filtro))
-
-            cursor.execute(
-                """
-                SELECT a.*, f.nome_completo
-                FROM ponto_atestados a
-                JOIN funcionarios f ON f.id = a.funcionario_id
-                WHERE COALESCE(a.status, 'pendente') = 'pendente'
-                ORDER BY a.criado_em DESC
-                """
-            )
-            atestados_pendentes = [dict(r) for r in (cursor.fetchall() or [])]
-            cursor.execute(
-                """
-                SELECT fa.*, f.nome_completo
-                FROM ponto_faltas fa
-                JOIN funcionarios f ON f.id = fa.funcionario_id
-                WHERE fa.status = 'pendente'
-                ORDER BY fa.data_ref DESC
-                """
-            )
-            faltas_pendentes = [dict(r) for r in (cursor.fetchall() or [])]
-            cursor.execute(
-                """
-                SELECT fa.*, f.nome_completo
-                FROM ponto_faltas fa
-                JOIN funcionarios f ON f.id = fa.funcionario_id
-                WHERE EXTRACT(YEAR FROM fa.data_ref) = %s
-                  AND EXTRACT(MONTH FROM fa.data_ref) = %s
-                ORDER BY fa.data_ref DESC, f.nome_completo
-                """,
-                (ano, mes),
-            )
-            faltas_mes = [dict(r) for r in (cursor.fetchall() or [])]
-            cursor.execute(
-                """
-                SELECT id, nome_completo
-                FROM funcionarios
-                WHERE COALESCE(ativo, TRUE) = TRUE
-                ORDER BY nome_completo
-                """
-            )
-            equipe = [dict(r) for r in (cursor.fetchall() or [])]
-    except Exception as e:
-        try:
-            conexao.rollback()
-        except Exception:
-            pass
-        flash(str(e), "danger")
-        return redirect(url_for("ponto_gestao", mes=mes_filtro) if request.method == "POST" else url_for("dashboard"))
-    finally:
-        conexao.close()
-
-    return render_template(
-        "ponto_gestao.html",
         mes_filtro=mes_filtro,
         atestados_pendentes=atestados_pendentes,
         faltas_pendentes=faltas_pendentes,
         faltas_mes=faltas_mes,
         equipe=equipe,
     )
+
+
+@app.route("/ponto/gestao", methods=["GET", "POST"])
+def ponto_gestao():
+    """Compatibilidade: mesma tela unificada de ponto."""
+    return ponto()
 
 
 @app.route("/ponto/relatorio.pdf")
