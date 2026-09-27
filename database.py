@@ -548,7 +548,7 @@ def garantir_tabelas_pedagogicas():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ped_bncc_v3"
+    chave = f"{schema}:ped_bncc_v4"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -702,6 +702,45 @@ def garantir_tabelas_pedagogicas():
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS carga_horaria_padroes (
+                    id SERIAL PRIMARY KEY,
+                    nome VARCHAR(120) NOT NULL,
+                    etapa VARCHAR(30) DEFAULT 'FUNDAMENTAL',
+                    minutos_aula INT DEFAULT 50,
+                    matriz_json TEXT NOT NULL DEFAULT '{}',
+                    ativo BOOLEAN DEFAULT TRUE,
+                    criado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute("SELECT COUNT(*) FROM carga_horaria_padroes")
+            qtd_padrao = cursor.fetchone()
+            total_padrao = qtd_padrao[0] if isinstance(qtd_padrao, (list, tuple)) else (qtd_padrao or {}).get("count") or 0
+            if not total_padrao:
+                import json as _json
+                # Referência aproximada de matriz curricular (aulas/semana) — a escola pode criar outras
+                matriz_fund = {
+                    "LP": 5, "MAT": 5, "CIE": 3, "HIS": 2, "GEO": 2,
+                    "ART": 2, "EF": 2, "ER": 1, "ING": 2,
+                }
+                matriz_medio = {
+                    "LP": 4, "MAT": 4, "CIE": 3, "HIS": 2, "GEO": 2,
+                    "ART": 1, "EF": 2, "ER": 1, "ING": 2,
+                }
+                for nome, etapa, mins, matriz in (
+                    ("Referência MEC/BNCC — Fundamental (50 min)", "FUNDAMENTAL", 50, matriz_fund),
+                    ("Referência MEC/BNCC — Fundamental (60 min)", "FUNDAMENTAL", 60, matriz_fund),
+                    ("Referência MEC/BNCC — Médio (50 min)", "MEDIO", 50, matriz_medio),
+                ):
+                    cursor.execute(
+                        """
+                        INSERT INTO carga_horaria_padroes (nome, etapa, minutos_aula, matriz_json, ativo)
+                        VALUES (%s, %s, %s, %s, TRUE)
+                        """,
+                        (nome, etapa, mins, _json.dumps(matriz, ensure_ascii=False)),
+                    )
             try:
                 cursor.execute(
                     """

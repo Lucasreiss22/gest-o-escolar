@@ -1617,6 +1617,230 @@ def _quadro_materia(row):
     }
 
 
+DIA_WEEKDAY = {"seg": 0, "ter": 1, "qua": 2, "qui": 3, "sex": 4, "sab": 5}
+TURNO_HORA_INICIO = {
+    "manhã": (7, 30),
+    "manha": (7, 30),
+    "tarde": (13, 0),
+    "noite": (18, 30),
+    "híbrido": (7, 30),
+    "hibrido": (7, 30),
+    "integral": (7, 30),
+}
+
+
+def _proxima_data_dia(dia_codigo, a_partir=None):
+    base = a_partir or date.today()
+    alvo = DIA_WEEKDAY.get((dia_codigo or "").lower())
+    if alvo is None:
+        return base
+    delta = (alvo - base.weekday()) % 7
+    return base + timedelta(days=delta)
+
+
+def _distribuir_aulas_semana(aulas, minutos):
+    """Espalha aulas na semana (seg–sex). Ex.: 5→1/dia; 3→seg/qua/sex; 2 com durações iguais."""
+    aulas = max(0, int(aulas or 0))
+    minutos = max(15, int(minutos or 50))
+    if aulas <= 0:
+        return []
+    dias = ["seg", "ter", "qua", "qui", "sex"]
+    if aulas <= 5:
+        # Preferência: dias espaçados
+        if aulas == 1:
+            escolhidos = ["qua"]
+        elif aulas == 2:
+            escolhidos = ["ter", "qui"]
+        elif aulas == 3:
+            escolhidos = ["seg", "qua", "sex"]
+        elif aulas == 4:
+            escolhidos = ["seg", "ter", "qui", "sex"]
+        else:
+            escolhidos = dias
+        return [{"dia": d, "quantidade": 1, "minutos": minutos} for d in escolhidos]
+    # Mais de 5: 1 por dia + extras no início da semana
+    grade = [{"dia": d, "quantidade": 1, "minutos": minutos} for d in dias]
+    resto = aulas - 5
+    i = 0
+    while resto > 0:
+        grade[i % 5]["quantidade"] += 1
+        resto -= 1
+        i += 1
+    return grade
+
+
+def _listar_cargas_padrao(cursor, etapa=None):
+    cursor.execute(
+        """
+        SELECT id, nome, etapa, minutos_aula, matriz_json, ativo
+        FROM carga_horaria_padroes
+        WHERE COALESCE(ativo, TRUE) = TRUE
+        ORDER BY nome
+        """
+    )
+    itens = []
+    for row in cursor.fetchall() or []:
+        item = dict(row) if hasattr(row, "keys") else {
+            "id": row[0], "nome": row[1], "etapa": row[2],
+            "minutos_aula": row[3], "matriz_json": row[4], "ativo": row[5],
+        }
+        try:
+            item["matriz"] = json.loads(item.get("matriz_json") or "{}")
+        except Exception:
+            item["matriz"] = {}
+        if etapa and item.get("etapa") and str(item["etapa"]).upper() not in (str(etapa).upper(), "AMBOS", ""):
+            # ainda lista todos; filtro opcional no template
+            pass
+        itens.append(item)
+    return itens
+
+
+def _grade_de_padrao(cursor, disciplina_id, padrao_id=None, etapa=None, minutos_override=None):
+    """Monta grade_json a partir do padrão de carga (matriz aulas/semana por código BNCC)."""
+    cursor.execute(
+        "SELECT id, codigo, nome, carga_horaria_semanal, minutos_aula, grade_json FROM disciplinas WHERE id = %s",
+        (disciplina_id,),
+    )
+    disc = cursor.fetchone()
+    if not disc:
+        return [], 50, 0
+    if hasattr(disc, "keys"):
+        codigo = (disc.get("codigo") or "").upper().strip()
+        ch_sem = disc.get("carga_horaria_semanal")
+        mins_disc = disc.get("minutos_aula")
+        grade_existente = _parse_grade(disc.get("grade_json"))
+    else:
+        codigo = (disc[1] or "").upper().strip()
+        ch_sem = disc[3]
+        mins_disc = disc[4]
+        grade_existente = _parse_grade(disc[5])
+    if grade_existente:
+        return grade_existente, int((grade_existente[0] or {}).get("minutos") or 50), sum(
+            int(b.get("quantidade") or 0) for b in grade_existente
+        )
+
+    padrao = None
+    if padrao_id:
+        cursor.execute(
+            "SELECT minutos_aula, matriz_json FROM carga_horaria_padroes WHERE id = %s",
+            (padrao_id,),
+        )
+        padrao = cursor.fetchone()
+    if not padrao and etapa:
+        cursor.execute(
+            """
+            SELECT minutos_aula, matriz_json FROM carga_horaria_padroes
+            WHERE COALESCE(ativo, TRUE) = TRUE
+              AND UPPER(COALESCE(etapa,'')) IN (%s, 'AMBOS')
+            ORDER BY id LIMIT 1
+            """,
+            (str(etapa).upper(),),
+        )
+        padrao = cursor.fetchone()
+    if not padrao:
+        cursor.execute(
+            "SELECT minutos_aula, matriz_json FROM carga_horaria_padroes WHERE COALESCE(ativo, TRUE) ORDER BY id LIMIT 1"
+        )
+        padrao = cursor.fetchone()
+
+    minutos = int(minutos_override or 0) or 50
+    matriz = {}
+    if padrao:
+        if hasattr(padrao, "keys"):
+            minutos = int(minutos_override or padrao.get("minutos_aula") or minutos)
+            try:
+                matriz = json.loads(padrao.get("matriz_json") or "{}")
+            except Exception:
+                matriz = {}
+        else:
+            minutos = int(minutos_override or padrao[0] or minutos)
+            try:
+                matriz = json.loads(padrao[1] or "{}")
+            except Exception:
+                matriz = {}
+    if mins_disc:
+        minutos = int(minutos_override or mins_disc or minutos)
+
+    aulas = int(matriz.get(codigo) or 0)
+    if not aulas and ch_sem:
+        # carga em horas → aproxima aulas
+        aulas = max(1, int(round(float(ch_sem) * 60 / minutos)))
+    if not aulas:
+        aulas = 2
+    grade = _distribuir_aulas_semana(aulas, minutos)
+    return grade, minutos, aulas
+
+
+def _horario_turno(turno, offset_min=0):
+    chave = (turno or "manhã").strip().lower()
+    h, m = TURNO_HORA_INICIO.get(chave, (7, 30))
+    total = h * 60 + m + int(offset_min or 0)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _criar_rotinas_turma(cursor, turma_id, turma_nome, turno, disc_grades, prof_por_disc, ano_letivo=None):
+    """Cria eventos de rotina (periodo=semana) no calendário de cada professor."""
+    criados = 0
+    base = date.today()
+    if ano_letivo:
+        try:
+            ano = int(str(ano_letivo)[:4])
+            if date(ano, 2, 1) > base:
+                base = date(ano, 2, 1)
+        except Exception:
+            pass
+    for disc_id, info in (disc_grades or {}).items():
+        nome_mat = info.get("nome") or "Aula"
+        grade = info.get("grade") or []
+        prof_id = prof_por_disc.get(str(disc_id)) or prof_por_disc.get(disc_id) or info.get("professor_id")
+        if not prof_id:
+            continue
+        offset_por_dia = {}
+        for bloco in grade:
+            dia = bloco.get("dia")
+            qtd = int(bloco.get("quantidade") or 0)
+            mins = int(bloco.get("minutos") or 50)
+            if qtd <= 0 or not dia:
+                continue
+            data_ref = _proxima_data_dia(dia, base)
+            offset = offset_por_dia.get(dia, 0)
+            for i in range(qtd):
+                horario = _horario_turno(turno, offset)
+                titulo = f"{turma_nome} — {nome_mat}"
+                if qtd > 1:
+                    titulo = f"{titulo} ({i + 1}/{qtd})"
+                desc = f"Grade automática · {qtd} aula(s) de {mins} min · {dia.upper()}"
+                cursor.execute(
+                    """
+                    INSERT INTO calendario_eventos
+                        (titulo, descricao, data_evento, tipo, turma_id, professor_id, horario, periodo)
+                    SELECT %s, %s, %s, 'rotina', %s, %s, %s::time, 'semana'
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM calendario_eventos
+                        WHERE professor_id = %s AND turma_id = %s AND tipo = 'rotina'
+                          AND periodo = 'semana' AND data_evento = %s
+                          AND titulo = %s
+                    )
+                    """,
+                    (
+                        titulo[:180],
+                        desc,
+                        data_ref,
+                        turma_id,
+                        prof_id,
+                        horario,
+                        prof_id,
+                        turma_id,
+                        data_ref,
+                        titulo[:180],
+                    ),
+                )
+                criados += cursor.rowcount or 0
+                offset += mins + 5
+            offset_por_dia[dia] = offset
+    return criados
+
+
 def calcular_encargos_professor(salario_base, regime_tributario="lucro_presumido"):
     """
     Calcula os encargos trabalhistas e provisões com base no salário bruto.
@@ -8446,26 +8670,27 @@ def pagina_pedagogico():
                 with conexao.cursor() as cursor:
                     if acao in ["criar_turma", "nova_turma"]:
                         etapa = (limpar_campo("etapa_ensino") or "FUNDAMENTAL").upper()
-                        if etapa not in ("INFANTIL", "FUNDAMENTAL", "MEDIO", "AMBOS"):
+                        if etapa not in ("INFANTIL", "FUNDAMENTAL", "MEDIO", "AMBOS", "FUNDAMENTAL_1", "FUNDAMENTAL_2"):
                             etapa = "FUNDAMENTAL"
+                        if etapa.startswith("FUNDAMENTAL"):
+                            etapa_filtro = "FUNDAMENTAL"
+                        else:
+                            etapa_filtro = etapa
                         prof_resp = limpar_campo("professor_id") or None
+                        padrao_id = request.form.get("carga_padrao_id", type=int)
+                        turno = limpar_campo("turno")
+                        ano_letivo = limpar_campo("ano_letivo") or "2026"
+                        nome_turma = limpar_campo("nome_turma") or limpar_campo("nome")
                         cursor.execute(
                             """
                             INSERT INTO turmas (nome, ano_letivo, turno, professor_responsavel_id, etapa_ensino)
                             VALUES (%s, %s, %s, %s, %s)
                             RETURNING id;
                             """,
-                            (
-                                limpar_campo("nome_turma") or limpar_campo("nome"),
-                                limpar_campo("ano_letivo") or "2026",
-                                limpar_campo("turno"),
-                                prof_resp,
-                                etapa,
-                            ),
+                            (nome_turma, ano_letivo, turno, prof_resp, etapa),
                         )
                         turma_nova = cursor.fetchone()
                         turma_id_nova = turma_nova[0] if isinstance(turma_nova, (list, tuple)) else (turma_nova or {}).get("id")
-                        # Professores extras (fundamental/médio com várias matérias)
                         profs_extra = [p for p in request.form.getlist("professor_ids") if str(p).strip()]
                         if prof_resp and str(prof_resp) not in [str(p) for p in profs_extra]:
                             profs_extra.insert(0, prof_resp)
@@ -8488,31 +8713,130 @@ def pagina_pedagogico():
                                     fid,
                                 ),
                             )
-                        # Vincular matérias BNCC da etapa
                         disc_ids = [d for d in request.form.getlist("disciplina_ids") if str(d).strip()]
-                        if not disc_ids and etapa in ("FUNDAMENTAL", "MEDIO"):
+                        if not disc_ids and etapa_filtro in ("FUNDAMENTAL", "MEDIO"):
                             cursor.execute(
                                 """
                                 SELECT id FROM disciplinas
                                 WHERE COALESCE(ativo, TRUE) = TRUE
                                   AND COALESCE(is_custom, FALSE) = FALSE
-                                  AND (UPPER(COALESCE(etapa_ensino,'')) IN (%s, 'AMBOS', '') OR etapa_ensino IS NULL)
+                                  AND (
+                                    UPPER(COALESCE(etapa_ensino,'')) IN (%s, 'AMBOS', 'FUNDAMENTAL_1', 'FUNDAMENTAL_2', '')
+                                    OR etapa_ensino IS NULL
+                                  )
                                 ORDER BY nome
                                 """,
-                                (etapa,),
+                                (etapa_filtro if etapa_filtro != "FUNDAMENTAL" else "AMBOS",),
                             )
-                            disc_ids = [row[0] if isinstance(row, (list, tuple)) else row.get("id") for row in (cursor.fetchall() or [])]
-                        for did in disc_ids:
+                            # Se filtro AMBOS não pegar FUNDAMENTAL codes, busca mais ampla
+                            rows = cursor.fetchall() or []
+                            if not rows and etapa_filtro == "FUNDAMENTAL":
+                                cursor.execute(
+                                    """
+                                    SELECT id FROM disciplinas
+                                    WHERE COALESCE(ativo, TRUE) = TRUE
+                                      AND COALESCE(is_custom, FALSE) = FALSE
+                                    ORDER BY nome
+                                    """
+                                )
+                                rows = cursor.fetchall() or []
+                            disc_ids = [row[0] if isinstance(row, (list, tuple)) else row.get("id") for row in rows]
+
+                        # Grade manual do formulário (mesma para todas) ou padrão por matéria
+                        tem_grade_form = bool(request.form.getlist("grade_seg_qtd"))
+                        grade_form = _ler_grade_semanal() if tem_grade_form else []
+                        disc_grades = {}
+                        for idx, did in enumerate(disc_ids):
+                            cursor.execute("SELECT id, codigo, nome FROM disciplinas WHERE id = %s", (did,))
+                            drow = cursor.fetchone()
+                            if hasattr(drow, "keys"):
+                                dnome = drow.get("nome")
+                            else:
+                                dnome = drow[2] if drow else "Matéria"
+                            if grade_form:
+                                grade = grade_form
+                                aulas = sum(int(b.get("quantidade") or 0) for b in grade)
+                                minutos = int((grade[0] or {}).get("minutos") or 50)
+                            else:
+                                grade, minutos, aulas = _grade_de_padrao(
+                                    cursor, did, padrao_id=padrao_id, etapa=etapa_filtro
+                                )
+                            grade_json = json.dumps(grade, ensure_ascii=False)
+                            dias = ",".join(dict.fromkeys(b["dia"] for b in grade))
+                            carga = max(1, int(round(sum(int(b["quantidade"]) * int(b["minutos"]) for b in grade) / 60.0))) if grade else 1
                             cursor.execute(
                                 """
-                                INSERT INTO turma_disciplinas (turma_id, disciplina_id)
-                                VALUES (%s, %s)
-                                ON CONFLICT (turma_id, disciplina_id) DO NOTHING
+                                INSERT INTO turma_disciplinas (
+                                    turma_id, disciplina_id, tipo_frequencia, aulas_semana,
+                                    minutos_aula, vezes_mes, dias_semana, grade_json
+                                ) VALUES (%s, %s, 'semanal', %s, %s, 1, %s, %s)
+                                ON CONFLICT (turma_id, disciplina_id) DO UPDATE SET
+                                    tipo_frequencia = 'semanal',
+                                    aulas_semana = EXCLUDED.aulas_semana,
+                                    minutos_aula = EXCLUDED.minutos_aula,
+                                    dias_semana = EXCLUDED.dias_semana,
+                                    grade_json = EXCLUDED.grade_json
                                 """,
-                                (turma_id_nova, did),
+                                (turma_id_nova, did, aulas, minutos, dias, grade_json),
                             )
+                            # Mapeia professor: form prof_disc_<id> ou round-robin
+                            map_prof = limpar_campo(f"prof_disc_{did}") or (
+                                profs_extra[idx % len(profs_extra)] if profs_extra else prof_resp
+                            )
+                            if map_prof:
+                                cursor.execute(
+                                    """
+                                    INSERT INTO turma_professores (turma_id, funcionario_id, disciplina_id, papel)
+                                    SELECT %s, %s, %s, 'materia'
+                                    WHERE NOT EXISTS (
+                                        SELECT 1 FROM turma_professores
+                                        WHERE turma_id = %s AND funcionario_id = %s AND disciplina_id = %s
+                                    )
+                                    """,
+                                    (turma_id_nova, map_prof, did, turma_id_nova, map_prof, did),
+                                )
+                            disc_grades[did] = {
+                                "nome": dnome,
+                                "grade": grade,
+                                "professor_id": map_prof,
+                            }
+
+                        prof_por_disc = {str(k): v.get("professor_id") for k, v in disc_grades.items()}
+                        n_rotinas = _criar_rotinas_turma(
+                            cursor,
+                            turma_id_nova,
+                            nome_turma,
+                            turno,
+                            disc_grades,
+                            prof_por_disc,
+                            ano_letivo,
+                        )
                         conexao.commit()
-                        flash("✅ Turma cadastrada com sucesso!", "success")
+                        msg = "✅ Turma cadastrada com grade de horários."
+                        if n_rotinas:
+                            msg += f" {n_rotinas} aula(s) inserida(s) no calendário dos professores."
+                        flash(msg, "success")
+
+                    elif acao == "salvar_carga_padrao":
+                        nome = limpar_campo("padrao_nome") or "Padrão da escola"
+                        etapa_p = (limpar_campo("padrao_etapa") or "FUNDAMENTAL").upper()
+                        minutos_p = request.form.get("padrao_minutos", type=int) or 50
+                        matriz = {}
+                        for chave in ("LP", "MAT", "CIE", "HIS", "GEO", "ART", "EF", "ER", "ING"):
+                            val = request.form.get(f"aulas_{chave}", type=int)
+                            if val and val > 0:
+                                matriz[chave] = val
+                        if not matriz:
+                            raise ValueError("Informe ao menos uma matéria com aulas por semana.")
+                        cursor.execute(
+                            """
+                            INSERT INTO carga_horaria_padroes (nome, etapa, minutos_aula, matriz_json, ativo)
+                            VALUES (%s, %s, %s, %s, TRUE)
+                            """,
+                            (nome[:120], etapa_p, minutos_p, json.dumps(matriz)),
+                        )
+                        conexao.commit()
+                        flash("Padrão de carga horária salvo. Use-o ao criar turmas.", "success")
 
                     elif acao in ["vincular_aluno", "incluir_aluno"]:
                         turma_id = limpar_campo("turma_id")
@@ -8916,6 +9240,15 @@ def pagina_pedagogico():
     data_chamada = request.args.get("data_chamada") or date.today().isoformat()
     disc_chamada = request.args.get("disc_chamada") or "__todas__"
     materia_editar_id = request.args.get("editar", type=int)
+    aluno_sel_id = request.args.get("aluno_sel", type=int)
+    painel_aluno = request.args.get("painel_aluno") or "resumo"
+    cargas_padrao = []
+    aluno_painel = None
+    aluno_notas = []
+    aluno_faltas = []
+    aluno_turmas = []
+    aluno_disciplinas = []
+    resumo_faltas = {"presente": 0, "falta": 0, "justificada": 0}
 
     garantir_tabelas_pedagogicas()
     conexao = obter_conexao()
@@ -9059,6 +9392,73 @@ def pagina_pedagogico():
                         else:
                             if discs.get(disc_chamada):
                                 presenca_aluno[aid] = discs.get(disc_chamada)
+
+                try:
+                    cargas_padrao = _listar_cargas_padrao(cursor)
+                except Exception:
+                    cargas_padrao = []
+
+                if aluno_sel_id:
+                    cursor.execute(
+                        """
+                        SELECT id, nome_completo, matricula, foto_url, data_nascimento,
+                               COALESCE(NULLIF(TRIM(status), ''), 'ativo') AS status
+                        FROM alunos WHERE id = %s
+                        """,
+                        (aluno_sel_id,),
+                    )
+                    aluno_painel = cursor.fetchone()
+                    if aluno_painel:
+                        cursor.execute(
+                            """
+                            SELECT t.id, t.nome, t.ano_letivo, t.turno, f.nome_completo AS professor
+                            FROM turma_alunos ta
+                            JOIN turmas t ON t.id = ta.turma_id
+                            LEFT JOIN funcionarios f ON f.id = t.professor_responsavel_id
+                            WHERE ta.aluno_id = %s
+                            ORDER BY t.nome
+                            """,
+                            (aluno_sel_id,),
+                        )
+                        aluno_turmas = list(cursor.fetchall() or [])
+                        cursor.execute(
+                            """
+                            SELECT DISTINCT d.nome
+                            FROM turma_alunos ta
+                            JOIN turma_disciplinas td ON td.turma_id = ta.turma_id
+                            JOIN disciplinas d ON d.id = td.disciplina_id
+                            WHERE ta.aluno_id = %s AND COALESCE(d.ativo, TRUE)
+                            ORDER BY d.nome
+                            """,
+                            (aluno_sel_id,),
+                        )
+                        aluno_disciplinas = [r["nome"] for r in (cursor.fetchall() or [])]
+                        cursor.execute(
+                            """
+                            SELECT id, materia, titulo_avaliacao, trimestre, nota, data_aplicacao, origem
+                            FROM provas_notas
+                            WHERE aluno_id = %s
+                            ORDER BY COALESCE(data_aplicacao, CURRENT_DATE) DESC, id DESC
+                            LIMIT 40
+                            """,
+                            (aluno_sel_id,),
+                        )
+                        aluno_notas = list(cursor.fetchall() or [])
+                        cursor.execute(
+                            """
+                            SELECT data_aula, status, disciplina, observacao
+                            FROM frequencia
+                            WHERE aluno_id = %s
+                            ORDER BY data_aula DESC
+                            LIMIT 60
+                            """,
+                            (aluno_sel_id,),
+                        )
+                        aluno_faltas = list(cursor.fetchall() or [])
+                        for row in aluno_faltas:
+                            st = (row.get("status") or "").lower()
+                            if st in resumo_faltas:
+                                resumo_faltas[st] += 1
         finally:
             conexao.close()
 
@@ -9077,13 +9477,22 @@ def pagina_pedagogico():
         quadros_por_turma=quadros_por_turma,
         provas_por_turma=provas_por_turma,
         busca_aluno=request.args.get("aluno", "").strip(),
+        aluno_sel=aluno_sel_id,
+        aluno_painel=aluno_painel,
+        aluno_notas=aluno_notas,
+        aluno_faltas=aluno_faltas,
+        aluno_turmas=aluno_turmas,
+        aluno_disciplinas=aluno_disciplinas,
+        resumo_faltas=resumo_faltas,
+        painel_aluno=painel_aluno,
+        cargas_padrao=cargas_padrao,
         dias_semana_opcoes=DIAS_SEMANA_OPCOES,
         categorias_materia=CATEGORIAS_MATERIA,
         etapas_materia=ETAPAS_MATERIA,
         materia_editar=materia_editar,
         aba=(
             request.args.get("aba")
-            or ("aluno" if request.args.get("aluno") else "turmas")
+            or ("aluno" if (request.args.get("aluno") or request.args.get("aluno_sel")) else "turmas")
         ),
         turma_sel=request.args.get("turma_sel", type=int),
         painel=request.args.get("painel") or "horas",
