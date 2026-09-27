@@ -1157,15 +1157,28 @@ def pdf_auditoria(escola, registros):
     pdf.secao("Movimentos")
     linhas = []
     for item in registros or []:
+        quem = item.get("usuario_nome") or "—"
+        login = item.get("login") or item.get("usuario_login") or item.get("usuario_email") or ""
+        if login:
+            quem = f"{quem} ({login})"
+        detalhe = item.get("detalhe_texto") or ""
+        if not detalhe and item.get("mudancas"):
+            partes = []
+            for m in item["mudancas"][:8]:
+                partes.append(f"{m.get('campo')}: {m.get('antes')} → {m.get('depois')}")
+            detalhe = " · ".join(partes)
+        resumo = item.get("resumo") or "—"
+        if detalhe:
+            resumo = f"{resumo} | {detalhe}"[:180]
         linhas.append([
             item.get("quando") or _data_br(item.get("criado_em")),
-            item.get("usuario_nome") or item.get("usuario_email") or "—",
+            quem[:40],
             item.get("tipo_rotulo") or item.get("tipo") or "—",
             item.get("modulo") or "—",
-            item.get("resumo") or "—",
+            resumo,
         ])
     if linhas:
-        pdf.tabela(["Quando", "Quem", "Tipo", "Módulo", "Resumo"], linhas, [32, 36, 28, 28, 66])
+        pdf.tabela(["Quando", "Quem (login)", "Tipo", "Módulo", "Resumo / alterações"], linhas, [28, 42, 24, 24, 72])
     else:
         pdf.paragrafo("Nenhum movimento neste filtro.")
     return _saida(pdf)

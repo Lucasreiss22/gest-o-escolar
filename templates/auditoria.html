@@ -14,7 +14,7 @@
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
         <h2>Auditoria</h2>
-        <p class="hint">Inclusões, alterações e exclusões de {{ escola_nome or "esta escola" }}. Visível apenas para o administrador.</p>
+        <p class="hint">Inclusões, alterações e exclusões de {{ escola_nome or "esta escola" }}. Toque em um registro para ver o que mudou, o usuário, o login e a hora. Visível apenas para o administrador.</p>
         <p style="margin:0 0 12px;">
             <a class="btn btn-primary" href="{{ url_for('relatorio_auditoria_pdf', tipo=tipo, busca=busca) }}">PDF da auditoria</a>
         </p>

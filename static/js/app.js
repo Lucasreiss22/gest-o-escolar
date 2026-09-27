@@ -635,3 +635,59 @@
         ligarHoraPickers();
     }
 })();
+
+/* Snapshot dos valores iniciais do formulário → auditoria "antes → depois" */
+(function () {
+    var IGNORAR = /^(auditoria_antes|acao|csrf_token|form_login|permanecer_logado)$/i;
+    var SENSIVEL = /senha|password|secret|token|codigo|arquivo|foto/i;
+
+    function valorCampo(campo) {
+        if (!campo || !campo.name) return null;
+        if (campo.disabled || campo.type === "file" || campo.type === "password") return null;
+        if (SENSIVEL.test(campo.name) || IGNORAR.test(campo.name)) return null;
+        if (campo.type === "checkbox" || campo.type === "radio") {
+            return campo.checked ? (campo.value || "on") : null;
+        }
+        if (campo.tagName === "SELECT" && campo.multiple) {
+            return Array.prototype.map.call(campo.selectedOptions, function (o) {
+                return o.value;
+            }).filter(Boolean).join(", ");
+        }
+        return campo.value;
+    }
+
+    function snapshotForm(form) {
+        if (!form || form.getAttribute("data-sem-auditoria") === "1") return;
+        if ((form.method || "get").toLowerCase() === "get") return;
+        if (form.querySelector('input[name="auditoria_antes"]')) return;
+        if (form.querySelector('input[type="password"]')) return;
+        var dados = {};
+        Array.prototype.forEach.call(form.elements || [], function (campo) {
+            if (!campo.name) return;
+            if (/_antes$|^antes_/.test(campo.name)) return;
+            var v = valorCampo(campo);
+            if (v === null || v === undefined || String(v).trim() === "") return;
+            if (Object.prototype.hasOwnProperty.call(dados, campo.name) && dados[campo.name]) {
+                dados[campo.name] = dados[campo.name] + ", " + v;
+            } else {
+                dados[campo.name] = String(v);
+            }
+        });
+        if (!Object.keys(dados).length) return;
+        var hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = "auditoria_antes";
+        hidden.value = JSON.stringify(dados);
+        form.appendChild(hidden);
+    }
+
+    function preparar() {
+        document.querySelectorAll("form").forEach(snapshotForm);
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", preparar);
+    } else {
+        preparar();
+    }
+})();

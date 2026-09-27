@@ -1,22 +1,83 @@
 {% if registros %}
 <div class="audit-lista">
     {% for item in registros %}
-    <article class="audit-item">
+    <article class="audit-item" data-audit-item tabindex="0" role="button" aria-expanded="false">
         <div class="audit-top">
             <span class="audit-tipo {{ item.tipo }}">{{ item.tipo_rotulo }}</span>
             <time>{{ item.quando }}</time>
         </div>
         <strong>{{ item.resumo }}</strong>
         <p class="audit-meta">
-            {{ item.usuario_nome or item.usuario_email or "Usuário" }}
-            {% if item.usuario_email and item.usuario_nome %} · {{ item.usuario_email }}{% endif %}
+            <span>{{ item.usuario_nome or "Usuário" }}</span>
+            {% if item.login %} · login <code>{{ item.login }}</code>{% endif %}
             {% if item.modulo %} · {{ item.modulo }}{% endif %}
-            {% if mostrar_escola and item.escola_nome %} · {{ item.escola_nome }}{% endif %}
+            {% if mostrar_escola and item.escola_nome %} · <strong>{{ item.escola_nome }}</strong>{% endif %}
         </p>
-        {% if item.detalhe %}<p class="audit-detalhe">{{ item.detalhe }}</p>{% endif %}
+        {% if item.detalhe_texto and not item.mudancas %}
+        <p class="audit-detalhe-preview">{{ item.detalhe_texto[:140] }}{% if item.detalhe_texto|length > 140 %}…{% endif %}</p>
+        {% elif item.mudancas %}
+        <p class="audit-detalhe-preview">{{ item.mudancas|length }} campo(s) · toque para ver o que mudou</p>
+        {% else %}
+        <p class="audit-detalhe-preview">Toque para ver detalhes</p>
+        {% endif %}
+
+        <div class="audit-detalhe-full" hidden onclick="event.stopPropagation()">
+            <h4>Detalhes da movimentação</h4>
+            <dl class="audit-dl">
+                <div><dt>Quando</dt><dd>{{ item.quando or '—' }}</dd></div>
+                <div><dt>Usuário</dt><dd>{{ item.usuario_nome or '—' }}</dd></div>
+                <div><dt>Login</dt><dd>{{ item.login or item.usuario_email or '—' }}</dd></div>
+                <div><dt>Tipo</dt><dd>{{ item.tipo_rotulo }}</dd></div>
+                <div><dt>Módulo</dt><dd>{{ item.modulo or '—' }}</dd></div>
+                {% if mostrar_escola or item.escola_nome %}
+                <div><dt>Escola</dt><dd>{{ item.escola_nome or '—' }}{% if item.escola_id %} (id {{ item.escola_id }}){% endif %}</dd></div>
+                {% endif %}
+            </dl>
+            {% if item.mudancas %}
+            <div class="table-wrap">
+                <table class="audit-diff">
+                    <thead>
+                        <tr><th>Campo</th><th>Antes</th><th>Depois</th></tr>
+                    </thead>
+                    <tbody>
+                    {% for m in item.mudancas %}
+                    <tr>
+                        <td>{{ m.campo }}</td>
+                        <td class="antes">{{ m.antes }}</td>
+                        <td class="depois">{{ m.depois }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% elif item.detalhe_texto %}
+            <p class="audit-detalhe">{{ item.detalhe_texto }}</p>
+            {% else %}
+            <p class="hint">Sem detalhe adicional registrado neste movimento.</p>
+            {% endif %}
+        </div>
     </article>
     {% endfor %}
 </div>
+<script>
+(function () {
+    document.querySelectorAll('[data-audit-item]').forEach(function (el) {
+        function toggle() {
+            var aberto = el.classList.toggle('aberto');
+            el.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+            var full = el.querySelector('.audit-detalhe-full');
+            if (full) full.hidden = !aberto;
+        }
+        el.addEventListener('click', toggle);
+        el.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggle();
+            }
+        });
+    });
+})();
+</script>
 {% else %}
 <p class="hint">Nenhuma inclusão, alteração ou exclusão registrada com esse filtro.</p>
 {% endif %}

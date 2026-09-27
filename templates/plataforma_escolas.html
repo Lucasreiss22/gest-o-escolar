@@ -382,7 +382,7 @@
         {% if aba == 'auditoria' %}
         <div class="card-box">
             <h3>Auditoria do sistema</h3>
-            <p class="hint">Tudo que foi incluído, alterado ou excluído nas escolas e nesta plataforma, com data, hora e usuário.</p>
+            <p class="hint">Inclusões, alterações e exclusões de todas as escolas. Filtre por escola para conferir um caso específico. Toque em um registro para ver o que mudou, quem fez e o login.</p>
             <form class="audit-filtros" method="GET" action="{{ url_for('plataforma_escolas') }}">
                 <input type="hidden" name="aba" value="auditoria">
                 <div>

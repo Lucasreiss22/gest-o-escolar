@@ -1167,15 +1167,34 @@ def gravar_auditoria(resposta):
             bruto = (request.form.get("escola_id") or "").strip()
             if bruto.isdigit():
                 escola_id = int(bruto)
+        escola_nome = session.get("escola_nome") or ""
+        if escola_id and (not escola_nome or session.get("super_admin")):
+            try:
+                esc = buscar_escola_por_id(escola_id)
+                if esc:
+                    nome_esc = esc.get("nome") if hasattr(esc, "get") else None
+                    if nome_esc:
+                        escola_nome = nome_esc
+            except Exception:
+                pass
+        if not escola_nome:
+            escola_nome = "Plataforma" if session.get("super_admin") else ""
+        login = (
+            session.get("usuario_email")
+            or session.get("login_email")
+            or session.get("plataforma_email")
+            or ""
+        )
         registrar_auditoria(
             escola_id,
-            session.get("escola_nome") or ("Plataforma" if session.get("super_admin") else ""),
-            session.get("usuario_nome"),
-            session.get("usuario_email"),
+            escola_nome,
+            session.get("usuario_nome") or login or "Usuário",
+            session.get("usuario_email") or login,
             tipo,
             modulo_da_rota(endpoint),
             resumo,
             detalhe,
+            usuario_login=login,
         )
     except Exception as erro:
         print(f"auditoria: {erro}")
