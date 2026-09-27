@@ -1647,39 +1647,77 @@ def pdf_contracheque(escola, mes_label, item):
     return _saida(pdf)
 
 
-def pdf_ponto(escola, colaborador, periodo_rotulo, registros, faltas=None, atestados=None):
+def pdf_ponto(escola, colaborador, periodo_rotulo, registros, faltas=None, atestados=None, resumo=None):
     pdf = RelatorioPDF("Relatório de ponto")
     pdf.add_page()
     pdf.paragrafo(f"{escola or 'Gestão Escolar'} · {colaborador or 'Colaborador'}")
     pdf.linha("Período", periodo_rotulo or "—")
-    pdf.secao("Batidas")
+    if resumo:
+        pdf.secao("Resumo do período")
+        pdf.linha("Jornada esperada/dia", resumo.get("jornada_fmt") or "—")
+        pdf.linha("Horas positivas", resumo.get("positivo_fmt") or "0h00")
+        pdf.linha("Horas negativas", resumo.get("negativo_fmt") or "0h00")
+        pdf.linha("Saldo líquido (banco)", resumo.get("liquido_fmt") or "0h00", negrito=True)
+        pdf.linha("Total presença (entrada→saída)", resumo.get("presenca_fmt") or "—")
+        pdf.linha("Total em café", resumo.get("cafe_fmt") or "—")
+        pdf.linha("Total em almoço", resumo.get("almoco_fmt") or "—")
+        pdf.linha("Total horas trabalhadas", resumo.get("trabalhado_fmt") or "—")
+
+    pdf.secao("Batidas detalhadas")
     linhas = []
     for item in registros or []:
         data = item.get("data_ref")
         if hasattr(data, "strftime"):
             data = data.strftime("%d/%m/%Y")
-        exc_cafe = item.get("excesso_cafe_min") or 0
-        exc_alm = item.get("excesso_almoco_min") or 0
         linhas.append([
             data or "—",
             item.get("entrada") or "—",
             item.get("cafe_ida") or "—",
             item.get("cafe_volta") or "—",
-            f"+{exc_cafe}m" if exc_cafe else "—",
+            item.get("cafe_dur_fmt") or "—",
             item.get("almoco") or "—",
             item.get("almoco_volta") or item.get("cafe") or "—",
-            f"+{exc_alm}m" if exc_alm else "—",
+            item.get("almoco_dur_fmt") or "—",
             item.get("saida") or "—",
         ])
     if linhas:
         pdf.tabela(
-            ["Data", "Cheguei", "Café↓", "Café↑", "+Café", "Almoço↓", "Almoço↑", "+Almoço", "Saí"],
+            ["Data", "Entrada", "Café↓", "Café↑", "Café", "Almoço↓", "Almoço↑", "Almoço", "Saída"],
             linhas,
-            [20, 18, 18, 18, 16, 18, 18, 18, 18],
+            [20, 18, 16, 16, 16, 18, 18, 18, 18],
         )
     else:
         pdf.paragrafo("Nenhuma batida neste período.")
-    pdf.paragrafo("Colunas +Café/+Almoço: minutos além do prazo estipulado para o colaborador.")
+
+    pdf.secao("Presença e banco de horas por dia")
+    linhas = []
+    for item in registros or []:
+        data = item.get("data_ref")
+        if hasattr(data, "strftime"):
+            data = data.strftime("%d/%m/%Y")
+        linhas.append([
+            data or "—",
+            item.get("presenca_fmt") or "—",
+            item.get("trabalhado_fmt") or "—",
+            item.get("esperado_fmt") or "—",
+            item.get("saldo_fmt") or "—",
+            (f"+{item.get('excesso_cafe_min')}m" if item.get("excesso_cafe_min") else "—"),
+            (f"+{item.get('excesso_almoco_min')}m" if item.get("excesso_almoco_min") else "—"),
+        ])
+    if linhas:
+        pdf.tabela(
+            ["Data", "Presença", "Trabalhado", "Esperado", "Saldo", "+Café", "+Almoço"],
+            linhas,
+            [24, 24, 26, 24, 24, 20, 22],
+        )
+    else:
+        pdf.paragrafo("Sem dias fechados (entrada e saída) neste período.")
+
+    pdf.paragrafo(
+        "Presença = saída − entrada. Trabalhado = presença − tempo de café − tempo de almoço. "
+        "Saldo = trabalhado − jornada do dia. +Café/+Almoço = minutos além do prazo."
+    )
+
     pdf.secao("Faltas e justificativas")
     linhas = []
     for item in faltas or []:

@@ -80,6 +80,7 @@
             <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='dia', data=data_ref) }}">PDF do dia</a>
             <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='semana', data=data_ref) }}">PDF da semana</a>
             <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='mes', data=data_ref) }}">PDF do mês</a>
+            <a class="btn btn-primary" href="{{ url_for('ponto_relatorio_pdf', periodo='banco', data=mes_filtro + '-01') }}">PDF banco de horas</a>
             {% endif %}
         </div>
 
@@ -362,10 +363,38 @@
                         <input type="month" name="mes" value="{{ mes_filtro }}">
                     </label>
                     <button class="btn btn-primary" type="submit">Filtrar</button>
-                    {% if pessoa %}
-                    <a class="btn btn-secondary" href="{{ url_for('ponto_relatorio_pdf', periodo='mes', data=mes_filtro + '-01') }}">PDF mensal (meu)</a>
-                    {% endif %}
                 </form>
+            </div>
+
+            <div class="card-box">
+                <h3 style="margin-top:0;">Relatórios PDF da equipe</h3>
+                <p class="hint">Selecione o colaborador e baixe o PDF com batidas (entrada, café, almoço, saída), totais de presença e banco de horas.</p>
+                <div class="form-grid">
+                    <div class="form-group" style="grid-column:1/-1;">
+                        <label>Colaborador</label>
+                        <select id="sel-pdf-func">
+                            <option value="">Selecione</option>
+                            {% for p in equipe %}
+                            <option value="{{ p.id }}">{{ p.nome_completo }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Data (dia / semana)</label>
+                        <input type="date" id="pdf-data" value="{{ data_ref }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Mês (mês / banco)</label>
+                        <input type="month" id="pdf-mes" value="{{ mes_filtro }}">
+                    </div>
+                </div>
+                <div class="acoes" style="margin-top:12px;">
+                    <a class="btn btn-secondary" id="btn-pdf-dia" href="#">PDF do dia</a>
+                    <a class="btn btn-secondary" id="btn-pdf-semana" href="#">PDF da semana</a>
+                    <a class="btn btn-secondary" id="btn-pdf-mes" href="#">PDF do mês</a>
+                    <a class="btn btn-primary" id="btn-pdf-banco" href="#">PDF banco de horas</a>
+                </div>
+                <p class="hint" id="pdf-aviso" style="margin-top:10px;">Selecione um colaborador para liberar os PDFs.</p>
             </div>
 
             <div class="card-box">
@@ -650,6 +679,50 @@
                 if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
             });
         });
+
+        (function setupPdfGestao() {
+            var selPdf = document.getElementById('sel-pdf-func');
+            var dataPdf = document.getElementById('pdf-data');
+            var mesPdf = document.getElementById('pdf-mes');
+            var aviso = document.getElementById('pdf-aviso');
+            var base = {{ url_for('ponto_relatorio_pdf')|tojson }};
+            function atualizar() {
+                var fid = selPdf && selPdf.value;
+                var dataDia = (dataPdf && dataPdf.value) || '';
+                var mes = (mesPdf && mesPdf.value) || '';
+                var dataMes = mes ? (mes + '-01') : dataDia;
+                var botoes = [
+                    ['btn-pdf-dia', 'dia', dataDia],
+                    ['btn-pdf-semana', 'semana', dataDia],
+                    ['btn-pdf-mes', 'mes', dataMes],
+                    ['btn-pdf-banco', 'banco', dataMes]
+                ];
+                botoes.forEach(function (item) {
+                    var el = document.getElementById(item[0]);
+                    if (!el) return;
+                    if (!fid) {
+                        el.href = '#';
+                        el.style.opacity = '0.45';
+                        el.onclick = function (e) { e.preventDefault(); };
+                        return;
+                    }
+                    el.style.opacity = '1';
+                    el.onclick = null;
+                    el.href = base + '?periodo=' + encodeURIComponent(item[1])
+                        + '&data=' + encodeURIComponent(item[2] || '')
+                        + '&funcionario_id=' + encodeURIComponent(fid);
+                });
+                if (aviso) {
+                    aviso.textContent = fid
+                        ? 'PDFs prontos para o colaborador selecionado.'
+                        : 'Selecione um colaborador para liberar os PDFs.';
+                }
+            }
+            if (selPdf) selPdf.addEventListener('change', atualizar);
+            if (dataPdf) dataPdf.addEventListener('change', atualizar);
+            if (mesPdf) mesPdf.addEventListener('change', atualizar);
+            atualizar();
+        })();
     })();
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

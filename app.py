@@ -11233,13 +11233,17 @@ def ponto_relatorio_pdf():
         flash(str(e), "danger")
         return redirect(url_for("ponto"))
     periodo = (request.args.get("periodo") or "mes").strip().lower()
-    if periodo not in {"dia", "semana", "mes"}:
+    if periodo not in {"dia", "semana", "mes", "banco"}:
         periodo = "mes"
     data_base = (request.args.get("data") or date.today().isoformat()).strip()
+    # banco de horas usa o mês da data/mês informado
+    periodo_intervalo = "mes" if periodo == "banco" else periodo
     try:
-        inicio, fim, rotulo = _intervalo_relatorio_ponto(periodo, data_base)
+        inicio, fim, rotulo = _intervalo_relatorio_ponto(periodo_intervalo, data_base)
     except Exception:
         inicio, fim, rotulo = _intervalo_relatorio_ponto("mes")
+    if periodo == "banco":
+        rotulo = f"Banco de horas — {rotulo}"
 
     funcionario_id = request.args.get("funcionario_id", type=int)
     gestao = _pode_gestao_ponto()
@@ -11248,6 +11252,9 @@ def ponto_relatorio_pdf():
         funcionario_id = meu_id
     elif not funcionario_id:
         funcionario_id = meu_id
+    if not funcionario_id:
+        flash("Selecione o colaborador para gerar o PDF.", "warning")
+        return redirect(url_for("ponto") + "#gestao")
 
     conexao = obter_conexao()
     if not conexao:
@@ -11265,6 +11272,8 @@ def ponto_relatorio_pdf():
             if not pessoa:
                 flash("Colaborador não encontrado.", "danger")
                 return redirect(url_for("ponto"))
+            jornada = _ler_jornada_ponto(cursor, funcionario_id)
+            agora = _agora_ponto_br()
             cursor.execute(
                 """
                 SELECT data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida,
@@ -11277,8 +11286,37 @@ def ponto_relatorio_pdf():
                 (funcionario_id, inicio, fim),
             )
             registros = []
+            tot_presenca = 0
+            tot_cafe = 0
+            tot_almoco = 0
+            tot_trabalhado = 0
+            banco_pos = 0
+            banco_neg = 0
             for item in cursor.fetchall() or []:
                 m = _mapa_registro_ponto(item)
+                dref = item["data_ref"]
+                if not hasattr(dref, "year"):
+                    dref = datetime.strptime(str(dref)[:10], "%Y-%m-%d").date()
+                cafe_min = 0
+                almoco_min = 0
+                if m.get("cafe_ida") and m.get("cafe_volta"):
+                    cafe_min = _minutos_entre_ponto(m["cafe_ida"], m["cafe_volta"], dref, agora) or 0
+                if m.get("almoco") and m.get("almoco_volta"):
+                    almoco_min = _minutos_entre_ponto(m["almoco"], m["almoco_volta"], dref, agora) or 0
+                presenca_min = 0
+                if m.get("entrada") and m.get("saida"):
+                    presenca_min = _minutos_entre_ponto(m["entrada"], m["saida"], dref, agora) or 0
+                calc = _saldo_dia_ponto(m, jornada, dref, agora)
+                saldo = int(calc.get("saldo_min") or 0)
+                if not calc.get("incompleto"):
+                    tot_presenca += presenca_min
+                    tot_cafe += cafe_min
+                    tot_almoco += almoco_min
+                    tot_trabalhado += int(calc.get("trabalhado_min") or 0)
+                    if saldo > 0:
+                        banco_pos += saldo
+                    elif saldo < 0:
+                        banco_neg += abs(saldo)
                 registros.append(
                     {
                         "data_ref": item["data_ref"],
@@ -11290,8 +11328,17 @@ def ponto_relatorio_pdf():
                         "saida": m["saida"] or "—",
                         "excesso_cafe_min": int(item.get("excesso_cafe_min") or 0),
                         "excesso_almoco_min": int(item.get("excesso_almoco_min") or 0),
+                        "cafe_dur_fmt": _fmt_minutos_banco(cafe_min) if cafe_min else "—",
+                        "almoco_dur_fmt": _fmt_minutos_banco(almoco_min) if almoco_min else "—",
+                        "presenca_fmt": _fmt_minutos_banco(presenca_min) if presenca_min else "—",
+                        "trabalhado_fmt": _fmt_minutos_banco(calc.get("trabalhado_min") or 0)
+                        if not calc.get("incompleto")
+                        else "—",
+                        "esperado_fmt": _fmt_minutos_banco(calc.get("esperado_min") or jornada),
+                        "saldo_fmt": _fmt_minutos_banco(saldo) if not calc.get("incompleto") else "pendente",
                     }
                 )
+            # Faltas confirmadas no período entram no banco negativo
             cursor.execute(
                 """
                 SELECT data_ref, tipo, motivo, status, descontar
@@ -11302,6 +11349,43 @@ def ponto_relatorio_pdf():
                 (funcionario_id, inicio, fim),
             )
             faltas = [dict(r) for r in (cursor.fetchall() or [])]
+            for fa in faltas:
+                if fa.get("status") != "confirmada":
+                    continue
+                dref = fa.get("data_ref")
+                if not hasattr(dref, "year"):
+                    dref = datetime.strptime(str(dref)[:10], "%Y-%m-%d").date()
+                chave = dref.isoformat()
+                tem_fechado = any(
+                    (str(r.get("data_ref"))[:10] == chave)
+                    and r.get("entrada") not in (None, "", "—")
+                    and r.get("saida") not in (None, "", "—")
+                    for r in registros
+                )
+                if not tem_fechado:
+                    banco_neg += jornada
+                    registros.append(
+                        {
+                            "data_ref": dref,
+                            "entrada": "—",
+                            "cafe_ida": "—",
+                            "cafe_volta": "—",
+                            "almoco": "—",
+                            "almoco_volta": "—",
+                            "saida": "—",
+                            "excesso_cafe_min": 0,
+                            "excesso_almoco_min": 0,
+                            "cafe_dur_fmt": "—",
+                            "almoco_dur_fmt": "—",
+                            "presenca_fmt": "—",
+                            "trabalhado_fmt": "0h00",
+                            "esperado_fmt": _fmt_minutos_banco(jornada),
+                            "saldo_fmt": _fmt_minutos_banco(-jornada) + " (falta)",
+                        }
+                    )
+            registros.sort(
+                key=lambda r: str(r.get("data_ref") or "")
+            )
             cursor.execute(
                 """
                 SELECT titulo, status, data_inicio, data_fim, criado_em
@@ -11316,6 +11400,16 @@ def ponto_relatorio_pdf():
                 (funcionario_id, fim, inicio, inicio, fim),
             )
             atestados = [dict(r) for r in (cursor.fetchall() or [])]
+            resumo = {
+                "jornada_fmt": _fmt_minutos_banco(jornada),
+                "positivo_fmt": _fmt_minutos_banco(banco_pos),
+                "negativo_fmt": _fmt_minutos_banco(-banco_neg if banco_neg else 0),
+                "liquido_fmt": _fmt_minutos_banco(banco_pos - banco_neg),
+                "presenca_fmt": _fmt_minutos_banco(tot_presenca),
+                "cafe_fmt": _fmt_minutos_banco(tot_cafe),
+                "almoco_fmt": _fmt_minutos_banco(tot_almoco),
+                "trabalhado_fmt": _fmt_minutos_banco(tot_trabalhado),
+            }
         buffer = pdf_ponto(
             escola,
             pessoa.get("nome_completo"),
@@ -11323,8 +11417,11 @@ def ponto_relatorio_pdf():
             registros,
             faltas,
             atestados,
+            resumo=resumo,
         )
-        nome = secure_filename(f"ponto_{periodo}_{pessoa.get('nome_completo') or funcionario_id}.pdf")
+        nome = secure_filename(
+            f"ponto_{periodo}_{pessoa.get('nome_completo') or funcionario_id}.pdf"
+        )
         return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=nome)
     finally:
         conexao.close()
