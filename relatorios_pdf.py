@@ -1658,23 +1658,28 @@ def pdf_ponto(escola, colaborador, periodo_rotulo, registros, faltas=None, atest
         data = item.get("data_ref")
         if hasattr(data, "strftime"):
             data = data.strftime("%d/%m/%Y")
+        exc_cafe = item.get("excesso_cafe_min") or 0
+        exc_alm = item.get("excesso_almoco_min") or 0
         linhas.append([
             data or "—",
             item.get("entrada") or "—",
             item.get("cafe_ida") or "—",
             item.get("cafe_volta") or "—",
+            f"+{exc_cafe}m" if exc_cafe else "—",
             item.get("almoco") or "—",
             item.get("almoco_volta") or item.get("cafe") or "—",
+            f"+{exc_alm}m" if exc_alm else "—",
             item.get("saida") or "—",
         ])
     if linhas:
         pdf.tabela(
-            ["Data", "Cheguei", "Café↓", "Café↑", "Almoço↓", "Almoço↑", "Saí"],
+            ["Data", "Cheguei", "Café↓", "Café↑", "+Café", "Almoço↓", "Almoço↑", "+Almoço", "Saí"],
             linhas,
-            [24, 22, 22, 22, 24, 24, 22],
+            [20, 18, 18, 18, 16, 18, 18, 18, 18],
         )
     else:
         pdf.paragrafo("Nenhuma batida neste período.")
+    pdf.paragrafo("Colunas +Café/+Almoço: minutos além do prazo estipulado para o colaborador.")
     pdf.secao("Faltas e justificativas")
     linhas = []
     for item in faltas or []:

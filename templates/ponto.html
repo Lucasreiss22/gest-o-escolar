@@ -41,6 +41,15 @@
         .contador .titulo { font-weight: 700; color: #0f172a; margin-bottom: 4px; }
         .contador .tempo { font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; }
         .contador .meta { color: #64748b; font-size: .85rem; margin-top: 4px; }
+        .contador .excesso { color: #b91c1c; font-weight: 700; margin-top: 6px; font-size: .9rem; }
+        .excesso-resumo { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; color: #9a3412; }
+        .preset-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+        .preset-row button {
+            border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 8px; padding: 6px 10px;
+            cursor: pointer; font-size: .8rem; font-weight: 700; color: #334155;
+        }
+        .preset-row button:hover { background: #e2e8f0; }
+        .equipe-tempos td form { margin: 0; }
         .sec-gestao { border-top: 2px solid #e2e8f0; margin-top: 28px; padding-top: 8px; }
         .tabs-ancora { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
     </style>
@@ -75,23 +84,36 @@
 
         {% if pessoa %}
         <div id="meu-ponto">
-        {% if contadores %}
         <div class="card-box">
-            <h3 style="margin-top:0;">Tempo restante</h3>
-            <p class="hint">Seus limites: café {{ minutos_cafe }} min · almoço {{ minutos_almoco }} min.</p>
+            <h3 style="margin-top:0;">Cronômetro — café e almoço</h3>
+            <p class="hint">Limites deste colaborador: café {{ minutos_cafe }} min · almoço {{ minutos_almoco }} min. O que passar do prazo é computado automaticamente.</p>
+            {% if contadores %}
             {% for c in contadores %}
             <div class="contador {% if c.esgotado %}esgotado{% endif %}" data-restante="{{ c.restante_seg }}">
-                <div class="titulo">{{ c.rotulo }}</div>
+                <div class="titulo">{{ c.rotulo }} em andamento</div>
                 <div class="tempo" data-display>
-                    {% if c.esgotado %}Tempo esgotado{% else %}—{% endif %}
+                    {% if c.esgotado %}Passou do prazo{% else %}—{% endif %}
                 </div>
                 <div class="meta">
-                    Saída {{ c.inicio }} · limite {{ c.limite_min }} min · voltar até {{ c.fim_previsto }}
+                    Saiu às {{ c.inicio }} · limite {{ c.limite_min }} min · voltar até {{ c.fim_previsto }}
+                </div>
+                <div class="excesso" data-excesso style="{% if not c.esgotado %}display:none{% endif %}">
+                    {% if c.esgotado %}Excedeu o prazo — o sistema está computando o atraso.{% endif %}
                 </div>
             </div>
             {% endfor %}
+            {% else %}
+            <p class="hint">O cronômetro aparece quando você registra “Saí para o café” ou “Saí para o almoço”.</p>
+            {% endif %}
+            {% if excesso_cafe_hoje or excesso_almoco_hoje %}
+            <div class="excesso-resumo">
+                Hoje computado além do prazo:
+                {% if excesso_cafe_hoje %}<strong>{{ excesso_cafe_hoje }} min de café</strong>{% endif %}
+                {% if excesso_cafe_hoje and excesso_almoco_hoje %} · {% endif %}
+                {% if excesso_almoco_hoje %}<strong>{{ excesso_almoco_hoje }} min de almoço</strong>{% endif %}.
+            </div>
+            {% endif %}
         </div>
-        {% endif %}
 
         <div class="card-box">
             <h3 style="margin-top:0;">Batidas de hoje</h3>
@@ -136,8 +158,10 @@
                         <th>Cheguei</th>
                         <th>Café↓</th>
                         <th>Café↑</th>
+                        <th>+Café</th>
                         <th>Almoço↓</th>
                         <th>Almoço↑</th>
+                        <th>+Almoço</th>
                         <th>Saí</th>
                         <th></th>
                     </tr>
@@ -149,8 +173,10 @@
                     <td>{{ item.entrada or '—' }}</td>
                     <td>{{ item.cafe_ida or '—' }}</td>
                     <td>{{ item.cafe_volta or '—' }}</td>
+                    <td>{% if item.excesso_cafe_min %}{{ item.excesso_cafe_min }} min{% else %}—{% endif %}</td>
                     <td>{{ item.almoco or '—' }}</td>
                     <td>{{ item.almoco_volta or '—' }}</td>
+                    <td>{% if item.excesso_almoco_min %}{{ item.excesso_almoco_min }} min{% else %}—{% endif %}</td>
                     <td>{{ item.saida or '—' }}</td>
                     <td>
                         <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir este registro de ponto?');">
@@ -288,20 +314,22 @@
 
             <div class="card-box">
                 <h3 style="margin-top:0;">Tempos de café e almoço por colaborador</h3>
-                <p class="hint">Deixe em branco para usar o padrão da escola (café {{ padrao_cafe }} min · almoço {{ padrao_almoco }} min nas Configurações). Exemplos: 60, 90 ou 120 minutos de almoço.</p>
-                <form method="POST" class="form-grid">
+                <p class="hint">Selecione o colaborador e defina o tempo dele. Almoço comum: 1h, 1h30 ou 2h. Em branco = padrão da escola (café {{ padrao_cafe }} min · almoço {{ padrao_almoco }} min).</p>
+                <form method="POST" class="form-grid" id="form-tempos">
                     <input type="hidden" name="acao" value="salvar_tempos_funcionario">
-                    <div class="form-group">
+                    <div class="form-group" style="grid-column:1/-1;">
                         <label>Colaborador</label>
                         <select name="funcionario_id" id="sel-tempos-func" required>
-                            <option value="">Selecione</option>
+                            <option value="">Selecione o colaborador</option>
                             {% for p in equipe %}
                             <option value="{{ p.id }}"
                                     data-cafe="{{ p.ponto_minutos_cafe if p.ponto_minutos_cafe is not none else '' }}"
                                     data-almoco="{{ p.ponto_minutos_almoco if p.ponto_minutos_almoco is not none else '' }}">
                                 {{ p.nome_completo }}
                                 {% if p.ponto_minutos_cafe is not none or p.ponto_minutos_almoco is not none %}
-                                    (café {{ p.ponto_minutos_cafe or 'padrão' }} · almoço {{ p.ponto_minutos_almoco or 'padrão' }})
+                                    — café {{ p.ponto_minutos_cafe or 'padrão' }} min · almoço {{ p.ponto_minutos_almoco or 'padrão' }} min
+                                {% else %}
+                                    — ainda no padrão da escola
                                 {% endif %}
                             </option>
                             {% endfor %}
@@ -309,16 +337,58 @@
                     </div>
                     <div class="form-group">
                         <label>Café (minutos)</label>
-                        <input type="number" name="ponto_minutos_cafe" id="inp-cafe" min="1" max="180" placeholder="Padrão da escola">
+                        <input type="number" name="ponto_minutos_cafe" id="inp-cafe" min="1" max="180" placeholder="Padrão {{ padrao_cafe }}">
+                        <div class="preset-row" data-target="inp-cafe">
+                            <button type="button" data-min="10">10 min</button>
+                            <button type="button" data-min="15">15 min</button>
+                            <button type="button" data-min="20">20 min</button>
+                            <button type="button" data-min="30">30 min</button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Almoço (minutos)</label>
                         <input type="number" name="ponto_minutos_almoco" id="inp-almoco" min="1" max="300" placeholder="Ex.: 60, 90, 120">
+                        <div class="preset-row" data-target="inp-almoco">
+                            <button type="button" data-min="60">1 hora</button>
+                            <button type="button" data-min="90">1h30</button>
+                            <button type="button" data-min="120">2 horas</button>
+                        </div>
                     </div>
                     <div class="form-group" style="justify-content:end;">
-                        <button class="btn btn-primary" type="submit">Salvar tempos</button>
+                        <button class="btn btn-primary" type="submit">Salvar tempos deste colaborador</button>
                     </div>
                 </form>
+
+                {% if equipe %}
+                <h4 style="margin:20px 0 8px;">Equipe e tempos atuais</h4>
+                <div style="overflow-x:auto;">
+                <table class="equipe-tempos">
+                    <thead>
+                        <tr>
+                            <th>Colaborador</th>
+                            <th>Café</th>
+                            <th>Almoço</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for p in equipe %}
+                    <tr>
+                        <td>{{ p.nome_completo }}</td>
+                        <td>{% if p.ponto_minutos_cafe is not none %}{{ p.ponto_minutos_cafe }} min{% else %}padrão ({{ padrao_cafe }}){% endif %}</td>
+                        <td>{% if p.ponto_minutos_almoco is not none %}{{ p.ponto_minutos_almoco }} min{% else %}padrão ({{ padrao_almoco }}){% endif %}</td>
+                        <td>
+                            <button type="button" class="btn btn-secondary btn-escolher-func"
+                                    data-id="{{ p.id }}">Selecionar</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+                {% else %}
+                <p class="hint">Nenhum colaborador ativo cadastrado em Equipe / Professores.</p>
+                {% endif %}
             </div>
 
             <div class="card-box">
@@ -459,20 +529,26 @@
             var r = s % 60;
             var base = (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
             if (h > 0) base = h + ':' + base;
-            return (seg < 0 ? '-' : '') + base;
+            return base;
         }
         function tick() {
             document.querySelectorAll('.contador[data-restante]').forEach(function (el) {
                 var restante = parseInt(el.getAttribute('data-restante'), 10);
                 if (isNaN(restante)) return;
                 var display = el.querySelector('[data-display]');
+                var excessoEl = el.querySelector('[data-excesso]');
                 if (!display) return;
                 if (restante <= 0) {
                     el.classList.add('esgotado');
-                    display.textContent = 'Tempo esgotado (' + fmt(restante) + ')';
+                    display.textContent = 'Passou ' + fmt(restante) + ' do prazo';
+                    if (excessoEl) {
+                        excessoEl.style.display = '';
+                        excessoEl.textContent = 'Atraso sendo computado. Ao voltar, o excesso fica registrado no ponto.';
+                    }
                 } else {
                     el.classList.remove('esgotado');
                     display.textContent = fmt(restante) + ' restantes';
+                    if (excessoEl) excessoEl.style.display = 'none';
                 }
                 el.setAttribute('data-restante', String(restante - 1));
             });
@@ -483,13 +559,32 @@
         var sel = document.getElementById('sel-tempos-func');
         var cafe = document.getElementById('inp-cafe');
         var almoco = document.getElementById('inp-almoco');
-        if (sel && cafe && almoco) {
-            sel.addEventListener('change', function () {
-                var opt = sel.options[sel.selectedIndex];
-                cafe.value = opt.getAttribute('data-cafe') || '';
-                almoco.value = opt.getAttribute('data-almoco') || '';
-            });
+        function preencherTempos() {
+            if (!sel || !cafe || !almoco) return;
+            var opt = sel.options[sel.selectedIndex];
+            if (!opt) return;
+            cafe.value = opt.getAttribute('data-cafe') || '';
+            almoco.value = opt.getAttribute('data-almoco') || '';
         }
+        if (sel) sel.addEventListener('change', preencherTempos);
+
+        document.querySelectorAll('.preset-row button[data-min]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var id = btn.parentElement.getAttribute('data-target');
+                var inp = document.getElementById(id);
+                if (inp) inp.value = btn.getAttribute('data-min');
+            });
+        });
+
+        document.querySelectorAll('.btn-escolher-func').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                if (!sel) return;
+                sel.value = btn.getAttribute('data-id');
+                preencherTempos();
+                var form = document.getElementById('form-tempos');
+                if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
     })();
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

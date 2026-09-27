@@ -988,6 +988,8 @@ def garantir_tabelas_folha():
                 ("configuracoes", "ponto_minutos_almoco", "INT DEFAULT 60"),
                 ("funcionarios", "ponto_minutos_cafe", "INT"),
                 ("funcionarios", "ponto_minutos_almoco", "INT"),
+                ("ponto_registros", "excesso_cafe_min", "INT DEFAULT 0"),
+                ("ponto_registros", "excesso_almoco_min", "INT DEFAULT 0"),
                 ("funcionarios", "ponto_minutos_cafe", "INT"),
                 ("funcionarios", "ponto_minutos_almoco", "INT"),
                 ("configuracoes", "nfse_token", "TEXT"),

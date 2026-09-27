@@ -10182,7 +10182,7 @@ def _garantir_ponto():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ponto_v3"
+    chave = f"{schema}:ponto_v4"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -10209,6 +10209,8 @@ def _garantir_ponto():
                 "ALTER TABLE ponto_registros ADD COLUMN IF NOT EXISTS cafe_ida TIME",
                 "ALTER TABLE ponto_registros ADD COLUMN IF NOT EXISTS cafe_volta TIME",
                 "ALTER TABLE ponto_registros ADD COLUMN IF NOT EXISTS almoco_volta TIME",
+                "ALTER TABLE ponto_registros ADD COLUMN IF NOT EXISTS excesso_cafe_min INT DEFAULT 0",
+                "ALTER TABLE ponto_registros ADD COLUMN IF NOT EXISTS excesso_almoco_min INT DEFAULT 0",
             ):
                 cursor.execute(sql)
             # Migra o antigo "cafe" (que era volta do almoço) para almoco_volta
@@ -10275,6 +10277,7 @@ def _garantir_ponto():
         conexao.commit()
         _tabelas_ok.discard(f"{schema}:ponto_v1")
         _tabelas_ok.discard(f"{schema}:ponto_v2")
+        _tabelas_ok.discard(f"{schema}:ponto_v3")
         _tabelas_ok.add(chave)
     except Exception:
         try:
@@ -10372,6 +10375,7 @@ def _contadores_intervalo_ponto(registro, minutos_cafe, minutos_almoco, agora, d
                 "fim_previsto": limite.strftime("%H:%M"),
                 "restante_seg": restante,
                 "esgotado": restante <= 0,
+                "excesso_min": max(0, int((-restante + 59) // 60)) if restante < 0 else 0,
             })
     if registro.get("almoco") and not registro.get("almoco_volta"):
         inicio = _parse_hora_ponto_hoje(registro["almoco"], data_ref, agora)
@@ -10386,8 +10390,20 @@ def _contadores_intervalo_ponto(registro, minutos_cafe, minutos_almoco, agora, d
                 "fim_previsto": limite.strftime("%H:%M"),
                 "restante_seg": restante,
                 "esgotado": restante <= 0,
+                "excesso_min": max(0, int((-restante + 59) // 60)) if restante < 0 else 0,
             })
     return contadores
+
+
+def _minutos_excesso_intervalo(hora_ida, hora_volta, limite_min, data_ref, agora):
+    """Minutos além do limite entre ida e volta (0 se dentro do prazo)."""
+    inicio = _parse_hora_ponto_hoje(hora_ida, data_ref, agora)
+    fim = _parse_hora_ponto_hoje(hora_volta, data_ref, agora)
+    if not inicio or not fim:
+        return 0
+    usado_min = (fim - inicio).total_seconds() / 60.0
+    excesso = int(usado_min - max(1, int(limite_min or 1)))
+    return max(0, excesso)
 
 
 def _ler_tempos_ponto(cursor, funcionario_id=None):
@@ -10492,6 +10508,8 @@ def ponto():
     faltas = []
     minutos_cafe, minutos_almoco = 15, 60
     padrao_cafe, padrao_almoco = 15, 60
+    excesso_cafe_hoje = 0
+    excesso_almoco_hoje = 0
     contadores = []
     atestados_pendentes = []
     faltas_pendentes = []
@@ -10675,13 +10693,15 @@ def ponto():
                     hora = agora_bat.strftime("%H:%M")
                     cursor.execute(
                         """
-                        SELECT id, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+                        SELECT id, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida,
+                               excesso_cafe_min, excesso_almoco_min
                         FROM ponto_registros
                         WHERE funcionario_id = %s AND data_ref = %s
                         """,
                         (funcionario_id, data_dia),
                     )
-                    atual_map = _mapa_registro_ponto(cursor.fetchone())
+                    row_atual = cursor.fetchone()
+                    atual_map = _mapa_registro_ponto(row_atual)
                     proxima = _proxima_batida(atual_map)
                     if proxima != tipo:
                         rotulos = _rotulos_batida_ponto()
@@ -10692,11 +10712,28 @@ def ponto():
                         raise ValueError("Todas as batidas de hoje já foram registradas.")
                     vals = {k: None for k in _ordem_batidas_ponto()}
                     vals[tipo] = hora
+                    cafe_lim, almoco_lim = _ler_tempos_ponto(cursor, funcionario_id)
+                    excesso_cafe = None
+                    excesso_almoco = None
+                    msg_extra = ""
+                    if tipo == "cafe_volta":
+                        excesso_cafe = _minutos_excesso_intervalo(
+                            atual_map.get("cafe_ida"), hora, cafe_lim, data_dia, agora_bat
+                        )
+                        if excesso_cafe:
+                            msg_extra = f" Excedeu {excesso_cafe} min do café (limite {cafe_lim} min)."
+                    elif tipo == "almoco_volta":
+                        excesso_almoco = _minutos_excesso_intervalo(
+                            atual_map.get("almoco"), hora, almoco_lim, data_dia, agora_bat
+                        )
+                        if excesso_almoco:
+                            msg_extra = f" Excedeu {excesso_almoco} min do almoço (limite {almoco_lim} min)."
                     cursor.execute(
                         """
                         INSERT INTO ponto_registros
-                            (funcionario_id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, saida, atualizado_em)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                            (funcionario_id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, saida,
+                             excesso_cafe_min, excesso_almoco_min, atualizado_em)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT (funcionario_id, data_ref)
                         DO UPDATE SET
                             entrada = COALESCE(ponto_registros.entrada, EXCLUDED.entrada),
@@ -10705,6 +10742,8 @@ def ponto():
                             almoco = COALESCE(ponto_registros.almoco, EXCLUDED.almoco),
                             almoco_volta = COALESCE(ponto_registros.almoco_volta, EXCLUDED.almoco_volta),
                             saida = COALESCE(ponto_registros.saida, EXCLUDED.saida),
+                            excesso_cafe_min = COALESCE(EXCLUDED.excesso_cafe_min, ponto_registros.excesso_cafe_min),
+                            excesso_almoco_min = COALESCE(EXCLUDED.excesso_almoco_min, ponto_registros.excesso_almoco_min),
                             atualizado_em = CURRENT_TIMESTAMP
                         """,
                         (
@@ -10716,9 +10755,14 @@ def ponto():
                             vals["almoco"],
                             vals["almoco_volta"],
                             vals["saida"],
+                            excesso_cafe,
+                            excesso_almoco,
                         ),
                     )
-                    flash(f"{_rotulos_batida_ponto()[tipo]} às {hora}.", "success")
+                    flash(
+                        f"{_rotulos_batida_ponto()[tipo]} às {hora}.{msg_extra}",
+                        "warning" if msg_extra else "success",
+                    )
                     conexao.commit()
                     return redirect(url_for("ponto"))
                 elif acao == "excluir_ponto":
@@ -10793,21 +10837,29 @@ def ponto():
             if funcionario_id and pessoa:
                 cursor.execute(
                     """
-                    SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+                    SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida,
+                           COALESCE(excesso_cafe_min, 0) AS excesso_cafe_min,
+                           COALESCE(excesso_almoco_min, 0) AS excesso_almoco_min
                     FROM ponto_registros
                     WHERE funcionario_id = %s AND data_ref = %s
                     """,
                     (funcionario_id, data_hoje),
                 )
                 row = cursor.fetchone()
+                excesso_cafe_hoje = 0
+                excesso_almoco_hoje = 0
                 if row:
                     registro = _mapa_registro_ponto(row)
+                    excesso_cafe_hoje = int(row.get("excesso_cafe_min") or 0)
+                    excesso_almoco_hoje = int(row.get("excesso_almoco_min") or 0)
                 contadores = _contadores_intervalo_ponto(
                     registro, minutos_cafe, minutos_almoco, agora, agora.date()
                 )
                 cursor.execute(
                     """
-                    SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+                    SELECT id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida,
+                           COALESCE(excesso_cafe_min, 0) AS excesso_cafe_min,
+                           COALESCE(excesso_almoco_min, 0) AS excesso_almoco_min
                     FROM ponto_registros
                     WHERE funcionario_id = %s
                     ORDER BY data_ref DESC
@@ -10828,6 +10880,8 @@ def ponto():
                             "almoco": m["almoco"] or "—",
                             "almoco_volta": m["almoco_volta"] or "—",
                             "saida": m["saida"] or "—",
+                            "excesso_cafe_min": int(item.get("excesso_cafe_min") or 0),
+                            "excesso_almoco_min": int(item.get("excesso_almoco_min") or 0),
                         }
                     )
                 cursor.execute(
@@ -10938,6 +10992,8 @@ def ponto():
         minutos_almoco=minutos_almoco,
         padrao_cafe=padrao_cafe,
         padrao_almoco=padrao_almoco,
+        excesso_cafe_hoje=excesso_cafe_hoje,
+        excesso_almoco_hoje=excesso_almoco_hoje,
         contadores=contadores,
         mes_filtro=mes_filtro,
         atestados_pendentes=atestados_pendentes,
@@ -10997,7 +11053,9 @@ def ponto_relatorio_pdf():
                 return redirect(url_for("ponto"))
             cursor.execute(
                 """
-                SELECT data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+                SELECT data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida,
+                       COALESCE(excesso_cafe_min, 0) AS excesso_cafe_min,
+                       COALESCE(excesso_almoco_min, 0) AS excesso_almoco_min
                 FROM ponto_registros
                 WHERE funcionario_id = %s AND data_ref BETWEEN %s AND %s
                 ORDER BY data_ref
@@ -11016,6 +11074,8 @@ def ponto_relatorio_pdf():
                         "almoco": m["almoco"] or "—",
                         "almoco_volta": m["almoco_volta"] or "—",
                         "saida": m["saida"] or "—",
+                        "excesso_cafe_min": int(item.get("excesso_cafe_min") or 0),
+                        "excesso_almoco_min": int(item.get("excesso_almoco_min") or 0),
                     }
                 )
             cursor.execute(
