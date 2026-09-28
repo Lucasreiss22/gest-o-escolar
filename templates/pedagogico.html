@@ -116,9 +116,13 @@
     <div class="content">
         <h2 class="fw-bold text-dark mb-2" style="font-size:1.35rem;">Pedagógico</h2>
         <nav class="ped-tabs" aria-label="Seções do pedagógico">
+            {% if pode_visao_pedagogico or pode_cadastro_pedagogico %}
             <a class="{% if aba == 'turmas' %}ativa{% endif %}" href="{{ url_for('pagina_pedagogico', aba='turmas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Turmas</a>
+            {% endif %}
+            {% if pode_visao_pedagogico %}
             <a class="{% if aba == 'aluno' %}ativa{% endif %}" href="{{ url_for('pagina_pedagogico', aba='aluno') }}">Por aluno</a>
-            {% if pode('pedagogico_cadastro') or pode_alterar('pedagogico_cadastro') %}
+            {% endif %}
+            {% if pode_cadastro_pedagogico %}
             <a class="{% if aba == 'materias' %}ativa{% endif %}" href="{{ url_for('pagina_pedagogico', aba='materias') }}">Matérias</a>
             <a class="{% if aba == 'cargas' %}ativa{% endif %}" href="{{ url_for('pagina_pedagogico', aba='cargas') }}">Cargas horárias</a>
             {% endif %}
@@ -145,7 +149,7 @@
         </div>
         {% else %}
 
-        {% if aba == 'aluno' %}
+        {% if aba == 'aluno' and pode_visao_pedagogico %}
         <div class="ped-panel">
             <h3 class="fs-6 fw-bold mb-2">Por aluno</h3>
             <p class="small text-muted mb-3">Notas, faltas, turmas e fichas PDF nesta tela — sem precisar do cadastro completo em Alunos.</p>

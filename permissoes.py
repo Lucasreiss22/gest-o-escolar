@@ -528,6 +528,12 @@ def endpoint_no_plano(endpoint, telas, acao_form=None):
 def pode_requisicao(papel, endpoint, metodo, salvo=None, acao_form=None):
     if not endpoint:
         return True
+    # Tela Pedagógico é uma só: visão OU cadastro de turmas basta para abrir
+    if endpoint == "pagina_pedagogico" and (metodo or "GET").upper() == "GET":
+        return (
+            pode_acao(papel, "pedagogico", "acessar", salvo)
+            or pode_acao(papel, "pedagogico_cadastro", "acessar", salvo)
+        )
     acao, modulo = classificar_requisicao(endpoint, metodo, acao_form)
     if not modulo:
         return True

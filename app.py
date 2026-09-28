@@ -8854,7 +8854,9 @@ def pagina_pedagogico():
         return redirect(url_for("login"))
     papel = session.get("usuario_papel")
     perms = session.get("permissoes")
-    if not pode_acao(papel, "pedagogico", "acessar", perms):
+    pode_visao = pode_acao(papel, "pedagogico", "acessar", perms)
+    pode_cadastro = pode_acao(papel, "pedagogico_cadastro", "acessar", perms)
+    if not (pode_visao or pode_cadastro):
         flash("Sem permissão para acessar o pedagógico.", "danger")
         return redirect(url_for("dashboard"))
 
@@ -9437,7 +9439,9 @@ def pagina_pedagogico():
     termo_professor = request.args.get("professor", "").strip()
     filtro_turno = request.args.get("turno", "").strip()
 
-    pode_consultar = pode_acao(papel, "pedagogico", "ver", perms)
+    pode_ver_visao = pode_acao(papel, "pedagogico", "ver", perms)
+    pode_ver_cadastro = pode_acao(papel, "pedagogico_cadastro", "ver", perms)
+    pode_consultar = pode_ver_visao or pode_ver_cadastro
 
     turmas, professores, alunos_cadastrados, disciplinas = [], [], [], []
     disciplinas_ativas = []
@@ -9449,7 +9453,7 @@ def pagina_pedagogico():
     data_chamada = request.args.get("data_chamada") or date.today().isoformat()
     disc_chamada = request.args.get("disc_chamada") or "__todas__"
     materia_editar_id = request.args.get("editar", type=int) if pode_consultar else None
-    aluno_sel_id = request.args.get("aluno_sel", type=int) if pode_consultar else None
+    aluno_sel_id = request.args.get("aluno_sel", type=int) if pode_ver_visao else None
     painel_aluno = request.args.get("painel_aluno") or "resumo"
     cargas_padrao = []
     aluno_painel = None
@@ -9460,6 +9464,16 @@ def pagina_pedagogico():
     resumo_faltas = {"presente": 0, "falta": 0, "justificada": 0}
 
     garantir_tabelas_pedagogicas()
+    aba_ped = request.args.get("aba") or (
+        "aluno"
+        if pode_visao and (request.args.get("aluno") or request.args.get("aluno_sel"))
+        else "turmas"
+    )
+    if aba_ped == "aluno" and not pode_visao:
+        aba_ped = "turmas"
+    elif aba_ped in ("materias", "cargas") and not pode_cadastro:
+        aba_ped = "turmas"
+
     conexao = obter_conexao() if pode_consultar else None
     if pode_consultar and conexao:
         try:
@@ -9700,10 +9714,9 @@ def pagina_pedagogico():
         etapas_materia=ETAPAS_MATERIA,
         materia_editar=materia_editar,
         sem_consulta=not pode_consultar,
-        aba=(
-            request.args.get("aba")
-            or ("aluno" if (request.args.get("aluno") or request.args.get("aluno_sel")) else "turmas")
-        ),
+        pode_visao_pedagogico=pode_visao,
+        pode_cadastro_pedagogico=pode_cadastro,
+        aba=aba_ped,
         turma_sel=request.args.get("turma_sel", type=int) if pode_consultar else None,
         painel=request.args.get("painel") or "horas",
         data_chamada=data_chamada,
