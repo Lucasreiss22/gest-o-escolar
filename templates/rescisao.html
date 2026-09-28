@@ -135,7 +135,12 @@
                                 <td>{{ v.cargo or '—' }}</td>
                                 <td>{{ rotulo_contrato(v.tipo_contrato) }}</td>
                                 <td>{{ v.situacao }}</td>
-                                <td>{% if v.rescisao_id %}{{ v.rescisao_tipo }} · R$ {{ v.total_liquido|moeda }}{% else %}—{% endif %}</td>
+                                <td>
+                                    {% if v.rescisao_id %}
+                                    {{ v.rescisao_tipo }} · R$ {{ v.total_liquido|moeda }}
+                                    <a class="btn btn-secondary btn-sm" style="margin-left:6px;padding:4px 8px;" href="{{ url_for('rescisao_pdf', rescisao_id=v.rescisao_id) }}">PDF</a>
+                                    {% else %}—{% endif %}
+                                </td>
                             </tr>
                         {% endfor %}
                         </tbody>
@@ -352,9 +357,10 @@
                 <div class="linha total"><span>Total proventos</span><strong>R$ {{ calculo.proventos|moeda }}</strong></div>
                 <div class="linha"><span>Total descontos</span><strong>R$ {{ calculo.descontos|moeda }}</strong></div>
                 <div class="linha total"><span>Líquido estimado</span><strong>R$ {{ calculo.total_liquido|moeda }}</strong></div>
+                <div class="linha total"><span>Custo da escola (Financeiro)</span><strong>R$ {{ calculo.custo_empregador|moeda }}</strong></div>
                 <p class="hint" style="margin-top:12px;">
-                    Multa FGTS e depósito do mês são custo/obrigação da escola junto à conta vinculada —
-                    o líquido acima reflete verbas pagas ao trabalhador (sem somar a multa ao bolso do empregado).
+                    Ao confirmar, este custo da escola é lançado automaticamente em Financeiro (categoria Rescisão):
+                    líquido + INSS + IRRF + FGTS do mês + multa FGTS.
                     Projeção do aviso indenizado: {{ calculo.dias_aviso_projecao }} dia(s) para 13º/férias.
                 </p>
             </div>
@@ -364,7 +370,7 @@
             <div class="card-box hist">
                 <h3 class="card-title">Histórico de vínculos</h3>
                 <table>
-                    <thead><tr><th>Início</th><th>Fim</th><th>Cargo</th><th>Situação</th></tr></thead>
+                    <thead><tr><th>Início</th><th>Fim</th><th>Cargo</th><th>Situação</th><th>PDF</th></tr></thead>
                     <tbody>
                     {% for v in historico %}
                         <tr>
@@ -372,6 +378,7 @@
                             <td>{{ v.data_fim or '—' }}</td>
                             <td>{{ v.cargo or '—' }}</td>
                             <td>{{ v.situacao }}{% if v.rescisao_tipo %} · {{ v.rescisao_tipo }}{% endif %}</td>
+                            <td>{% if v.rescisao_id %}<a href="{{ url_for('rescisao_pdf', rescisao_id=v.rescisao_id) }}">Memória</a>{% else %}—{% endif %}</td>
                         </tr>
                     {% endfor %}
                     </tbody>

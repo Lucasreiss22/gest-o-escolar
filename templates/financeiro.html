@@ -129,6 +129,8 @@
             .caixa-faixa { flex-direction: column; align-items: stretch; }
             .caixa-faixa-nums { justify-content: space-between; gap: 12px; }
             .caixa-faixa-nums strong { font-size: 1.05rem; }
+            .card-resumo.caixa-faixa[style] { grid-template-columns: 1fr !important; }
+            .card-resumo.caixa-faixa > div[style*="border-right"] { border-right: none !important; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px !important; margin-bottom: 4px; }
             .fin-mobile-list { display: block; }
             .grid-acoes-geracao { gap: 12px; }
         }
@@ -242,6 +244,7 @@
                 <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="btn btn-success">PDF tributos</a>
                 <a href="{{ url_for('relatorio_pdf_folha', mes=mes_atual) }}" class="btn btn-success">PDF folha</a>
                 <a href="{{ url_for('relatorio_pdf_custos', mes=mes_atual) }}" class="btn btn-success">PDF custos</a>
+                <a href="{{ url_for('relatorio_pdf_rescisoes', mes=mes_atual) }}" class="btn btn-success">PDF rescisões</a>
             </div>
             <div style="margin-top: 8px; font-size: 0.8rem; color: #64748b;">
                 Apuração de <strong>{{ mes_label }}</strong>
@@ -362,22 +365,33 @@
                 <div class="valor">R$ {{ (totais.liquido)|moeda }}</div>
                 <span class="hint" style="color: #1abc9c;">Abrir relatório da conta</span>
             </a>
-            <div class="card-resumo caixa-faixa {% if regime_apuracao == 'caixa' %}recebido{% endif %}">
-                <div class="caixa-faixa-titulo">
-                    <h4>{% if regime_apuracao == 'caixa' %}Regime de caixa{% else %}Regime de competência{% endif %}</h4>
-                    <span class="hint">{% if regime_apuracao == 'caixa' %}O não pago deste mês ficou fora da apuração{% else %}A apuração usa o vencimento, pago ou não{% endif %}</span>
+            <div class="card-resumo caixa-faixa {% if regime_apuracao == 'caixa' %}recebido{% endif %}" style="display:grid;grid-template-columns:minmax(200px,1fr) minmax(260px,1.4fr);gap:14px;align-items:stretch;">
+                <div style="display:flex;flex-direction:column;justify-content:center;padding:4px 2px;border-right:1px solid #e2e8f0;">
+                    <h4 style="margin:0 0 4px;">Custo por rescisão</h4>
+                    <span class="hint">Verbas + FGTS + multa no mês</span>
+                    <a href="{{ url_for('relatorio_pdf_rescisoes', mes=mes_atual) }}" style="text-decoration:none;color:inherit;margin-top:10px;display:block;padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;">
+                        <span style="display:block;font-size:0.68rem;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:#64748b;">Total no mês</span>
+                        <strong style="display:block;margin-top:2px;font-size:1.2rem;color:#1e293b;">R$ {{ (totais.custos_rescisoes or 0)|moeda }}</strong>
+                        <span class="pdf" style="display:block;margin-top:4px;font-size:0.68rem;font-weight:700;color:#3498db;">PDF com memória de cálculo</span>
+                    </a>
                 </div>
-                <div class="caixa-faixa-nums">
-                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime_pago', mes=mes_atual) }}">
-                        <span>Pago no mês</span>
-                        <strong>R$ {{ (totais.recebido_caixa or 0)|moeda }}</strong>
-                        <span class="pdf">PDF do que foi pago</span>
-                    </a>
-                    <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime_nao_pago', mes=mes_atual) }}">
-                        <span>Não pago no mês</span>
-                        <strong>R$ {{ (totais.inadimplente or 0)|moeda }}</strong>
-                        <span class="pdf">PDF do que não foi pago</span>
-                    </a>
+                <div>
+                    <div class="caixa-faixa-titulo">
+                        <h4>{% if regime_apuracao == 'caixa' %}Regime de caixa{% else %}Regime de competência{% endif %}</h4>
+                        <span class="hint">{% if regime_apuracao == 'caixa' %}O não pago deste mês ficou fora da apuração{% else %}A apuração usa o vencimento, pago ou não{% endif %}</span>
+                    </div>
+                    <div class="caixa-faixa-nums" style="margin-top:8px;">
+                        <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime_pago', mes=mes_atual) }}">
+                            <span>Pago no mês</span>
+                            <strong>R$ {{ (totais.recebido_caixa or 0)|moeda }}</strong>
+                            <span class="pdf">PDF do que foi pago</span>
+                        </a>
+                        <a href="{{ url_for('relatorio_cartao_financeiro', tipo='regime_nao_pago', mes=mes_atual) }}">
+                            <span>Não pago no mês</span>
+                            <strong>R$ {{ (totais.inadimplente or 0)|moeda }}</strong>
+                            <span class="pdf">PDF do que não foi pago</span>
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -616,6 +630,7 @@
                 <div class="fin-linha"><span>(−) Tributos da empresa</span><strong>R$ {{ (totais.tributos)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(−) Compras e custos fixos (aluguel, energia, material)</span><strong>R$ {{ (totais.custos_compras or 0)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(−) Contratação de serviços (NFS-e)</span><strong>R$ {{ (totais.custos_servicos or 0)|moeda }}</strong></div>
+                <div class="fin-linha"><span>(−) Custo por rescisão</span><strong>R$ {{ (totais.custos_rescisoes or 0)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(=) Caixa restante</span><strong>R$ {{ (totais.liquido)|moeda }}</strong></div>
                 <p style="font-size: 0.78rem; color: #64748b; margin-top: 8px;">Folha e encargos não se misturam com compras nem com serviços prestados por terceiros.</p>
             </div>
@@ -922,8 +937,13 @@
                         <div>
                             <span class="nome">{{ c.descricao }}</span>
                             <span class="meta">
+                                {% set cat = (c.categoria or '')|lower %}
+                                {% if cat in ['rescisao', 'rescisão', 'rescisoes', 'rescisões'] %}
+                                <strong>Rescisão</strong>
+                                {% else %}
                                 {{ rotulo_tipo.get(c.tipo, 'À vista') }}
                                 {% if c.categoria %} · {{ c.categoria }}{% endif %}
+                                {% endif %}
                                 {% if c.forma %} · {{ rotulo_forma.get(c.forma, c.forma) }}{% endif %}
                                 {% if c.prestador %} · {{ c.prestador }}{% endif %}
                                 {% if c.tipo == 'parcelado' %} · {{ c.parcela_num }}/{{ c.parcelas }}{% endif %}

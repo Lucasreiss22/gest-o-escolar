@@ -119,6 +119,8 @@ from relatorios_pdf import (
     pdf_auditoria,
     pdf_pasta_professor,
     pdf_ponto,
+    pdf_rescisao,
+    pdf_rescisoes_mes,
 )
 from folha import (
     calcular_folha_pessoa,
@@ -499,16 +501,21 @@ def _efeito_caixa_custo(custo):
 def resumir_custos_operacionais(custos):
     compras = 0.0
     servicos = 0.0
+    rescisoes = 0.0
     for item in custos or []:
         efeito, tipo = _efeito_caixa_custo(item)
-        if tipo == "servico":
+        categoria = (item.get("categoria") or "").strip().lower()
+        if categoria in ("rescisao", "rescisão", "rescisoes", "rescisões"):
+            rescisoes += efeito
+        elif tipo == "servico":
             servicos += efeito
         else:
             compras += efeito
     return {
         "compras": round(compras, 2),
         "servicos": round(servicos, 2),
-        "custos": round(compras + servicos, 2),
+        "rescisoes": round(rescisoes, 2),
+        "custos": round(compras + servicos + rescisoes, 2),
     }
 
 
@@ -4514,6 +4521,26 @@ def pagina_rescisao():
                             params,
                             usuario_id=session.get("usuario_id"),
                         )
+                        custo_escola = float(calculo.get("custo_empregador") or 0)
+                        if custo_escola > 0:
+                            data_custo = (
+                                params.get("data_pagamento")
+                                or calculo.get("data_desligamento")
+                                or date.today().isoformat()
+                            )
+                            _gravar_custo(
+                                cursor,
+                                {
+                                    "tipo": "avista",
+                                    "descricao": (
+                                        f"Rescisão #{rid} — {selecionado.get('nome_completo') or 'Colaborador'}"
+                                    ),
+                                    "categoria": "rescisao",
+                                    "data": data_custo,
+                                    "forma": "dinheiro",
+                                    "valor": custo_escola,
+                                },
+                            )
                         conexao.commit()
                         try:
                             registrar_auditoria(
@@ -4524,12 +4551,12 @@ def pagina_rescisao():
                                 "alteracao",
                                 "rescisao",
                                 f"Rescisão de {selecionado.get('nome_completo')}",
-                                f"#{rid} · {calculo.get('tipo_rescisao')} · líquido R$ {calculo.get('total_liquido')}",
+                                f"#{rid} · {calculo.get('tipo_rescisao')} · líquido R$ {calculo.get('total_liquido')} · custo escola R$ {custo_escola}",
                                 usuario_login=session.get("usuario_email"),
                             )
                         except Exception:
                             pass
-                        msg = "Rescisão registrada. Vínculo encerrado; cadastro mantido como contrato rescindido."
+                        msg = "Rescisão registrada. Custo lançado no Financeiro."
                         if login_removido:
                             msg += " Usuário de acesso removido."
                         if calculo.get("pagamento_atrasado"):
@@ -4617,6 +4644,136 @@ def rescisao_recontratar():
         return redirect(url_for("pagina_rescisao", fid=fid, modo="rescindidos"))
     finally:
         conexao.close()
+
+
+def _itens_rescisao_mes(cursor, mes_filtro):
+    cursor.execute(
+        """
+        SELECT r.*, f.nome_completo, f.cpf, f.cargo,
+               COALESCE(
+                   (r.detalhes->>'custo_empregador')::numeric,
+                   r.total_liquido + COALESCE(r.inss, 0) + COALESCE(r.irrf, 0)
+                   + COALESCE(r.fgts_mes, 0) + COALESCE(r.multa_fgts, 0)
+               ) AS custo_empregador
+        FROM rescisoes r
+        JOIN funcionarios f ON f.id = r.funcionario_id
+        WHERE TO_CHAR(COALESCE(r.data_pagamento, r.data_desligamento), 'YYYY-MM') = %s
+        ORDER BY COALESCE(r.data_pagamento, r.data_desligamento) DESC, r.id DESC
+        """,
+        (mes_filtro,),
+    )
+    itens = []
+    for row in cursor.fetchall() or []:
+        item = dict(row)
+        detalhes = item.get("detalhes")
+        if isinstance(detalhes, str):
+            try:
+                import json
+                detalhes = json.loads(detalhes)
+            except Exception:
+                detalhes = {}
+        item["detalhes"] = detalhes or {}
+        if not item.get("custo_empregador") and detalhes:
+            item["custo_empregador"] = detalhes.get("custo_empregador")
+        itens.append(item)
+    return itens
+
+
+@app.route("/financeiro/rescisoes/pdf")
+def relatorio_pdf_rescisoes():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if not pode_acao(session.get("usuario_papel"), "financeiro", "ver", session.get("permissoes")) and not pode_acao(
+        session.get("usuario_papel"), "rescisao", "ver", session.get("permissoes")
+    ):
+        flash("Sem permissão para o relatório de rescisões.", "danger")
+        return redirect(url_for("dashboard"))
+    mes_filtro = request.args.get("mes", "").strip() or datetime.now().strftime("%Y-%m")
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+            cfg = cursor.fetchone() or {}
+            escola = cfg.get("nome_escola") or session.get("escola_nome") or "Escola"
+            itens = _itens_rescisao_mes(cursor, mes_filtro)
+            # Preferir soma dos custos lançados no financeiro (fonte da verdade do caixa)
+            custos = listar_custos_do_mes(cursor, mes_filtro)
+            total = resumir_custos_operacionais(custos).get("rescisoes") or 0.0
+            if not total:
+                total = round(sum(float(i.get("custo_empregador") or 0) for i in itens), 2)
+            try:
+                ano, mes = mes_filtro.split("-")
+                mes_label = datetime(int(ano), int(mes), 1).strftime("%m/%Y")
+            except Exception:
+                mes_label = mes_filtro
+            buffer = pdf_rescisoes_mes(escola, mes_label, itens, total)
+    finally:
+        conexao.close()
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"custos_rescisao_{mes_filtro}.pdf",
+    )
+
+
+@app.route("/rescisao/<int:rescisao_id>/pdf")
+def rescisao_pdf(rescisao_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if not pode_acao(session.get("usuario_papel"), "rescisao", "ver", session.get("permissoes")) and not pode_acao(
+        session.get("usuario_papel"), "financeiro", "ver", session.get("permissoes")
+    ):
+        flash("Sem permissão para o PDF da rescisão.", "danger")
+        return redirect(url_for("dashboard"))
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("pagina_rescisao"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT r.*, f.nome_completo, f.cpf, f.cargo
+                FROM rescisoes r
+                JOIN funcionarios f ON f.id = r.funcionario_id
+                WHERE r.id = %s
+                """,
+                (rescisao_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                flash("Rescisão não encontrada.", "danger")
+                return redirect(url_for("pagina_rescisao", modo="rescindidos"))
+            cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
+            cfg = cursor.fetchone() or {}
+            escola = cfg.get("nome_escola") or session.get("escola_nome") or "Escola"
+            detalhes = row.get("detalhes")
+            if isinstance(detalhes, str):
+                try:
+                    import json
+                    detalhes = json.loads(detalhes)
+                except Exception:
+                    detalhes = {}
+            pessoa = {
+                "nome_completo": row.get("nome_completo"),
+                "cpf": row.get("cpf"),
+                "cargo": row.get("cargo"),
+            }
+            buffer = pdf_rescisao(escola, pessoa, detalhes or {}, rescisao_id=rescisao_id)
+    finally:
+        conexao.close()
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"rescisao_{rescisao_id}.pdf",
+    )
 
 
 @app.route("/dashboard")
@@ -10706,6 +10863,7 @@ def pagina_financeiro():
         "custos": 0.0,
         "custos_compras": 0.0,
         "custos_servicos": 0.0,
+        "custos_rescisoes": 0.0,
         "emitido": 0.0,
         "recebido_caixa": 0.0,
         "inadimplente": 0.0,
@@ -10814,6 +10972,7 @@ def pagina_financeiro():
                 resumo_custos = resumir_custos_operacionais(custos_mes)
                 totais["custos_compras"] = resumo_custos["compras"]
                 totais["custos_servicos"] = resumo_custos["servicos"]
+                totais["custos_rescisoes"] = resumo_custos.get("rescisoes") or 0.0
                 totais["custos"] = resumo_custos["custos"]
 
                 apuracao_simples = None
@@ -11265,6 +11424,10 @@ def relatorio_cartao_financeiro(tipo):
                 total = 0.0
                 for item in custos:
                     porque, efeito = _porque_custo(item)
+                    cat = (item.get("categoria") or "").strip().lower()
+                    eh_rescisao = cat in ("rescisao", "rescisão", "rescisoes", "rescisões")
+                    if eh_rescisao:
+                        continue
                     if tipo == "servicos" and (item.get("tipo") or "").lower() != "servico":
                         continue
                     if tipo == "compras" and (item.get("tipo") or "").lower() == "servico":
@@ -11277,6 +11440,7 @@ def relatorio_cartao_financeiro(tipo):
                         mes_label,
                         "Compras e custos fixos",
                         "Entram aluguel, energia, material e parcelas que não são contratação de serviço. "
+                        "Rescisões têm relatório próprio (Custo por rescisão). "
                         "O valor do cartão é o que efetivamente sai no mês.",
                         escolhidos,
                         total,
@@ -11317,7 +11481,7 @@ def relatorio_cartao_financeiro(tipo):
                         for comp in meses_do_trimestre(mes_filtro)
                     )
                     tributos = float(apurar_lucro_presumido(receita_mes, colaboradores, receita_tri).get("tributos") or 0)
-                total = recebido - folha - tributos - custos["compras"] - custos["servicos"]
+                total = recebido - folha - tributos - custos["compras"] - custos["servicos"] - custos.get("rescisoes", 0)
                 buffer = pdf_caixa_restante(
                     escola,
                     mes_label,
@@ -11327,6 +11491,7 @@ def relatorio_cartao_financeiro(tipo):
                         ("(−) Tributos da empresa", tributos),
                         ("(−) Compras e custos fixos", custos["compras"]),
                         ("(−) Contratação de serviços", custos["servicos"]),
+                        ("(−) Custo por rescisão", custos.get("rescisoes") or 0),
                     ],
                     total,
                     regime_apuracao,
@@ -11454,6 +11619,7 @@ def relatorio_tributario():
                 resumo_custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
                 totais["custos_compras"] = resumo_custos["compras"]
                 totais["custos_servicos"] = resumo_custos["servicos"]
+                totais["custos_rescisoes"] = resumo_custos.get("rescisoes") or 0.0
                 totais["custos"] = resumo_custos["custos"]
                 if regime == "lucro_presumido":
                     receita_tri = sum(

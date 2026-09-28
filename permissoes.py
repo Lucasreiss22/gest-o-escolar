@@ -52,6 +52,8 @@ ENDPOINTS = {
     "relatorio_cartao_financeiro": "financeiro",
     "relatorio_pdf_folha": "financeiro",
     "relatorio_pdf_custos": "financeiro",
+    "relatorio_pdf_rescisoes": "financeiro",
+    "rescisao_pdf": "rescisao",
     "calendario_escolar": "calendario",
     "cadastrar_evento": "calendario",
     "relatorio_pdf_consulta": "calendario",
@@ -279,6 +281,8 @@ _POST_SO_LEITURA = {
     "relatorio_pdf_consulta",
     "relatorio_tributario",
     "relatorio_pdf_custos",
+    "relatorio_pdf_rescisoes",
+    "rescisao_pdf",
     "boletim_pdf",
     "ficha_pedagogica_pdf",
 }

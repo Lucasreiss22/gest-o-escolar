@@ -342,6 +342,10 @@ def calcular_rescisao(func, params):
 
     total_liquido = _money(proventos - descontos)
 
+    # Custo da escola: verbas brutas ao trabalhador + FGTS do mês + multa rescisória
+    # (INSS/IRRF retidos saem do bolso da escola na quitação junto com o líquido)
+    custo_empregador = _money(total_liquido + inss + irrf + fgts_mes + multa_fgts)
+
     atrasado, limite_pag = pagamento_em_atraso(deslig, params.get("data_pagamento"))
 
     return {
@@ -378,6 +382,7 @@ def calcular_rescisao(func, params):
         "proventos": proventos,
         "descontos": descontos,
         "total_liquido": total_liquido,
+        "custo_empregador": custo_empregador,
         "data_limite_pagamento": limite_pag.isoformat() if limite_pag else None,
         "pagamento_atrasado": atrasado,
         "direitos": direitos,

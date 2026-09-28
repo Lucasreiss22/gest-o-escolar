@@ -1878,3 +1878,107 @@ def pdf_cobranca_mensalidade(escola, cobranca, aluno=None):
     pdf.linha("Status", cobranca.get("status") or "Pendente")
     pdf.paragrafo("Aviso de cobrança da mensalidade. Confirme o pagamento com a secretaria.")
     return _saida(pdf)
+
+
+def _linha_rescisao_calc(pdf, calculo):
+    """Memória de cálculo completa de uma rescisão."""
+    c = calculo or {}
+    pdf.linha("Tipo", c.get("rotulo_tipo") or c.get("tipo_rescisao") or "-")
+    pdf.linha("Aviso prévio", c.get("rotulo_aviso") or c.get("aviso_modalidade") or "-")
+    pdf.linha("Admissão", c.get("data_admissao") or "-")
+    pdf.linha("Desligamento", c.get("data_desligamento") or "-")
+    pdf.linha("Salário de referência", _brl(c.get("salario_mensal")))
+    pdf.ln(2)
+    pdf.secao("Verbas")
+    pdf.linha(f"Saldo de salário ({c.get('dias_trabalhados_mes') or 0} dias)", _brl(c.get("saldo_salario")))
+    pdf.linha(f"Aviso prévio ({c.get('dias_aviso') or 0} dias)", _brl(c.get("aviso_indenizado")))
+    if float(c.get("aviso_desconto") or 0) > 0:
+        pdf.linha("Desconto aviso não cumprido", f"- {_brl(c.get('aviso_desconto'))}")
+    pdf.linha(f"13º proporcional ({c.get('avos_13') or 0}/12)", _brl(c.get("decimo_terceiro")))
+    pdf.linha("Férias vencidas", _brl(c.get("ferias_vencidas")))
+    pdf.linha("1/3 férias vencidas", _brl(c.get("terco_ferias_vencidas")))
+    pdf.linha(f"Férias proporcionais ({c.get('avos_ferias_proporcionais') or 0}/12)", _brl(c.get("ferias_proporcionais")))
+    pdf.linha("1/3 férias proporcionais", _brl(c.get("terco_ferias_proporcionais")))
+    if float(c.get("outros_proventos") or 0) > 0:
+        pdf.linha("Outros proventos", _brl(c.get("outros_proventos")))
+    pdf.ln(2)
+    pdf.secao("Encargos e descontos")
+    aliq = float(c.get("aliquota_fgts") or 0) * 100
+    aliq_m = float(c.get("aliquota_multa_fgts") or 0) * 100
+    pdf.linha(f"FGTS do mês ({aliq:.1f}%)", _brl(c.get("fgts_mes")))
+    pdf.linha(f"Multa FGTS ({aliq_m:.0f}%)", _brl(c.get("multa_fgts")))
+    pdf.linha("INSS (estimativa)", f"- {_brl(c.get('inss'))}")
+    pdf.linha("IRRF (estimativa)", f"- {_brl(c.get('irrf'))}")
+    if float(c.get("outros_descontos") or 0) > 0:
+        pdf.linha("Outros descontos", f"- {_brl(c.get('outros_descontos'))}")
+    pdf.ln(2)
+    pdf.secao("Totais")
+    pdf.linha("Proventos", _brl(c.get("proventos")))
+    pdf.linha("Descontos", _brl(c.get("descontos")))
+    pdf.linha("Líquido ao trabalhador", _brl(c.get("total_liquido")), negrito=True)
+    pdf.linha("Custo total da escola", _brl(c.get("custo_empregador")), negrito=True)
+    if c.get("data_limite_pagamento"):
+        pdf.paragrafo(
+            f"Prazo Art. 477 §6º CLT: quitação até {c.get('data_limite_pagamento')}."
+            + (" Atenção: pagamento em atraso." if c.get("pagamento_atrasado") else "")
+        )
+    pdf.paragrafo(
+        "Custo da escola = líquido + INSS + IRRF + FGTS do mês + multa FGTS. "
+        "A multa e o FGTS vão à conta vinculada; o líquido é pago ao trabalhador."
+    )
+
+
+def pdf_rescisao(escola, pessoa, calculo, rescisao_id=None):
+    pdf = RelatorioPDF("Rescisão contratual — memória de cálculo")
+    pdf.add_page()
+    pdf.paragrafo(escola or "Gestão Escolar")
+    if rescisao_id:
+        pdf.linha("Rescisão nº", str(rescisao_id))
+    pdf.linha("Colaborador", (pessoa or {}).get("nome_completo") or "-")
+    if (pessoa or {}).get("cpf"):
+        pdf.linha("CPF", pessoa.get("cpf"))
+    if (pessoa or {}).get("cargo"):
+        pdf.linha("Cargo", pessoa.get("cargo"))
+    pdf.ln(2)
+    _linha_rescisao_calc(pdf, calculo)
+    return _saida(pdf)
+
+
+def pdf_rescisoes_mes(escola, mes_label, itens, total_custo):
+    """Relatório mensal: cada rescisão com memória de cálculo e custo da escola."""
+    pdf = RelatorioPDF("Custos por rescisão")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola or 'Gestão Escolar'} · {mes_label}")
+    pdf.linha("Total de custos por rescisão no mês", _brl(total_custo), negrito=True)
+    pdf.paragrafo(
+        "Cada rescisão abaixo traz a memória de cálculo completa. "
+        "O valor entra em Financeiro como custo com categoria Rescisão."
+    )
+    if not itens:
+        pdf.paragrafo("Nenhuma rescisão neste mês.")
+        return _saida(pdf)
+    for item in itens:
+        pdf.ln(3)
+        pdf.secao((item.get("nome_completo") or "Colaborador")[:80])
+        if item.get("id"):
+            pdf.linha("Rescisão nº", str(item.get("id")))
+        if item.get("data_desligamento"):
+            data = item["data_desligamento"]
+            if hasattr(data, "strftime"):
+                data = data.strftime("%d/%m/%Y")
+            pdf.linha("Desligamento", str(data)[:10])
+        pdf.linha("Custo lançado no Financeiro", _brl(item.get("custo_empregador") or item.get("total_liquido")))
+        calc = item.get("detalhes") or {}
+        if isinstance(calc, str):
+            try:
+                import json
+                calc = json.loads(calc)
+            except Exception:
+                calc = {}
+        if calc:
+            _linha_rescisao_calc(pdf, calc)
+        else:
+            pdf.linha("Líquido registrado", _brl(item.get("total_liquido")))
+            pdf.linha("Multa FGTS", _brl(item.get("multa_fgts")))
+            pdf.linha("FGTS mês", _brl(item.get("fgts_mes")))
+    return _saida(pdf)
