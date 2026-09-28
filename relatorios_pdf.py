@@ -874,6 +874,101 @@ def pdf_boletim(escola, aluno, notas, faltas_resumo, turmas=None):
     return _saida(pdf)
 
 
+def pdf_ficha_pedagogica(
+    escola,
+    aluno,
+    turmas=None,
+    notas=None,
+    faltas=None,
+    faltas_resumo=None,
+    modo="simplificado",
+):
+    """Ficha pedagógica sem dados sensíveis de cadastro (CPF, endereço, responsáveis)."""
+    completo = (modo or "simplificado").strip().lower() == "completo"
+    titulo = "Ficha pedagógica completa" if completo else "Ficha pedagógica simplificada"
+    pdf = RelatorioPDF(titulo)
+    pdf.add_page()
+    pdf.paragrafo(escola or "Gestão Escolar")
+    pdf.linha("Aluno", (aluno or {}).get("nome_completo") or "—")
+    pdf.linha("Matrícula", (aluno or {}).get("matricula") or "—")
+    pdf.linha("Status", (aluno or {}).get("status") or "—")
+    if turmas:
+        nomes = ", ".join(
+            (t.get("nome") or t.get("nome_turma") or "").strip()
+            for t in turmas
+            if (t.get("nome") or t.get("nome_turma"))
+        )
+        pdf.linha("Turmas", nomes or "—")
+    resumo = faltas_resumo or {}
+    pdf.linha("Presenças", resumo.get("presente") or 0)
+    pdf.linha("Faltas", resumo.get("falta") or 0)
+    pdf.linha("Justificadas", resumo.get("justificada") or 0)
+
+    _secao_se_couber(pdf, "Notas e avaliações")
+    linhas_notas = []
+    for n in notas or []:
+        data_n = n.get("data_aplicacao")
+        if hasattr(data_n, "strftime"):
+            data_n = data_n.strftime("%d/%m/%Y")
+        linhas_notas.append([
+            str(n.get("materia") or "—")[:40],
+            str(n.get("titulo_avaliacao") or n.get("titulo") or "—")[:36],
+            str(n.get("trimestre") or "—"),
+            str(n.get("nota") if n.get("nota") is not None else "—"),
+            str(data_n or "—")[:10] if completo else "",
+        ])
+    if linhas_notas:
+        if completo:
+            pdf.tabela(
+                ["Matéria", "Prova", "Trim.", "Nota", "Data"],
+                [[a, b, c, d, e] for a, b, c, d, e in linhas_notas],
+                [42, 48, 18, 22, 30],
+            )
+        else:
+            # Resumo: últimas 12
+            reduzidas = [[a, b, c, d] for a, b, c, d, _e in linhas_notas[:12]]
+            pdf.tabela(["Matéria", "Prova", "Trim.", "Nota"], reduzidas, [50, 55, 22, 30])
+            if len(linhas_notas) > 12:
+                pdf.paragrafo(f"… e mais {len(linhas_notas) - 12} registro(s). Use a ficha completa.", tamanho=9)
+    else:
+        pdf.paragrafo("Sem notas lançadas.")
+
+    if completo:
+        _secao_se_couber(pdf, "Frequência recente")
+        linhas_f = []
+        for f in (faltas or [])[:40]:
+            data_f = f.get("data_aula")
+            if hasattr(data_f, "strftime"):
+                data_f = data_f.strftime("%d/%m/%Y")
+            linhas_f.append([
+                str(data_f or "—"),
+                _rotulo_status_chamada(f.get("status")),
+                str(f.get("disciplina") or "—")[:50],
+            ])
+        if linhas_f:
+            pdf.tabela(["Data", "Status", "Disciplina"], linhas_f, [35, 35, 90])
+        else:
+            pdf.paragrafo("Sem registros de frequência.")
+
+        if turmas:
+            _secao_se_couber(pdf, "Turmas vinculadas")
+            linhas_t = []
+            for t in turmas:
+                linhas_t.append([
+                    str(t.get("nome") or t.get("nome_turma") or "—"),
+                    str(t.get("ano_letivo") or "—"),
+                    str(t.get("turno") or "—"),
+                ])
+            pdf.tabela(["Turma", "Ano", "Turno"], linhas_t, [80, 35, 45])
+    else:
+        pdf.paragrafo(
+            "Versão simplificada: identificação, turmas e resumo de notas/frequência. "
+            "Para histórico detalhado, gere a ficha completa.",
+            tamanho=9,
+        )
+    return _saida(pdf)
+
+
 def _hora(valor):
     if hasattr(valor, "strftime"):
         return valor.strftime("%H:%M")

@@ -64,6 +64,7 @@ ENDPOINTS = {
     "boletim_pdf": "pedagogico",
     "anexar_boletim": "pedagogico",
     "ajustar_prova_aluno": "pedagogico",
+    "ficha_pedagogica_pdf": "pedagogico",
     "modelo_alunos_csv": "alunos",
     "cobranca_pdf": "financeiro",
     "cobranca_email": "financeiro",
@@ -153,9 +154,35 @@ ACOES_ROTULO = {
 
 ACOES_HINT = {
     "acessar": "Mostra a tela no menu e permite abrir a aba.",
-    "ver": "Consulta dados sem editar (listas, PDFs, detalhes).",
+    "ver": "Consulta dados sem editar (listas, painéis, detalhes).",
     "alterar": "Cria e edita registros nessa tela.",
     "excluir": "Apaga registros ou desfaz vínculos nessa tela.",
+}
+
+# Sub-ações finas (só Alunos e Pedagógico nesta entrega)
+SUBACOES = {
+    "alunos": (
+        ("pdf", "Gerar PDF cadastral / lista"),
+    ),
+    "pedagogico": (
+        ("notas", "Lançar / ajustar notas"),
+        ("chamada", "Marcar presença e faltas"),
+        ("boletim", "Gerar boletim PDF"),
+        ("ficha", "Gerar ficha pedagógica PDF"),
+    ),
+}
+
+SUBACOES_ROTULO = {
+    area: {codigo: rotulo for codigo, rotulo in itens}
+    for area, itens in SUBACOES.items()
+}
+
+SUBACOES_HINT = {
+    "pdf": "Lista de alunos ou ficha cadastral pela aba Alunos.",
+    "notas": "Incluir e ajustar notas e provas no pedagógico.",
+    "chamada": "Registrar presença, falta ou justificativa.",
+    "boletim": "Baixar ou enviar o boletim em PDF.",
+    "ficha": "Ficha pedagógica simplificada ou completa (sem cadastro sensível).",
 }
 
 TELAS_PLANO = [
@@ -221,6 +248,7 @@ _TELA_EXTRA = {
     "adicionar_nota": "pedagogico",
     "boletim_pdf": "pedagogico",
     "anexar_boletim": "pedagogico",
+    "ficha_pedagogica_pdf": "pedagogico",
     "ajustar_contracheque": "contracheque",
     "pagina_notas_fiscais": "nfse",
     "nfse_emitir": "nfse",
@@ -236,7 +264,14 @@ _TELA_EXTRA = {
     "ponto_gestao": "ponto",
 }
 
-_POST_SO_LEITURA = {"pdf_contracheque_rota", "relatorio_pdf_consulta", "relatorio_tributario", "relatorio_pdf_custos"}
+_POST_SO_LEITURA = {
+    "pdf_contracheque_rota",
+    "relatorio_pdf_consulta",
+    "relatorio_tributario",
+    "relatorio_pdf_custos",
+    "boletim_pdf",
+    "ficha_pedagogica_pdf",
+}
 
 _ENDPOINTS_EXCLUIR = {
     "excluir_aluno_rota": "alunos",
@@ -278,11 +313,51 @@ _FORM_CADASTRO = {
     ("aluno_vincular_turma", "vincular"): "pedagogico_cadastro",
 }
 
+# (endpoint, acao_form ou "") -> (sub_acao, modulo)
+_SUBACAO_REQ = {
+    ("adicionar_nota", ""): ("notas", "pedagogico"),
+    ("ajustar_prova_aluno", ""): ("notas", "pedagogico"),
+    ("anexar_boletim", ""): ("boletim", "pedagogico"),
+    ("boletim_pdf", ""): ("boletim", "pedagogico"),
+    ("ficha_pedagogica_pdf", ""): ("ficha", "pedagogico"),
+    ("relatorio_alunos_pdf", ""): ("pdf", "alunos"),
+    ("lancar_frequencia_aluno", ""): ("chamada", "pedagogico"),
+    ("pagina_pedagogico", "marcar_presenca"): ("chamada", "pedagogico"),
+    ("pagina_pedagogico", "marcar_presenca_aluno"): ("chamada", "pedagogico"),
+    ("pagina_pedagogico", "marcar_presenca_turma"): ("chamada", "pedagogico"),
+    ("pagina_pedagogico", "marcar_presenca_lote"): ("chamada", "pedagogico"),
+    ("pagina_pedagogico", "lancar_frequencia"): ("chamada", "pedagogico"),
+    ("pagina_pedagogico", "adicionar_nota"): ("notas", "pedagogico"),
+    ("pagina_pedagogico", "ajustar_nota"): ("notas", "pedagogico"),
+    ("calendario_escolar", "marcar_presenca"): ("chamada", "pedagogico"),
+    ("calendario_escolar", "lancar_frequencia"): ("chamada", "pedagogico"),
+}
+
 
 def pode_modulo(papel, modulo):
     papel_n = normalizar_papel(papel)
     permitidos = MODULOS.get(modulo, PAPEIS_TOTAIS)
     return papel_n in permitidos
+
+
+def _subs_padrao(area, papel_n, entra):
+    """Defaults das sub-ações por área/papel."""
+    itens = SUBACOES.get(area) or ()
+    if not itens:
+        return {}
+    if not entra:
+        return {codigo: False for codigo, _r in itens}
+    # Professor: pedagógico completo nas sub-ações; sem alunos.pdf
+    if area == "pedagogico":
+        ligar = entra  # quem acessa pedagógico por padrão pode notas/chamada/pdfs
+        if papel_n == "funcionario":
+            ligar = False
+        return {codigo: ligar for codigo, _r in itens}
+    if area == "alunos":
+        # PDF cadastral: secretaria e gestão
+        ligar = papel_n in {"admin", "supervisor", "financeiro", "direcao", "secretaria"}
+        return {codigo: ligar for codigo, _r in itens}
+    return {codigo: False for codigo, _r in itens}
 
 
 def permissoes_padrao(papel):
@@ -294,7 +369,7 @@ def permissoes_padrao(papel):
         if area == "contracheque" and papel_n in {"professor", "funcionario", "secretaria"}:
             altera = False
         if area == "auditoria":
-            altera = False  # auditoria é consulta; só admin/supervisor “acessam”
+            altera = False
         gestao = papel_n in {"admin", "supervisor", "financeiro", "direcao"}
         mapa[area] = {
             "acessar": entra,
@@ -305,6 +380,7 @@ def permissoes_padrao(papel):
         if area == "dashboard":
             mapa[area]["alterar"] = False
             mapa[area]["excluir"] = False
+        mapa[area].update(_subs_padrao(area, papel_n, entra))
     return mapa
 
 
@@ -321,6 +397,13 @@ def ler_permissoes(bruto):
         return None
 
 
+def _chaves_area(area):
+    chaves = list(ACOES_ACESSO)
+    for codigo, _rotulo in SUBACOES.get(area) or ():
+        chaves.append(codigo)
+    return chaves
+
+
 def permissoes_efetivas(papel, salvo=None):
     base = permissoes_padrao(papel)
     dados = ler_permissoes(salvo)
@@ -328,14 +411,20 @@ def permissoes_efetivas(papel, salvo=None):
         return base
     for area, _rotulo in AREAS_ACESSO:
         item = dados.get(area) or {}
-        for acao in ACOES_ACESSO:
-            if acao in item:
-                base[area][acao] = bool(item[acao])
-        if base[area].get("excluir") or base[area]["alterar"]:
+        for chave in _chaves_area(area):
+            if chave in item:
+                base[area][chave] = bool(item[chave])
+        # Cascade: alterar/excluir ⇒ ver+acessar; ver ⇒ acessar.
+        # Acessar sozinho NÃO implica ver.
+        if base[area].get("excluir") or base[area].get("alterar"):
             base[area]["ver"] = True
             base[area]["acessar"] = True
-        elif base[area]["ver"]:
+        elif base[area].get("ver"):
             base[area]["acessar"] = True
+        # Sub-ações exigem ver
+        for codigo, _r in SUBACOES.get(area) or ():
+            if base[area].get(codigo) and not base[area].get("ver"):
+                base[area][codigo] = False
     return base
 
 
@@ -354,8 +443,21 @@ def pode_acao(papel, modulo, acao="acessar", salvo=None):
     if acao == "alterar":
         return bool(bloco.get("alterar"))
     if acao == "ver":
-        return bool(bloco.get("ver") or bloco.get("acessar"))
-    return bool(bloco.get("acessar") or bloco.get("ver"))
+        return bool(bloco.get("ver"))
+    if acao in (SUBACOES_ROTULO.get(modulo) or {}):
+        return bool(bloco.get("ver") and bloco.get(acao))
+    # acessar: só o flag acessar (menu / abrir aba)
+    return bool(bloco.get("acessar"))
+
+
+def pode_subacao(papel, modulo, sub, salvo=None):
+    """Consulta uma sub-ação fina (notas, chamada, boletim, ficha, pdf…)."""
+    if normalizar_papel(papel) == "admin":
+        return True
+    bloco = permissoes_efetivas(papel, salvo).get(modulo) or {}
+    if not bloco.get("ver"):
+        return False
+    return bool(bloco.get(sub))
 
 
 def pode_endpoint(papel, endpoint):
@@ -368,15 +470,28 @@ def pode_endpoint(papel, endpoint):
 
 
 def classificar_requisicao(endpoint, metodo, acao_form=None):
-    if (metodo or "GET").upper() == "POST" and endpoint not in _POST_SO_LEITURA:
+    """
+    Retorna (acao, modulo).
+    Para sub-ações, acao é o código da sub (notas, chamada, …).
+    GET de conteúdo sensível (boletim/ficha) também usa sub-ação.
+    """
+    chave = (endpoint or "", acao_form or "")
+    if chave in _SUBACAO_REQ:
+        sub, modulo = _SUBACAO_REQ[chave]
+        return sub, modulo
+    if endpoint in _SUBACAO_REQ:
+        sub, modulo = _SUBACAO_REQ[(endpoint, "")]
+        return sub, modulo
+    metodo_u = (metodo or "GET").upper()
+    if metodo_u == "POST" and endpoint not in _POST_SO_LEITURA:
         if endpoint in _ENDPOINTS_EXCLUIR:
             return "excluir", _ENDPOINTS_EXCLUIR[endpoint]
-        chave = (endpoint, acao_form or "")
         if chave in _FORM_EXCLUIR:
             return "excluir", _FORM_EXCLUIR[chave]
         if chave in _FORM_CADASTRO:
             return "alterar", _FORM_CADASTRO[chave]
         return "alterar", ENDPOINTS.get(endpoint)
+    # GET: abrir aba = acessar; conteúdo de consulta é checado na view com pode_ver
     return "acessar", ENDPOINTS.get(endpoint)
 
 
@@ -388,10 +503,8 @@ def modulo_no_plano(modulo, telas):
         return True
     if tela in telas:
         return True
-    # Pacotes antigos: "pedagogico" libera as funções do módulo
     if tela.startswith("pedagogico") and "pedagogico" in telas:
         return True
-    # Pacotes antigos: NFS-e vinha junto com financeiro
     if tela == "nfse" and "financeiro" in telas:
         return True
     return False
@@ -402,6 +515,8 @@ def endpoint_no_plano(endpoint, telas, acao_form=None):
         return True
     if endpoint == "detalhes_aluno":
         return "alunos" in telas or "pedagogico" in telas
+    if endpoint == "ficha_pedagogica_pdf":
+        return "pedagogico" in telas
     if endpoint in _TELA_EXTRA:
         return _TELA_EXTRA[endpoint] in telas
     _tipo, modulo = classificar_requisicao(endpoint, "GET", acao_form)

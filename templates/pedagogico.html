@@ -134,10 +134,17 @@
             {% endif %}
         {% endwith %}
 
+        {% if sem_consulta %}
+        <div class="alert alert-warning" role="alert">
+            Você pode abrir esta aba, mas <strong>não tem permissão de Ver / consultar</strong>.
+            Peça ao administrador para marcar <em>Ver / consultar</em> (e as ações extras, se precisar) em Configurações.
+        </div>
+        {% else %}
+
         {% if aba == 'aluno' %}
         <div class="ped-panel">
             <h3 class="fs-6 fw-bold mb-2">Por aluno</h3>
-            <p class="small text-muted mb-3">Notas, faltas, turmas e matérias nesta tela — sem ir ao cadastro.</p>
+            <p class="small text-muted mb-3">Notas, faltas, turmas e fichas PDF nesta tela — sem precisar do cadastro completo em Alunos.</p>
             <form method="GET" class="row g-2 mb-3">
                 <input type="hidden" name="aba" value="aluno">
                 <div class="col-8 col-md-9">
@@ -177,6 +184,18 @@
                     </div>
                 </div>
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('pagina_pedagogico', aba='aluno') }}">Trocar aluno</a>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+                {% if pode_sub('pedagogico', 'ficha') %}
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('ficha_pedagogica_pdf', aluno_id=aluno_painel.id, modo='simplificado') }}">Ficha simplificada (PDF)</a>
+                <a class="btn btn-sm btn-primary" href="{{ url_for('ficha_pedagogica_pdf', aluno_id=aluno_painel.id, modo='completo') }}">Ficha completa (PDF)</a>
+                {% endif %}
+                {% if pode_sub('pedagogico', 'boletim') %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('boletim_pdf', aluno_id=aluno_painel.id) }}">Boletim (PDF)</a>
+                {% endif %}
+                {% if pode_ver('alunos') %}
+                <a class="btn btn-sm btn-outline-dark" href="{{ url_for('detalhes_aluno', aluno_id=aluno_painel.id) }}">Abrir cadastro completo</a>
+                {% endif %}
             </div>
             <div class="stat-row">
                 <div class="stat-mini"><span>Presentes</span><strong>{{ resumo_faltas.presente }}</strong></div>
@@ -848,7 +867,11 @@
                                     <span>
                                     <span class="d-inline-flex align-items-center gap-2">
                                         {% with foto_atual=aluno.foto_url, foto_nome=aluno.nome_completo %}{% include '_foto_mini.html' %}{% endwith %}
+                                        {% if pode_ver('alunos') %}
                                         <a href="{{ url_for('detalhes_aluno', aluno_id=aluno.id) }}" onclick="event.stopPropagation();">{{ aluno.nome_completo }}</a>
+                                        {% else %}
+                                        <span>{{ aluno.nome_completo }}</span>
+                                        {% endif %}
                                     </span>
                                         <div class="small text-muted">
                                             {% if aluno.matricula %}Mat. {{ aluno.matricula }}{% endif %}
@@ -903,7 +926,7 @@
                         </div>
                     </form>
                     <div class="d-flex flex-wrap gap-2">
-                        {% if pode_alterar('pedagogico') %}
+                        {% if pode_sub('pedagogico', 'chamada') %}
                         <form method="POST" class="m-0">
                             <input type="hidden" name="acao" value="marcar_presenca_turma">
                             <input type="hidden" name="turma_id" value="{{ turma.id }}">
@@ -939,10 +962,16 @@
                                 {% for al in lista_alunos_turma %}
                                 {% set st = presenca_aluno.get(al.id) %}
                                 <tr>
-                                    <td><a href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}" class="text-primary text-decoration-none fw-bold">{{ al.nome }}</a></td>
+                                    <td>
+                                        {% if pode_ver('alunos') %}
+                                        <a href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}" class="text-primary text-decoration-none fw-bold">{{ al.nome }}</a>
+                                        {% else %}
+                                        <a href="{{ url_for('pagina_pedagogico', aba='aluno', aluno_sel=al.id) }}" class="text-primary text-decoration-none fw-bold">{{ al.nome }}</a>
+                                        {% endif %}
+                                    </td>
                                     <td>{{ al.matricula or '-' }}</td>
                                     <td>
-                                        {% if pode_alterar('pedagogico') %}
+                                        {% if pode_sub('pedagogico', 'chamada') %}
                                         <form method="POST" class="d-inline">
                                             <input type="hidden" name="acao" value="marcar_presenca_aluno">
                                             <input type="hidden" name="turma_id" value="{{ turma.id }}">
@@ -956,7 +985,10 @@
                                         {% elif st == 'falta' %}Falta{% elif st == 'presente' %}Presente{% else %}Sem lançamento{% endif %}
                                     </td>
                                     <td class="text-end">
+                                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('pagina_pedagogico', aba='aluno', aluno_sel=al.id) }}">Painel</a>
+                                        {% if pode_ver('alunos') %}
                                         <a class="btn btn-sm btn-outline-primary" href="{{ url_for('detalhes_aluno', aluno_id=al.id) }}">Cadastro</a>
+                                        {% endif %}
                                         {% if pode_excluir('pedagogico_cadastro') %}
                                         <form method="POST" style="display:inline;">
                                             <input type="hidden" name="acao" value="desvincular_aluno">
@@ -982,6 +1014,7 @@
             {% endif %}
         {% endif %}
         {% endif %}
+        {% endif %}{# fim sem_consulta else #}
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

@@ -92,6 +92,7 @@ from tributacao import (
 )
 from relatorios_pdf import (
     pdf_boletim,
+    pdf_ficha_pedagogica,
     pdf_contracheque,
     pdf_historico_periodo,
     pdf_folha_pagamento,
@@ -132,11 +133,15 @@ from permissoes import (
     ACOES_ACESSO,
     ACOES_ROTULO,
     ACOES_HINT,
+    SUBACOES,
+    SUBACOES_ROTULO,
+    SUBACOES_HINT,
     TELAS_PLANO,
     classificar_requisicao,
     endpoint_no_plano,
     modulo_no_plano,
     pode_acao,
+    pode_subacao,
     pode_endpoint,
     pode_modulo,
     pode_requisicao,
@@ -522,10 +527,13 @@ def _permissoes_do_form(papel):
         return None
     dados = {}
     for area, _rotulo in AREAS_ACESSO:
-        dados[area] = {
+        bloco = {
             acao: request.form.get(f"perm_{area}_{acao}") == "1"
-            for acao in ("acessar", "ver", "alterar", "excluir")
+            for acao in ACOES_ACESSO
         }
+        for sub, _rot in SUBACOES.get(area) or ():
+            bloco[sub] = request.form.get(f"perm_{area}_{sub}") == "1"
+        dados[area] = bloco
     return permissoes_efetivas(papel, dados)
 
 
@@ -1187,11 +1195,15 @@ def inject_acl():
         "pode_ver": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "ver", session.get("permissoes")),
         "pode_alterar": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "alterar", session.get("permissoes")),
         "pode_excluir": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "excluir", session.get("permissoes")),
+        "pode_sub": lambda modulo, sub: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_subacao(papel, modulo, sub, session.get("permissoes")),
         "areas_acesso": AREAS_ACESSO,
         "areas_grupos": AREAS_GRUPOS,
         "acoes_acesso": ACOES_ACESSO,
         "acoes_rotulo": ACOES_ROTULO,
         "acoes_hint": ACOES_HINT,
+        "subacoes": SUBACOES,
+        "subacoes_rotulo": SUBACOES_ROTULO,
+        "subacoes_hint": SUBACOES_HINT,
         "smtp_ok": smtp_ok,
         "google_login": google_login,
         "super_admin": bool(session.get("super_admin")),
@@ -1221,6 +1233,7 @@ _AUDITORIA_IGNORAR = {
     "pagina_auditoria", "relatorio_tributario", "relatorio_pdf_folha", "relatorio_pdf_custos",
     "relatorio_cartao_financeiro",
     "cobranca_pdf", "cobranca_email", "memoria_simples_pdf", "extrato_pgdas_pdf", "boletim_pdf", "pdf_contracheque_rota",
+    "ficha_pedagogica_pdf",
     "modelo_alunos_csv", "modelo_custos_csv", "modelo_simples_csv", "modelo_alunos_financeiro_csv",
 }
 
@@ -7029,6 +7042,9 @@ def _nome_da_escola(cursor):
 def relatorio_alunos_pdf():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
+    if not pode_subacao(session.get("usuario_papel"), "alunos", "pdf", session.get("permissoes")):
+        flash("Sem permissão para gerar PDF de alunos.", "danger")
+        return redirect(url_for("pagina_alunos"))
     termo = (request.args.get("q") or "").strip()
     alunos = listar_alunos(termo)
     escola = "Gestão Escolar"
@@ -7372,6 +7388,14 @@ def excluir_documento_pessoa(doc_id):
 def detalhes_aluno(aluno_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
+    papel = session.get("usuario_papel")
+    perms = session.get("permissoes")
+    # Cadastro completo exige alunos.ver; senão redireciona ao painel pedagógico
+    if not pode_acao(papel, "alunos", "ver", perms):
+        if pode_acao(papel, "pedagogico", "ver", perms):
+            return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
+        flash("Sem permissão para consultar o cadastro deste aluno.", "danger")
+        return redirect(url_for("dashboard"))
 
     conexao = obter_conexao()
     aluno, responsaveis, turmas_aluno, financeiro_aluno, pessoas_autorizadas, provas_notas = None, [], [], [], [], []
@@ -8112,6 +8136,9 @@ def autorizacao_busca_anexo(token):
 def adicionar_nota(aluno_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
+    if not pode_subacao(session.get("usuario_papel"), "pedagogico", "notas", session.get("permissoes")):
+        flash("Sem permissão para lançar notas.", "danger")
+        return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
 
     conexao = obter_conexao()
     if conexao:
@@ -8332,6 +8359,9 @@ def ajustar_prova_aluno(aluno_id):
 def boletim_pdf(aluno_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
+    if not pode_subacao(session.get("usuario_papel"), "pedagogico", "boletim", session.get("permissoes")):
+        flash("Sem permissão para gerar boletim.", "danger")
+        return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
     garantir_tabelas_pedagogicas()
     conexao = obter_conexao()
     if not conexao:
@@ -8426,6 +8456,9 @@ def boletim_pdf(aluno_id):
 def anexar_boletim(aluno_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
+    if not pode_subacao(session.get("usuario_papel"), "pedagogico", "boletim", session.get("permissoes")):
+        flash("Sem permissão para anexar boletim.", "danger")
+        return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
     garantir_tabelas_pedagogicas()
     arquivo = request.files.get("arquivo_boletim")
     if not arquivo or arquivo.filename == "":
@@ -8464,6 +8497,9 @@ def anexar_boletim(aluno_id):
 def lancar_frequencia_aluno(aluno_id):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
+    if not pode_subacao(session.get("usuario_papel"), "pedagogico", "chamada", session.get("permissoes")):
+        flash("Sem permissão para marcar presença/faltas.", "danger")
+        return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
     garantir_tabelas_pedagogicas()
     conexao = obter_conexao()
     if conexao:
@@ -8679,9 +8715,23 @@ def excluir_professor(id):
 def pagina_pedagogico():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
+    papel = session.get("usuario_papel")
+    perms = session.get("permissoes")
+    if not pode_acao(papel, "pedagogico", "acessar", perms):
+        flash("Sem permissão para acessar o pedagógico.", "danger")
+        return redirect(url_for("dashboard"))
 
     if request.method == "POST":
         acao = request.form.get("acao", "criar_turma")
+        # Sub-ações finas
+        if acao in ("marcar_presenca_aluno", "marcar_presenca_turma", "lancar_frequencia"):
+            if not pode_subacao(papel, "pedagogico", "chamada", perms):
+                flash("Sem permissão para marcar presença/faltas.", "danger")
+                return redirect(url_for("pagina_pedagogico"))
+        if acao in ("adicionar_nota", "ajustar_nota"):
+            if not pode_subacao(papel, "pedagogico", "notas", perms):
+                flash("Sem permissão para lançar notas.", "danger")
+                return redirect(url_for("pagina_pedagogico"))
         conexao = obter_conexao()
         garantir_tabelas_pedagogicas()
 
@@ -9250,6 +9300,8 @@ def pagina_pedagogico():
     termo_professor = request.args.get("professor", "").strip()
     filtro_turno = request.args.get("turno", "").strip()
 
+    pode_consultar = pode_acao(papel, "pedagogico", "ver", perms)
+
     turmas, professores, alunos_cadastrados, disciplinas = [], [], [], []
     disciplinas_ativas = []
     alunos_por_turma = {}
@@ -9259,8 +9311,8 @@ def pagina_pedagogico():
     presenca_aluno = {}
     data_chamada = request.args.get("data_chamada") or date.today().isoformat()
     disc_chamada = request.args.get("disc_chamada") or "__todas__"
-    materia_editar_id = request.args.get("editar", type=int)
-    aluno_sel_id = request.args.get("aluno_sel", type=int)
+    materia_editar_id = request.args.get("editar", type=int) if pode_consultar else None
+    aluno_sel_id = request.args.get("aluno_sel", type=int) if pode_consultar else None
     painel_aluno = request.args.get("painel_aluno") or "resumo"
     cargas_padrao = []
     aluno_painel = None
@@ -9271,8 +9323,8 @@ def pagina_pedagogico():
     resumo_faltas = {"presente": 0, "falta": 0, "justificada": 0}
 
     garantir_tabelas_pedagogicas()
-    conexao = obter_conexao()
-    if conexao:
+    conexao = obter_conexao() if pode_consultar else None
+    if pode_consultar and conexao:
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                 query_turmas = """
@@ -9496,7 +9548,7 @@ def pagina_pedagogico():
         disciplinas_por_turma=disciplinas_por_turma,
         quadros_por_turma=quadros_por_turma,
         provas_por_turma=provas_por_turma,
-        busca_aluno=request.args.get("aluno", "").strip(),
+        busca_aluno=request.args.get("aluno", "").strip() if pode_consultar else "",
         aluno_sel=aluno_sel_id,
         aluno_painel=aluno_painel,
         aluno_notas=aluno_notas,
@@ -9510,16 +9562,113 @@ def pagina_pedagogico():
         categorias_materia=CATEGORIAS_MATERIA,
         etapas_materia=ETAPAS_MATERIA,
         materia_editar=materia_editar,
+        sem_consulta=not pode_consultar,
         aba=(
             request.args.get("aba")
             or ("aluno" if (request.args.get("aluno") or request.args.get("aluno_sel")) else "turmas")
         ),
-        turma_sel=request.args.get("turma_sel", type=int),
+        turma_sel=request.args.get("turma_sel", type=int) if pode_consultar else None,
         painel=request.args.get("painel") or "horas",
         data_chamada=data_chamada,
         disc_chamada=disc_chamada,
         presenca_aluno=presenca_aluno,
     )
+
+
+@app.route("/pedagogico/aluno/<int:aluno_id>/ficha.pdf")
+def ficha_pedagogica_pdf(aluno_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if not pode_subacao(session.get("usuario_papel"), "pedagogico", "ficha", session.get("permissoes")):
+        flash("Sem permissão para gerar ficha pedagógica.", "danger")
+        return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
+    modo = (request.args.get("modo") or "simplificado").strip().lower()
+    if modo not in {"simplificado", "completo"}:
+        modo = "simplificado"
+    garantir_tabelas_pedagogicas()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            escola = _nome_da_escola(cursor)
+            cursor.execute(
+                "SELECT id, nome_completo, matricula, status FROM alunos WHERE id = %s",
+                (aluno_id,),
+            )
+            aluno = cursor.fetchone()
+            if not aluno:
+                flash("Aluno não encontrado.", "danger")
+                return redirect(url_for("pagina_pedagogico", aba="aluno"))
+            cursor.execute(
+                """
+                SELECT t.id, t.nome, t.ano_letivo, t.turno
+                FROM turmas t
+                JOIN turma_alunos ta ON ta.turma_id = t.id
+                WHERE ta.aluno_id = %s
+                ORDER BY t.nome
+                """,
+                (aluno_id,),
+            )
+            turmas = list(cursor.fetchall() or [])
+            cursor.execute(
+                """
+                SELECT materia, titulo_avaliacao, trimestre, nota, data_aplicacao
+                FROM provas_notas
+                WHERE aluno_id = %s
+                ORDER BY COALESCE(data_aplicacao, CURRENT_DATE) DESC, id DESC
+                LIMIT %s
+                """,
+                (aluno_id, 80 if modo == "completo" else 20),
+            )
+            notas = list(cursor.fetchall() or [])
+            cursor.execute(
+                """
+                SELECT data_aula, status, disciplina, observacao
+                FROM frequencia
+                WHERE aluno_id = %s
+                ORDER BY data_aula DESC
+                LIMIT %s
+                """,
+                (aluno_id, 60 if modo == "completo" else 20),
+            )
+            faltas = list(cursor.fetchall() or [])
+            resumo = {"presente": 0, "falta": 0, "justificada": 0}
+            cursor.execute(
+                """
+                SELECT LOWER(COALESCE(status,'')) AS st, COUNT(*) AS qtd
+                FROM frequencia
+                WHERE aluno_id = %s
+                GROUP BY LOWER(COALESCE(status,''))
+                """,
+                (aluno_id,),
+            )
+            for row in cursor.fetchall() or []:
+                st = row.get("st") or ""
+                if st in resumo:
+                    resumo[st] = row.get("qtd") or 0
+        buffer = pdf_ficha_pedagogica(
+            escola,
+            aluno,
+            turmas=turmas,
+            notas=notas,
+            faltas=faltas,
+            faltas_resumo=resumo,
+            modo=modo,
+        )
+        nome = (aluno.get("matricula") or aluno.get("nome_completo") or "aluno").replace(" ", "_")
+        return send_file(
+            buffer,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"ficha_pedagogica_{modo}_{nome}.pdf",
+        )
+    except Exception as e:
+        flash(f"Não foi possível gerar a ficha: {e}", "danger")
+        return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
+    finally:
+        conexao.close()
 
 
 @app.route("/financeiro", methods=["GET", "POST"])
@@ -12566,13 +12715,18 @@ def pagina_configuracoes():
                         for area, _rotulo in AREAS_ACESSO:
                             ant = anteriores.get(area) or {}
                             novo = perm_salvas.get(area) or {}
-                            for acao_p in ACOES_ACESSO:
+                            chaves = list(ACOES_ACESSO) + [c for c, _r in SUBACOES.get(area) or ()]
+                            for acao_p in chaves:
                                 a_val = bool(ant.get(acao_p))
                                 n_val = bool(novo.get(acao_p))
                                 if a_val != n_val:
+                                    if acao_p in ACOES_ROTULO:
+                                        rotulo_campo = ACOES_ROTULO[acao_p]
+                                    else:
+                                        rotulo_campo = (SUBACOES_ROTULO.get(area) or {}).get(acao_p, acao_p)
                                     mudancas.append(
                                         {
-                                            "campo": f"{mapa_area.get(area, area)} · {ACOES_ROTULO.get(acao_p, acao_p)}",
+                                            "campo": f"{mapa_area.get(area, area)} · {rotulo_campo}",
                                             "antes": "Sim" if a_val else "Não",
                                             "depois": "Sim" if n_val else "Não",
                                         }
@@ -12821,6 +12975,9 @@ def pagina_configuracoes():
         acoes_acesso=ACOES_ACESSO,
         acoes_rotulo=ACOES_ROTULO,
         acoes_hint=ACOES_HINT,
+        subacoes=SUBACOES,
+        subacoes_rotulo=SUBACOES_ROTULO,
+        subacoes_hint=SUBACOES_HINT,
         padroes_acesso=padroes_por_papel(),
         nome_do_papel=rotulo_papel,
     )

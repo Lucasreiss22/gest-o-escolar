@@ -296,6 +296,27 @@
                                 </td>
                                 {% endfor %}
                             </tr>
+                            {% if subacoes.get(area) %}
+                            <tr class="perm-sub">
+                                <td colspan="5" style="background:#fafbfc;padding:8px 12px 12px 28px;">
+                                    <div style="font-size:.72rem;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;">Nesta tela (só com Ver/consultar)</div>
+                                    <div style="display:flex;flex-wrap:wrap;gap:10px 16px;">
+                                        {% for sub, sub_rotulo in subacoes[area] %}
+                                        <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer;" title="{{ subacoes_hint.get(sub, '') }}">
+                                            <input type="checkbox"
+                                                   name="perm_{{ area }}_{{ sub }}"
+                                                   value="1"
+                                                   data-perm="{{ area }}"
+                                                   data-acao="{{ sub }}"
+                                                   data-sub="1"
+                                                   {% if bloco.get(sub) %}checked{% endif %}>
+                                            {{ sub_rotulo }}
+                                        </label>
+                                        {% endfor %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endif %}
                             {% endfor %}
                             {% else %}
                             <tr><td colspan="5" class="hint">Nenhuma tela liberada no plano desta escola.</td></tr>
@@ -304,8 +325,8 @@
                     </table>
                 </div>
                 <p style="font-size:.85rem;color:#64748b;margin:12px 0 0;line-height:1.45;">
-                    Mesmo com a aba habilitada no plano da escola, a pessoa só mexe no que estiver marcado aqui.
-                    <strong>Alterar</strong> libera criar/editar; <strong>Excluir</strong> é separado.
+                    <strong>Acessar</strong> só mostra a aba; <strong>Ver / consultar</strong> libera listas e painéis.
+                    Em Alunos e Pedagógico há ações extras (notas, chamada, boletim, ficha PDF).
                     Quem não tem a permissão não vê o botão. A pessoa precisa entrar de novo para a mudança valer.
                     O histórico completo fica em Auditoria.
                 </p>
@@ -361,7 +382,8 @@
         function soVer() {
             document.querySelectorAll("[data-perm]").forEach(function (el) {
                 var acao = el.getAttribute("data-acao");
-                setar(el, acao === "acessar" || acao === "ver");
+                var ehSub = el.getAttribute("data-sub") === "1";
+                setar(el, !ehSub && (acao === "acessar" || acao === "ver"));
             });
         }
         function limpar() {
@@ -379,10 +401,25 @@
         });
         document.querySelectorAll("[data-acao='ver']").forEach(function (el) {
             el.addEventListener("change", function () {
+                var area = el.getAttribute("data-perm");
+                if (el.checked) {
+                    document.querySelectorAll("[data-perm='" + area + "'][data-acao='acessar']").forEach(function (item) {
+                        setar(item, true);
+                    });
+                } else {
+                    document.querySelectorAll("[data-perm='" + area + "'][data-sub='1']").forEach(function (item) {
+                        setar(item, false);
+                    });
+                }
+            });
+        });
+        document.querySelectorAll("[data-sub='1']").forEach(function (el) {
+            el.addEventListener("change", function () {
                 if (!el.checked) return;
                 var area = el.getAttribute("data-perm");
-                document.querySelectorAll("[data-perm='" + area + "'][data-acao='acessar']").forEach(function (item) {
-                    setar(item, true);
+                document.querySelectorAll("[data-perm='" + area + "']").forEach(function (item) {
+                    var acao = item.getAttribute("data-acao");
+                    if (acao === "acessar" || acao === "ver") setar(item, true);
                 });
             });
         });

@@ -122,7 +122,8 @@ _ROTULOS = {
     "lancar_frequencia_aluno": "Lançou frequência",
     "adicionar_nota": "Incluiu nota",
     "ajustar_prova_aluno": "Ajustou prova do aluno",
-    "anexar_boletim": "Anexou boletim",
+    "ficha_pedagogica_pdf": "Gerou ficha pedagógica",
+    "boletim_pdf": "Gerou boletim",
     "sala_professor_enviar_pdf": "Enviou PDF da sala do professor",
     # Equipe
     "cadastrar_professor": "Incluiu colaborador",
