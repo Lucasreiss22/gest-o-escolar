@@ -261,21 +261,49 @@ def _erro_interno(e):
     return _pagina_erro(e)
 
 
+@app.errorhandler(404)
+def _pagina_nao_encontrada(e):
+    # Evita a tela “Not Found” do Werkzeug — manda de volta ao login
+    try:
+        if session.get("usuario_id") and not session.get("super_admin"):
+            flash("Página não encontrada.", "danger")
+            return redirect(url_for("dashboard"))
+    except Exception:
+        pass
+    return redirect("/login")
+
+
 @app.errorhandler(Exception)
 def _qualquer_erro(e):
-    if isinstance(e, HTTPException) and e.code != 500:
-        return e
+    if isinstance(e, HTTPException):
+        if e.code == 404:
+            return _pagina_nao_encontrada(e)
+        if e.code != 500:
+            return e
     return _pagina_erro(e)
 
 
 @app.route("/ping")
 @app.route("/health")
+@app.route("/healthz")
 def ping():
+    # Health check do Render precisa ser instantâneo (sem banco / folha).
+    return "ok", 200, {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"}
+
+
+@app.route("/tarefas/folha")
+def tarefas_folha():
+    """Processamento periódico de contra-cheques (chame via cron se quiser)."""
+    segredo = (request.args.get("token") or request.headers.get("X-Cron-Token") or "").strip()
+    esperado = (_CFG.get("SECRET_KEY") or "").strip()
+    if esperado and segredo != esperado:
+        return "forbidden", 403
     try:
         _processar_contracheques_todas_escolas()
+        return "folha ok", 200
     except Exception as e:
-        print(f"ping folha: {e}")
-    return "ok", 200, {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"}
+        print(f"tarefas folha: {e}")
+        return f"erro: {e}", 500
 
 oauth = None
 try:
@@ -1167,7 +1195,8 @@ def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos,
 
 @app.context_processor
 def inject_acl():
-    papel = normalizar_papel(session.get("usuario_papel"))
+    logado = bool(session.get("usuario_id") or session.get("super_admin"))
+    papel = normalizar_papel(session.get("usuario_papel")) if logado else "funcionario"
     cid = (_CFG.get("GOOGLE_CLIENT_ID") or "").strip()
     secret = (_CFG.get("GOOGLE_CLIENT_SECRET") or "").strip()
     google_login = False
@@ -1177,7 +1206,7 @@ def inject_acl():
         or session.get("gmail_envio")
     )
     login_publico = (request.endpoint or "") in {
-        "login", "logout", "ping", "login_google", "login_google_callback",
+        "login", "logout", "ping", "tarefas_folha", "login_google", "login_google_callback",
         "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
         "plataforma_escolas", "plataforma_autorizar_gmail", "plataforma_voltar",
     }
@@ -1192,11 +1221,11 @@ def inject_acl():
         "papel_atual": papel,
         "rotulo_papel": rotulo_papel(papel),
         "nfse_liberada": bool(getattr(g, "nfse_liberada", False)),
-        "pode": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "acessar", session.get("permissoes")),
-        "pode_ver": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "ver", session.get("permissoes")),
-        "pode_alterar": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "alterar", session.get("permissoes")),
-        "pode_excluir": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "excluir", session.get("permissoes")),
-        "pode_sub": lambda modulo, sub: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_subacao(papel, modulo, sub, session.get("permissoes")),
+        "pode": lambda modulo: logado and (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "acessar", session.get("permissoes")),
+        "pode_ver": lambda modulo: logado and (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "ver", session.get("permissoes")),
+        "pode_alterar": lambda modulo: logado and (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "alterar", session.get("permissoes")),
+        "pode_excluir": lambda modulo: logado and (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "excluir", session.get("permissoes")),
+        "pode_sub": lambda modulo, sub: logado and (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_subacao(papel, modulo, sub, session.get("permissoes")),
         "areas_acesso": AREAS_ACESSO,
         "areas_grupos": AREAS_GRUPOS,
         "acoes_acesso": ACOES_ACESSO,
@@ -1401,7 +1430,7 @@ def _atualizar_permissoes_sessao():
 def proteger_rotas():
     endpoint = request.endpoint
     publicos = {
-        None, "login", "logout", "static", "ping", "login_google", "login_google_callback",
+        None, "login", "logout", "static", "ping", "tarefas_folha", "login_google", "login_google_callback",
         "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
         "autorizacao_busca_publico", "autorizacao_busca_responder", "autorizacao_busca_anexo",
     }
@@ -2834,8 +2863,13 @@ def login_esqueci_senha():
 
 @app.route("/", methods=["GET", "POST"])
 @app.route("/login", methods=["GET", "POST"])
+@app.route("/entrar", methods=["GET", "POST"])
 def login():
-    garantir_plataforma()
+    # Nunca derruba a tela de login se o banco estiver lento/indisponível
+    try:
+        garantir_plataforma()
+    except Exception as e:
+        print(f"login garantir_plataforma: {e}")
     if request.method == "POST":
         try:
             email = exigencia_email(request.form.get("email"), "E-mail")
