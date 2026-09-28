@@ -842,7 +842,7 @@ def garantir_tabelas_folha():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:folha:simples"
+    chave = f"{schema}:folha:simples:rescisao"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -1102,6 +1102,8 @@ def garantir_tabelas_folha():
                     )
             from nfse import garantir_tabela_escola
             garantir_tabela_escola(cursor)
+            from rescisao import garantir_tabelas_rescisao
+            garantir_tabelas_rescisao(cursor)
             conexao.commit()
             _tabelas_ok.add(chave)
     except Exception as e:

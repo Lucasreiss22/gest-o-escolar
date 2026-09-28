@@ -65,7 +65,7 @@
     </div>
     {% endif %}
 
-    {% if pode('professores') or pode('ponto') or pode('contracheque') %}
+    {% if pode('professores') or pode('ponto') or pode('contracheque') or pode('rescisao') %}
     <div class="nav-section">
         <div class="nav-section-label">Pessoas / RH</div>
         {% if pode('professores') %}
@@ -90,6 +90,14 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M8 15h4"/></svg>
             </span>
             <span>Contra-cheque</span>
+        </a>
+        {% endif %}
+        {% if pode('rescisao') %}
+        <a href="{{ url_for('pagina_rescisao') }}" class="{% if nav_active == 'rescisao' %}active{% endif %}">
+            <span class="nav-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 14l2 2 4-4"/><path d="M5 21h14a2 2 0 0 0 2-2V7l-5-5H5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2z"/><path d="M14 2v5h5"/></svg>
+            </span>
+            <span>Rescisão</span>
         </a>
         {% endif %}
     </div>

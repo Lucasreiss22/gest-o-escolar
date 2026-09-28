@@ -128,6 +128,16 @@ from folha import (
     dia_pagamento_valido,
     aplicar_ajuste_competencia,
 )
+from rescisao import (
+    TIPOS_RESCISAO,
+    AVISO_MODALIDADES,
+    calcular_rescisao,
+    dias_aviso_proporcional,
+    encerrar_vinculo_e_salvar_rescisao,
+    listar_historico_vinculos,
+    recontratar_funcionario,
+    sincronizar_vinculo_do_funcionario,
+)
 from permissoes import (
     AREAS_ACESSO,
     AREAS_GRUPOS,
@@ -4157,6 +4167,26 @@ def gerenciar_usuarios():
                             "UPDATE funcionarios SET foto_url = %s WHERE id = %s",
                             (foto_func, fid),
                         )
+                    if fid:
+                        try:
+                            sincronizar_vinculo_do_funcionario(
+                                cursor,
+                                fid,
+                                {
+                                    "matricula_esocial": limpar_campo("matricula_esocial") or None,
+                                    "data_inicio_contrato": inicio_contrato,
+                                    "data_contratacao": inicio_contrato,
+                                    "data_fim_contrato": limpar_campo("data_fim_contrato") or None,
+                                    "tipo_contrato": request.form.get("tipo_contrato") or "clt_mensalista",
+                                    "cargo": cargo,
+                                    "salario": _float_form("salario"),
+                                    "valor_hora": _float_form("valor_hora"),
+                                    "horas_mes": _float_form("horas_mes"),
+                                    "ativo": ativo,
+                                },
+                            )
+                        except Exception:
+                            pass
                     conexao.commit()
                     if uid and uid == session.get("usuario_id"):
                         session["usuario_papel"] = papel
@@ -4356,6 +4386,237 @@ def gerenciar_usuarios():
         preview_folha=preview_folha,
         regime_folha=regime_folha,
     )
+
+
+def _params_rescisao_do_form(form, defaults=None):
+    d = dict(defaults or {})
+    get = form.get if form is not None else lambda *_a, **_k: None
+
+    def _v(nome, padrao=""):
+        bruto = get(nome)
+        if bruto is None or bruto == "":
+            return d.get(nome, padrao)
+        return bruto
+
+    return {
+        "tipo_rescisao": _v("tipo_rescisao", "sem_justa_causa"),
+        "aviso_modalidade": _v("aviso_modalidade", "indenizado"),
+        "data_desligamento": _v("data_desligamento", date.today().isoformat()),
+        "data_aviso": _v("data_aviso", ""),
+        "data_pagamento": _v("data_pagamento", ""),
+        "dias_trabalhados_mes": _v("dias_trabalhados_mes", str(date.today().day)),
+        "dias_aviso": _v("dias_aviso", ""),
+        "ferias_vencidas_simples": _v("ferias_vencidas_simples", "0"),
+        "ferias_vencidas_dobro": _v("ferias_vencidas_dobro", "0"),
+        "avos_ferias_proporcionais": _v("avos_ferias_proporcionais", ""),
+        "avos_13": _v("avos_13", ""),
+        "decimo_ja_pago": _v("decimo_ja_pago", "0"),
+        "saldo_fgts_depositos": _v("saldo_fgts_depositos", "0"),
+        "outros_proventos": _v("outros_proventos", "0"),
+        "outros_descontos": _v("outros_descontos", "0"),
+        "remover_usuario": bool(form and form.get("remover_usuario") == "1") if form is not None else bool(d.get("remover_usuario")),
+    }
+
+
+@app.route("/rescisao", methods=["GET", "POST"])
+def pagina_rescisao():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    papel = session.get("usuario_papel")
+    perms = session.get("permissoes")
+    if not pode_acao(papel, "rescisao", "acessar", perms):
+        flash("Sem permissão para rescisão contratual.", "danger")
+        return redirect(url_for("dashboard"))
+
+    garantir_tabelas_folha()
+    modo = (request.args.get("modo") or request.form.get("modo") or "ativos").strip()
+    if modo not in ("ativos", "rescindidos"):
+        modo = "ativos"
+    busca = (request.args.get("q") or request.form.get("q") or "").strip()
+    fid = request.args.get("fid", type=int) or request.form.get("funcionario_id", type=int)
+
+    selecionado = None
+    historico = []
+    calculo = None
+    params = _params_rescisao_do_form(None)
+    lista = []
+
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("dashboard"))
+
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            if modo == "rescindidos":
+                cursor.execute(
+                    """
+                    SELECT * FROM funcionarios
+                    WHERE COALESCE(ativo, TRUE) = FALSE
+                       OR LOWER(COALESCE(situacao, '')) = 'rescindido'
+                       OR data_fim_contrato IS NOT NULL
+                    ORDER BY nome_completo ASC
+                    """
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM funcionarios
+                    WHERE COALESCE(ativo, TRUE) = TRUE
+                      AND LOWER(COALESCE(situacao, 'ativo')) <> 'rescindido'
+                      AND data_fim_contrato IS NULL
+                    ORDER BY nome_completo ASC
+                    """
+                )
+            lista = list(cursor.fetchall() or [])
+            if busca:
+                termo = busca.lower()
+                lista = [
+                    f for f in lista
+                    if termo in (f.get("nome_completo") or "").lower()
+                    or termo in (f.get("cpf") or "")
+                    or termo in (f.get("cargo") or "").lower()
+                ]
+
+            if fid:
+                cursor.execute("SELECT * FROM funcionarios WHERE id = %s", (fid,))
+                selecionado = cursor.fetchone()
+                if selecionado:
+                    historico = listar_historico_vinculos(cursor, fid)
+                    params = _params_rescisao_do_form(None, {
+                        "dias_trabalhados_mes": str(date.today().day),
+                        "dias_aviso": str(dias_aviso_proporcional(
+                            selecionado.get("data_inicio_contrato") or selecionado.get("data_contratacao"),
+                            date.today(),
+                        )),
+                    })
+
+            if request.method == "POST" and selecionado and modo != "rescindidos":
+                if not pode_acao(papel, "rescisao", "ver", perms) and not pode_acao(papel, "rescisao", "alterar", perms):
+                    flash("Sem permissão para calcular rescisão.", "danger")
+                    return redirect(url_for("pagina_rescisao", fid=fid, modo=modo))
+                params = _params_rescisao_do_form(request.form)
+                calculo = calcular_rescisao(dict(selecionado), params)
+                # Espelha avos/dias calculados nos campos ajustáveis
+                params["dias_aviso"] = str(calculo.get("dias_aviso") or "")
+                params["avos_13"] = str(calculo.get("avos_13") or "")
+                params["avos_ferias_proporcionais"] = str(calculo.get("avos_ferias_proporcionais") or "")
+                acao = request.form.get("acao") or "calcular"
+                if acao == "confirmar":
+                    if not pode_acao(papel, "rescisao", "alterar", perms):
+                        flash("Sem permissão para confirmar rescisão.", "danger")
+                        return redirect(url_for("pagina_rescisao", fid=fid))
+                    try:
+                        rid, login_removido = encerrar_vinculo_e_salvar_rescisao(
+                            cursor,
+                            fid,
+                            calculo,
+                            params,
+                            usuario_id=session.get("usuario_id"),
+                        )
+                        conexao.commit()
+                        try:
+                            registrar_auditoria(
+                                session.get("escola_id"),
+                                session.get("escola_nome") or session.get("escola_slug") or "",
+                                session.get("usuario_nome") or "",
+                                session.get("usuario_email") or "",
+                                "alteracao",
+                                "rescisao",
+                                f"Rescisão de {selecionado.get('nome_completo')}",
+                                f"#{rid} · {calculo.get('tipo_rescisao')} · líquido R$ {calculo.get('total_liquido')}",
+                                usuario_login=session.get("usuario_email"),
+                            )
+                        except Exception:
+                            pass
+                        msg = "Rescisão registrada. Vínculo encerrado; cadastro mantido como contrato rescindido."
+                        if login_removido:
+                            msg += " Usuário de acesso removido."
+                        if calculo.get("pagamento_atrasado"):
+                            flash(msg + " Atenção: pagamento fora do prazo do Art. 477 §6º.", "danger")
+                        else:
+                            flash(msg, "success")
+                        return redirect(url_for("pagina_rescisao", fid=fid, modo="rescindidos"))
+                    except Exception as e:
+                        conexao.rollback()
+                        flash(f"Não foi possível registrar a rescisão: {e}", "danger")
+    finally:
+        conexao.close()
+
+    return render_template(
+        "rescisao.html",
+        modo=modo,
+        busca=busca,
+        lista=lista,
+        selecionado=selecionado,
+        historico=historico,
+        calculo=calculo,
+        params=params,
+        tipos_rescisao=TIPOS_RESCISAO,
+        aviso_modalidades=AVISO_MODALIDADES,
+        rotulo_contrato=rotulo_contrato,
+    )
+
+
+@app.route("/rescisao/recontratar", methods=["POST"])
+def rescisao_recontratar():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    papel = session.get("usuario_papel")
+    perms = session.get("permissoes")
+    if not pode_acao(papel, "rescisao", "alterar", perms):
+        flash("Sem permissão para recontratar.", "danger")
+        return redirect(url_for("pagina_rescisao", modo="rescindidos"))
+
+    fid = request.form.get("funcionario_id", type=int)
+    if not fid:
+        flash("Funcionário não informado.", "danger")
+        return redirect(url_for("pagina_rescisao", modo="rescindidos"))
+
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("pagina_rescisao", modo="rescindidos"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            vid = recontratar_funcionario(
+                cursor,
+                fid,
+                {
+                    "data_inicio": limpar_campo("data_inicio"),
+                    "matricula_esocial": limpar_campo("matricula_esocial"),
+                    "cargo": limpar_campo("cargo"),
+                    "tipo_contrato": request.form.get("tipo_contrato") or "clt_mensalista",
+                    "salario": _float_form("salario"),
+                    "valor_hora": _float_form("valor_hora"),
+                    "horas_mes": _float_form("horas_mes", 220.0),
+                    "dia_pagamento": dia_pagamento_valido(request.form.get("dia_pagamento")),
+                },
+            )
+            conexao.commit()
+            try:
+                registrar_auditoria(
+                    session.get("escola_id"),
+                    session.get("escola_nome") or session.get("escola_slug") or "",
+                    session.get("usuario_nome") or "",
+                    session.get("usuario_email") or "",
+                    "inclusao",
+                    "rescisao",
+                    f"Recontratação funcionário #{fid}",
+                    f"Novo vínculo #{vid}",
+                    usuario_login=session.get("usuario_email"),
+                )
+            except Exception:
+                pass
+            flash("Novo contrato aberto. Dados pessoais reaproveitados; vínculo anterior permanece no histórico.", "success")
+            return redirect(url_for("gerenciar_usuarios", fid=fid))
+    except Exception as e:
+        conexao.rollback()
+        flash(str(e), "danger")
+        return redirect(url_for("pagina_rescisao", fid=fid, modo="rescindidos"))
+    finally:
+        conexao.close()
 
 
 @app.route("/dashboard")

@@ -14,6 +14,7 @@ MODULOS = {
     "usuarios": {"admin", "administrador", "direcao", "supervisor", "financeiro"},
     "contracheque": PAPEIS_TOTAIS | {"professor", "funcionario", "secretaria"},
     "ponto": PAPEIS_TOTAIS | {"professor", "funcionario", "secretaria"},
+    "rescisao": PAPEIS_TOTAIS | {"financeiro"},
     "auditoria": {"admin", "administrador", "direcao", "supervisor"},
     "nfse": {"admin", "financeiro"},
 }
@@ -82,6 +83,10 @@ ENDPOINTS = {
     "ponto_gestao": "ponto",
     "ponto_relatorio_pdf": "ponto",
     "atestado_ponto": "ponto",
+    "pagina_rescisao": "rescisao",
+    "rescisao_calcular": "rescisao",
+    "rescisao_confirmar": "rescisao",
+    "rescisao_recontratar": "rescisao",
     "aluno_vincular_turma": "pedagogico_cadastro",
     "pagina_auditoria": "auditoria",
     "relatorio_auditoria_pdf": "auditoria",
@@ -128,6 +133,7 @@ AREAS_ACESSO = [
     ("calendario", "Calendário / chamada"),
     ("contracheque", "Contra-cheque"),
     ("ponto", "Ponto (bater e ver)"),
+    ("rescisao", "Rescisão contratual"),
     ("configuracoes", "Configurações"),
     ("usuarios", "Usuários e permissões"),
     ("auditoria", "Auditoria"),
@@ -138,7 +144,7 @@ AREAS_ACESSO = [
 AREAS_GRUPOS = [
     ("Menu e painel", ["dashboard"]),
     ("Alunos e pedagógico", ["alunos", "pedagogico", "pedagogico_cadastro", "calendario"]),
-    ("Equipe e ponto", ["professores", "ponto", "contracheque"]),
+    ("Equipe e ponto", ["professores", "ponto", "contracheque", "rescisao"]),
     ("Financeiro e notas", ["financeiro", "nfse"]),
     ("Administração", ["configuracoes", "usuarios", "auditoria"]),
 ]
@@ -195,6 +201,7 @@ TELAS_PLANO = [
     ("calendario", "Calendário / chamada"),
     ("contracheque", "Contra-cheque"),
     ("ponto", "Ponto"),
+    ("rescisao", "Rescisão / recontratação"),
     ("auditoria", "Auditoria"),
 ]
 
@@ -212,6 +219,7 @@ MODULO_PARA_TELA = {
     "ponto": "ponto",
     "nfse": "nfse",
     "auditoria": "auditoria",
+    "rescisao": "rescisao",
 }
 
 PACOTES_INICIAIS = [
@@ -262,6 +270,8 @@ _TELA_EXTRA = {
     "relatorio_auditoria_pdf": "auditoria",
     "ponto": "ponto",
     "ponto_gestao": "ponto",
+    "pagina_rescisao": "rescisao",
+    "rescisao_recontratar": "rescisao",
 }
 
 _POST_SO_LEITURA = {
@@ -506,6 +516,8 @@ def modulo_no_plano(modulo, telas):
     if tela.startswith("pedagogico") and "pedagogico" in telas:
         return True
     if tela == "nfse" and "financeiro" in telas:
+        return True
+    if tela == "rescisao" and ("professores" in telas or "financeiro" in telas):
         return True
     return False
 
