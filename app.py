@@ -551,11 +551,21 @@ def _especialidade_form():
     return texto[:150]
 
 
-def _permissoes_do_form(papel):
+def _permissoes_do_form(papel, anteriores=None):
+    """Lê os checkboxes do formulário. Áreas sem checkbox no POST mantêm o valor anterior."""
     if not any(str(chave).startswith("perm_") for chave in request.form.keys()):
         return None
+    anteriores = anteriores or {}
     dados = {}
+    chaves_form = list(request.form.keys())
     for area, _rotulo in AREAS_ACESSO:
+        prefixo = f"perm_{area}_"
+        if not any(str(k).startswith(prefixo) for k in chaves_form):
+            # Área não estava na tela (plano/NFSe) — não zera
+            ant = anteriores.get(area)
+            if isinstance(ant, dict):
+                dados[area] = dict(ant)
+            continue
         bloco = {
             acao: request.form.get(f"perm_{area}_{acao}") == "1"
             for acao in ACOES_ACESSO
@@ -563,7 +573,14 @@ def _permissoes_do_form(papel):
         for sub, _rot in SUBACOES.get(area) or ():
             bloco[sub] = request.form.get(f"perm_{area}_{sub}") == "1"
         dados[area] = bloco
-    return permissoes_efetivas(papel, dados)
+    # Mescla com anteriores para áreas omitidas, depois aplica cascade de leitura
+    bruto = {}
+    for area, _rotulo in AREAS_ACESSO:
+        if area in dados:
+            bruto[area] = dados[area]
+        elif isinstance(anteriores.get(area), dict):
+            bruto[area] = dict(anteriores[area])
+    return permissoes_efetivas(papel, bruto)
 
 
 def _cargo_do_form(papel=None):
@@ -1277,6 +1294,14 @@ def _flash_de_erro():
 
 @app.after_request
 def gravar_auditoria(resposta):
+    # Páginas autenticadas não podem ficar em cache — senão o F5 mantém o menu antigo
+    try:
+        if session.get("usuario_id") and resposta.mimetype and "html" in (resposta.mimetype or ""):
+            resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resposta.headers["Pragma"] = "no-cache"
+            resposta.headers["Expires"] = "0"
+    except Exception:
+        pass
     try:
         if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
             return resposta
@@ -1392,14 +1417,10 @@ def _limpar_cache_nfse_sessao():
     session.pop("_nfse_check_em", None)
 
 
-def _atualizar_permissoes_sessao():
-    """Relê papel/permissões do banco a cada página — F5 já atualiza o menu."""
+def _atualizar_permissoes_sessao(forcar=False):
+    """Relê papel/permissões do banco a cada página — F5 atualiza o menu."""
     uid = session.get("usuario_id")
     if not uid or session.get("super_admin"):
-        return
-    agora = time.time()
-    # Evita 2 consultas no mesmo segundo (redirect + carga); F5 sempre passa.
-    if (agora - float(session.get("permissoes_atualizado_em") or 0)) < 1.5:
         return
     conexao = obter_conexao()
     if not conexao:
@@ -1414,12 +1435,13 @@ def _atualizar_permissoes_sessao():
         if not row:
             return
         papel = normalizar_papel(row.get("papel") or session.get("usuario_papel") or "funcionario")
+        novas = permissoes_efetivas(papel, row.get("permissoes"))
         session["usuario_papel"] = papel
-        session["permissoes"] = permissoes_efetivas(papel, row.get("permissoes"))
-        session["permissoes_atualizado_em"] = agora
+        session["permissoes"] = novas
+        session["permissoes_atualizado_em"] = time.time()
+        session.modified = True
     except Exception as erro:
         print(f"atualizar permissoes sessao: {erro}")
-    # obter_conexao reusa o pool; close devolve ao worker
     try:
         conexao.close()
     except Exception:
@@ -12814,7 +12836,7 @@ def pagina_configuracoes():
                         row = cursor.fetchone() or {}
                         papel = normalizar_papel(row.get("papel") or "funcionario")
                         anteriores = permissoes_efetivas(papel, row.get("permissoes"))
-                        perm_salvas = _permissoes_do_form(papel) or permissoes_padrao(papel)
+                        perm_salvas = _permissoes_do_form(papel, anteriores) or anteriores or permissoes_padrao(papel)
                         if not getattr(g, "nfse_liberada", False):
                             perm_salvas["nfse"] = anteriores.get("nfse") or {}
                         cursor.execute(
@@ -12825,7 +12847,7 @@ def pagina_configuracoes():
                         if uid == session.get("usuario_id"):
                             session["permissoes"] = perm_salvas
                             session["permissoes_atualizado_em"] = time.time()
-                            session["permissoes_atualizado_em"] = time.time()
+                            session.modified = True
                         # Detalhe completo para auditoria
                         mudancas = []
                         mapa_area = {a: r for a, r in AREAS_ACESSO}
@@ -12873,7 +12895,10 @@ def pagina_configuracoes():
                             )
                         except Exception as erro_aud:
                             print(f"auditoria permissões: {erro_aud}")
-                        flash("Permissões salvas. A pessoa vê as abas no próximo F5 (não precisa sair e entrar).", "success")
+                        flash(
+                            "Permissões salvas. Peça à pessoa um F5 (atualizar a página) — o menu muda na hora, sem sair e entrar.",
+                            "success",
+                        )
                 except Exception as e:
                     conexao.rollback()
                     flash(f"Não foi possível salvar o acesso: {e}", "danger")

@@ -118,9 +118,13 @@
         <nav class="ped-tabs" aria-label="Seções do pedagógico">
             <a class="{% if aba == 'turmas' %}ativa{% endif %}" href="{{ url_for('pagina_pedagogico', aba='turmas', turma=filtro_turma, professor=filtro_prof, turno=filtro_turno) }}">Turmas</a>
             <a class="{% if aba == 'aluno' %}ativa{% endif %}" href="{{ url_for('pagina_pedagogico', aba='aluno') }}">Por aluno</a>
+            {% if pode('pedagogico_cadastro') or pode_alterar('pedagogico_cadastro') %}
             <a class="{% if aba == 'materias' %}ativa{% endif %}" href="{{ url_for('pagina_pedagogico', aba='materias') }}">Matérias</a>
             <a class="{% if aba == 'cargas' %}ativa{% endif %}" href="{{ url_for('pagina_pedagogico', aba='cargas') }}">Cargas horárias</a>
+            {% endif %}
+            {% if pode('calendario') %}
             <a href="{{ url_for('calendario_escolar') }}">Calendário</a>
+            {% endif %}
         </nav>
 
         {% with messages = get_flashed_messages(with_categories=true) %}

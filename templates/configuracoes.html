@@ -247,9 +247,10 @@
             <p style="font-size:.9rem;color:#334155;margin-top:0;">
                 {{ acesso.nome }} · {{ nome_do_papel(acesso.papel) }}{% if acesso.cargo %} · {{ acesso.cargo }}{% endif %}
             </p>
-            <form method="POST" id="formPermissoes">
+            <form method="POST" id="formPermissoes" action="{{ url_for('pagina_configuracoes') }}" autocomplete="off">
                 <input type="hidden" name="acao" value="salvar_acesso">
                 <input type="hidden" name="usuario_id" value="{{ acesso.id }}">
+                <input type="hidden" name="perm__envio" value="1">
                 <p style="margin:0 0 12px; display:flex; flex-wrap:wrap; gap:8px;">
                     <button type="button" class="btn btn-primary" id="usarPadraoFuncao">Usar padrão da função</button>
                     <button type="button" class="btn" id="marcarVerTudo" style="background:#e2e8f0;color:#0f172a;">Só ver (todas as abas)</button>
