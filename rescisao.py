@@ -407,13 +407,16 @@ def garantir_tabelas_rescisao(cursor):
         )
         """
     )
-    cursor.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_vinculo_aberto
-        ON funcionario_vinculos (funcionario_id)
-        WHERE data_fim IS NULL AND situacao = 'ativo'
-        """
-    )
+    try:
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_vinculo_aberto
+            ON funcionario_vinculos (funcionario_id)
+            WHERE data_fim IS NULL AND situacao = 'ativo'
+            """
+        )
+    except Exception:
+        pass
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS rescisoes (

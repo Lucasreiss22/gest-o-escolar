@@ -4624,6 +4624,12 @@ def dashboard():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
 
+    # Garante tabelas de folha/rescisão mesmo sem abrir o Financeiro
+    try:
+        garantir_tabelas_folha()
+    except Exception:
+        pass
+
     metrics = {"total_alunos": 0, "total_professores": 0, "total_turmas": 0, "total_usuarios": 0, "total_funcionarios": 0}
     conexao = obter_conexao()
     if conexao:

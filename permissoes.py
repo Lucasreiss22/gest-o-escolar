@@ -529,8 +529,9 @@ def endpoint_no_plano(endpoint, telas, acao_form=None):
         return "alunos" in telas or "pedagogico" in telas
     if endpoint == "ficha_pedagogica_pdf":
         return "pedagogico" in telas
+    # Usa as mesmas regras/fallbacks de modulo_no_plano (ex.: rescisão com equipe/financeiro)
     if endpoint in _TELA_EXTRA:
-        return _TELA_EXTRA[endpoint] in telas
+        return modulo_no_plano(_TELA_EXTRA[endpoint], telas)
     _tipo, modulo = classificar_requisicao(endpoint, "GET", acao_form)
     if not modulo:
         return True

@@ -842,7 +842,7 @@ def garantir_tabelas_folha():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:folha:simples:rescisao"
+    chave = f"{schema}:folha:simples:rescisao2"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
