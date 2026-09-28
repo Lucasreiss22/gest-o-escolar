@@ -27,17 +27,23 @@
                 <div><dt>Quando</dt><dd>{{ item.quando or '—' }}</dd></div>
                 <div><dt>Usuário</dt><dd>{{ item.usuario_nome or '—' }}</dd></div>
                 <div><dt>Login</dt><dd>{{ item.login or item.usuario_email or '—' }}</dd></div>
-                <div><dt>Tipo</dt><dd>{{ item.tipo_rotulo }}</dd></div>
-                <div><dt>Módulo</dt><dd>{{ item.modulo or '—' }}</dd></div>
+                <div><dt>Tipo</dt><dd>
+                    {% if item.tipo == 'inclusao' %}Incluiu / criou
+                    {% elif item.tipo == 'exclusao' %}Excluiu
+                    {% else %}Alterou / editou{% endif %}
+                    ({{ item.tipo_rotulo }})
+                </dd></div>
+                <div><dt>Tela / aba</dt><dd>{{ item.modulo or '—' }}</dd></div>
                 {% if mostrar_escola or item.escola_nome %}
                 <div><dt>Escola</dt><dd>{{ item.escola_nome or '—' }}{% if item.escola_id %} (id {{ item.escola_id }}){% endif %}</dd></div>
                 {% endif %}
+                <div><dt>Resumo</dt><dd>{{ item.resumo or '—' }}</dd></div>
             </dl>
             {% if item.mudancas %}
             <div class="table-wrap">
                 <table class="audit-diff">
                     <thead>
-                        <tr><th>Campo</th><th>Antes</th><th>Depois</th></tr>
+                        <tr><th>Campo</th><th>Antes (como estava)</th><th>Depois (como ficou)</th></tr>
                     </thead>
                     <tbody>
                     {% for m in item.mudancas %}

@@ -14,23 +14,36 @@
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}
         {% endwith %}
         <h2>Auditoria</h2>
-        <p class="hint">Inclusões, alterações e exclusões de {{ escola_nome or "esta escola" }}. Toque em um registro para ver o que mudou, o usuário, o login e a hora. Visível apenas para o administrador.</p>
+        <p class="hint">
+            Histórico completo de inclusões, alterações e exclusões em todas as telas de {{ escola_nome or "esta escola" }}.
+            Cada registro mostra quem fez (nome e login), em qual aba, o que mudou (antes → depois) e se foi ver/consultar, alterar ou excluir.
+            Toque em um item para abrir o detalhe.
+        </p>
         <p style="margin:0 0 12px;">
-            <a class="btn btn-primary" href="{{ url_for('relatorio_auditoria_pdf', tipo=tipo, busca=busca) }}">PDF da auditoria</a>
+            <a class="btn btn-primary" href="{{ url_for('relatorio_auditoria_pdf', tipo=tipo, busca=busca, modulo=modulo) }}">PDF da auditoria</a>
         </p>
         <form class="audit-filtros" method="GET" action="{{ url_for('pagina_auditoria') }}">
             <div>
                 <label for="tipo">Movimento</label>
                 <select id="tipo" name="tipo">
                     <option value="">Todos</option>
-                    <option value="inclusao" {% if tipo == 'inclusao' %}selected{% endif %}>Inclusão</option>
-                    <option value="alteracao" {% if tipo == 'alteracao' %}selected{% endif %}>Alteração</option>
+                    <option value="inclusao" {% if tipo == 'inclusao' %}selected{% endif %}>Inclusão (criar)</option>
+                    <option value="alteracao" {% if tipo == 'alteracao' %}selected{% endif %}>Alteração (editar)</option>
                     <option value="exclusao" {% if tipo == 'exclusao' %}selected{% endif %}>Exclusão</option>
                 </select>
             </div>
             <div>
+                <label for="modulo">Tela / aba</label>
+                <select id="modulo" name="modulo">
+                    <option value="">Todas as telas</option>
+                    {% for tela in telas_auditoria or [] %}
+                    <option value="{{ tela }}" {% if modulo == tela %}selected{% endif %}>{{ tela }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
                 <label for="busca">Busca</label>
-                <input id="busca" name="busca" value="{{ busca }}" placeholder="Usuário, aluno, descrição">
+                <input id="busca" name="busca" value="{{ busca }}" placeholder="Usuário, login, aluno, campo…">
             </div>
             <button class="btn btn-primary" type="submit">Filtrar</button>
         </form>

@@ -128,6 +128,10 @@ from folha import (
 )
 from permissoes import (
     AREAS_ACESSO,
+    AREAS_GRUPOS,
+    ACOES_ACESSO,
+    ACOES_ROTULO,
+    ACOES_HINT,
     TELAS_PLANO,
     classificar_requisicao,
     endpoint_no_plano,
@@ -148,6 +152,7 @@ from auditoria import (
     classificar_movimento,
     listar_auditoria,
     modulo_da_rota,
+    modulos_auditoria,
     montar_detalhe,
     registrar_auditoria,
 )
@@ -1179,8 +1184,14 @@ def inject_acl():
         "rotulo_papel": rotulo_papel(papel),
         "nfse_liberada": bool(getattr(g, "nfse_liberada", False)),
         "pode": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "acessar", session.get("permissoes")),
+        "pode_ver": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "ver", session.get("permissoes")),
         "pode_alterar": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "alterar", session.get("permissoes")),
         "pode_excluir": lambda modulo: (modulo != "nfse" or getattr(g, "nfse_liberada", False)) and _no_plano(modulo) and pode_acao(papel, modulo, "excluir", session.get("permissoes")),
+        "areas_acesso": AREAS_ACESSO,
+        "areas_grupos": AREAS_GRUPOS,
+        "acoes_acesso": ACOES_ACESSO,
+        "acoes_rotulo": ACOES_ROTULO,
+        "acoes_hint": ACOES_HINT,
         "smtp_ok": smtp_ok,
         "google_login": google_login,
         "super_admin": bool(session.get("super_admin")),
@@ -1236,6 +1247,9 @@ def gravar_auditoria(resposta):
         if _flash_de_erro():
             return resposta
         acao = (request.form.get("acao") or "").strip()
+        # Permissões já gravam auditoria detalhada (antes/depois por aba)
+        if acao == "salvar_acesso":
+            return resposta
         tipo, rotulo = classificar_movimento(endpoint, acao)
         detalhe = montar_detalhe(request.form, request.files)
         assunto = ""
@@ -3732,14 +3746,17 @@ def plataforma_escolas():
 def pagina_auditoria():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
-    if session.get("usuario_papel") != "admin":
-        flash("A auditoria fica disponível apenas para o administrador da escola.", "danger")
+    if not pode_acao(session.get("usuario_papel"), "auditoria", "acessar", session.get("permissoes")):
+        flash("A auditoria fica disponível apenas para quem tem permissão nesta área.", "danger")
         return redirect(url_for("dashboard"))
     tipo = (request.args.get("tipo") or "").strip()
     busca = (request.args.get("busca") or "").strip()
+    modulo = (request.args.get("modulo") or "").strip()
     registros = []
+    telas = []
     try:
-        registros = listar_auditoria(session.get("escola_id"), tipo, busca)
+        registros = listar_auditoria(session.get("escola_id"), tipo, busca, modulo=modulo)
+        telas = modulos_auditoria(session.get("escola_id"))
     except Exception as e:
         flash(f"Não foi possível carregar a auditoria: {e}", "danger")
     return render_template(
@@ -3747,6 +3764,8 @@ def pagina_auditoria():
         registros=registros,
         tipo=tipo,
         busca=busca,
+        modulo=modulo,
+        telas_auditoria=telas,
         escola_nome=session.get("escola_nome") or "",
     )
 
@@ -7138,12 +7157,13 @@ def relatorio_nfse_pdf():
 def relatorio_auditoria_pdf():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
-    if session.get("usuario_papel") != "admin":
-        flash("A auditoria fica disponível apenas para o administrador da escola.", "danger")
+    if not pode_acao(session.get("usuario_papel"), "auditoria", "ver", session.get("permissoes")):
+        flash("A auditoria fica disponível apenas para quem tem permissão nesta área.", "danger")
         return redirect(url_for("dashboard"))
     tipo = (request.args.get("tipo") or "").strip()
     busca = (request.args.get("busca") or "").strip()
-    registros = listar_auditoria(session.get("escola_id"), tipo, busca)
+    modulo = (request.args.get("modulo") or "").strip()
+    registros = listar_auditoria(session.get("escola_id"), tipo, busca, modulo=modulo)
     buffer = pdf_auditoria(session.get("escola_nome") or "Gestão Escolar", registros)
     return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="auditoria.pdf")
 
@@ -12521,14 +12541,17 @@ def pagina_configuracoes():
             uid = request.form.get("usuario_id", type=int)
             if conexao and uid:
                 try:
-                    with conexao.cursor() as cursor:
+                    with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes TEXT")
-                        cursor.execute("SELECT papel, permissoes FROM usuarios WHERE id = %s", (uid,))
+                        cursor.execute(
+                            "SELECT id, nome, email, papel, permissoes FROM usuarios WHERE id = %s",
+                            (uid,),
+                        )
                         row = cursor.fetchone() or {}
                         papel = normalizar_papel(row.get("papel") or "funcionario")
+                        anteriores = permissoes_efetivas(papel, row.get("permissoes"))
                         perm_salvas = _permissoes_do_form(papel) or permissoes_padrao(papel)
                         if not getattr(g, "nfse_liberada", False):
-                            anteriores = permissoes_efetivas(papel, row.get("permissoes"))
                             perm_salvas["nfse"] = anteriores.get("nfse") or {}
                         cursor.execute(
                             "UPDATE usuarios SET permissoes = %s WHERE id = %s",
@@ -12537,6 +12560,48 @@ def pagina_configuracoes():
                         conexao.commit()
                         if uid == session.get("usuario_id"):
                             session["permissoes"] = perm_salvas
+                        # Detalhe completo para auditoria
+                        mudancas = []
+                        mapa_area = {a: r for a, r in AREAS_ACESSO}
+                        for area, _rotulo in AREAS_ACESSO:
+                            ant = anteriores.get(area) or {}
+                            novo = perm_salvas.get(area) or {}
+                            for acao_p in ACOES_ACESSO:
+                                a_val = bool(ant.get(acao_p))
+                                n_val = bool(novo.get(acao_p))
+                                if a_val != n_val:
+                                    mudancas.append(
+                                        {
+                                            "campo": f"{mapa_area.get(area, area)} · {ACOES_ROTULO.get(acao_p, acao_p)}",
+                                            "antes": "Sim" if a_val else "Não",
+                                            "depois": "Sim" if n_val else "Não",
+                                        }
+                                    )
+                        detalhe = json.dumps(
+                            {
+                                "mudancas": mudancas,
+                                "texto": " · ".join(
+                                    f"{m['campo']}: {m['antes']} → {m['depois']}" for m in mudancas
+                                )[:4000],
+                                "usuario_alvo": row.get("nome") or row.get("email"),
+                                "login_alvo": row.get("email"),
+                            },
+                            ensure_ascii=False,
+                        )[:8000]
+                        try:
+                            registrar_auditoria(
+                                session.get("escola_id"),
+                                session.get("escola_nome") or "",
+                                session.get("usuario_nome"),
+                                session.get("usuario_email"),
+                                "alteracao",
+                                "Usuários e permissões",
+                                f"Alterou permissões: {row.get('nome') or row.get('email')}",
+                                detalhe,
+                                usuario_login=session.get("usuario_email") or session.get("login_email"),
+                            )
+                        except Exception as erro_aud:
+                            print(f"auditoria permissões: {erro_aud}")
                         flash("Acesso desta pessoa salvo. Vale no próximo login dela.", "success")
                 except Exception as e:
                     conexao.rollback()
@@ -12737,6 +12802,25 @@ def pagina_configuracoes():
             if modulo_no_plano(area[0], session.get("escola_telas"))
             and (area[0] != "nfse" or getattr(g, "nfse_liberada", False))
         ],
+        areas_grupos=[
+            item for item in (
+                (
+                    grupo,
+                    [
+                        (codigo, dict(AREAS_ACESSO).get(codigo, codigo))
+                        for codigo in areas
+                        if modulo_no_plano(codigo, session.get("escola_telas"))
+                        and (codigo != "nfse" or getattr(g, "nfse_liberada", False))
+                        and codigo in dict(AREAS_ACESSO)
+                    ],
+                )
+                for grupo, areas in AREAS_GRUPOS
+            )
+            if item[1]
+        ],
+        acoes_acesso=ACOES_ACESSO,
+        acoes_rotulo=ACOES_ROTULO,
+        acoes_hint=ACOES_HINT,
         padroes_acesso=padroes_por_papel(),
         nome_do_papel=rotulo_papel,
     )

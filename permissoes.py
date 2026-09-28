@@ -14,7 +14,7 @@ MODULOS = {
     "usuarios": {"admin", "administrador", "direcao", "supervisor", "financeiro"},
     "contracheque": PAPEIS_TOTAIS | {"professor", "funcionario", "secretaria"},
     "ponto": PAPEIS_TOTAIS | {"professor", "funcionario", "secretaria"},
-    "auditoria": {"admin"},
+    "auditoria": {"admin", "administrador", "direcao", "supervisor"},
     "nfse": {"admin", "financeiro"},
 }
 
@@ -119,20 +119,44 @@ def normalizar_papel(papel):
 
 AREAS_ACESSO = [
     ("dashboard", "Painel"),
-    ("alunos", "Alunos (cadastro e exclusão)"),
-    ("pedagogico", "Pedagógico (turmas, chamada e notas)"),
-    ("pedagogico_cadastro", "Turmas e matrículas"),
+    ("alunos", "Alunos"),
+    ("pedagogico", "Pedagógico — visão, chamada e notas"),
+    ("pedagogico_cadastro", "Pedagógico — turmas, matérias e matrículas"),
     ("professores", "Equipe"),
     ("financeiro", "Financeiro"),
-    ("calendario", "Calendário"),
+    ("calendario", "Calendário / chamada"),
     ("contracheque", "Contra-cheque"),
-    ("ponto", "Ponto"),
+    ("ponto", "Ponto (bater e ver)"),
     ("configuracoes", "Configurações"),
     ("usuarios", "Usuários e permissões"),
-    ("nfse", "Notas fiscais"),
+    ("auditoria", "Auditoria"),
+    ("nfse", "Notas fiscais (NFS-e)"),
+]
+
+# Agrupa a matriz de permissões na tela de configurações
+AREAS_GRUPOS = [
+    ("Menu e painel", ["dashboard"]),
+    ("Alunos e pedagógico", ["alunos", "pedagogico", "pedagogico_cadastro", "calendario"]),
+    ("Equipe e ponto", ["professores", "ponto", "contracheque"]),
+    ("Financeiro e notas", ["financeiro", "nfse"]),
+    ("Administração", ["configuracoes", "usuarios", "auditoria"]),
 ]
 
 ACOES_ACESSO = ("acessar", "ver", "alterar", "excluir")
+
+ACOES_ROTULO = {
+    "acessar": "Acessar aba",
+    "ver": "Ver / consultar",
+    "alterar": "Alterar / incluir",
+    "excluir": "Excluir",
+}
+
+ACOES_HINT = {
+    "acessar": "Mostra a tela no menu e permite abrir a aba.",
+    "ver": "Consulta dados sem editar (listas, PDFs, detalhes).",
+    "alterar": "Cria e edita registros nessa tela.",
+    "excluir": "Apaga registros ou desfaz vínculos nessa tela.",
+}
 
 TELAS_PLANO = [
     ("alunos", "Alunos"),
@@ -269,13 +293,18 @@ def permissoes_padrao(papel):
         altera = entra
         if area == "contracheque" and papel_n in {"professor", "funcionario", "secretaria"}:
             altera = False
+        if area == "auditoria":
+            altera = False  # auditoria é consulta; só admin/supervisor “acessam”
         gestao = papel_n in {"admin", "supervisor", "financeiro", "direcao"}
         mapa[area] = {
             "acessar": entra,
             "ver": entra,
-            "alterar": altera,
-            "excluir": altera and gestao,
+            "alterar": altera and area not in {"auditoria", "dashboard"},
+            "excluir": altera and gestao and area not in {"auditoria", "dashboard", "contracheque"},
         }
+        if area == "dashboard":
+            mapa[area]["alterar"] = False
+            mapa[area]["excluir"] = False
     return mapa
 
 

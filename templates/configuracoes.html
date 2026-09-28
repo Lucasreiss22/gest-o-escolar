@@ -221,10 +221,11 @@
         {% endif %}
 
         <div class="card-box">
-            <h3 class="card-title">Acesso da equipe</h3>
+            <h3 class="card-title">Permissões por tela</h3>
             <p style="color:#64748b; font-size:0.9rem; line-height:1.45;">
-                O cadastro da pessoa continua em Gerenciar Usuários. Aqui você define o que cada uma pode acessar, ver, alterar no cadastro e excluir.
-                O padrão já vem pela função. Secretaria altera cadastro de aluno e turma, mas não exclui até você marcar. Direção, financeiro e supervisor excluem por padrão. Administrador faz tudo.
+                O cadastro da pessoa fica em Gerenciar Usuários. Aqui você define, em cada aba liberada para a escola,
+                o que essa pessoa pode <strong>acessar</strong>, <strong>ver</strong>, <strong>alterar/incluir</strong> e <strong>excluir</strong>.
+                O padrão vem da função; você pode afinar tela a tela. Toda mudança entra na auditoria.
             </p>
             {% if not equipe_acesso %}
             <p style="color:#64748b;">Nenhuma pessoa com acesso ao painel. Cadastre em Gerenciar Usuários e marque que ela entra no sistema.</p>
@@ -246,44 +247,69 @@
             <p style="font-size:.9rem;color:#334155;margin-top:0;">
                 {{ acesso.nome }} · {{ nome_do_papel(acesso.papel) }}{% if acesso.cargo %} · {{ acesso.cargo }}{% endif %}
             </p>
-            <form method="POST">
+            <form method="POST" id="formPermissoes">
                 <input type="hidden" name="acao" value="salvar_acesso">
                 <input type="hidden" name="usuario_id" value="{{ acesso.id }}">
-                <p style="margin:0 0 10px;"><button type="button" class="btn btn-primary" id="usarPadraoFuncao">Usar o padrão da função</button></p>
+                <p style="margin:0 0 12px; display:flex; flex-wrap:wrap; gap:8px;">
+                    <button type="button" class="btn btn-primary" id="usarPadraoFuncao">Usar padrão da função</button>
+                    <button type="button" class="btn" id="marcarVerTudo" style="background:#e2e8f0;color:#0f172a;">Só ver (todas as abas)</button>
+                    <button type="button" class="btn" id="limparPermissoes" style="background:#fee2e2;color:#991b1b;">Limpar tudo</button>
+                </p>
+                <div class="perm-legenda" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin:0 0 14px;">
+                    {% for acao in acoes_acesso %}
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;">
+                        <strong style="font-size:.8rem;">{{ acoes_rotulo[acao] }}</strong>
+                        <div style="font-size:.75rem;color:#64748b;line-height:1.35;">{{ acoes_hint[acao] }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
                 <div style="overflow-x:auto;">
-                    <table>
+                    <table class="perm-table" style="min-width:640px;">
                         <thead>
                             <tr>
-                                <th>Área</th>
-                                <th style="text-align:center;">Acessar</th>
-                                <th style="text-align:center;">Ver</th>
-                                <th style="text-align:center;">Alterar cadastro</th>
-                                <th style="text-align:center;">Excluir</th>
+                                <th>Tela / aba</th>
+                                {% for acao in acoes_acesso %}
+                                <th style="text-align:center;font-size:.78rem;">{{ acoes_rotulo[acao] }}</th>
+                                {% endfor %}
                             </tr>
                         </thead>
                         <tbody>
-                            {% for area, rotulo in areas_acesso %}
+                            {% for grupo, itens in areas_grupos %}
+                            <tr class="perm-grupo">
+                                <td colspan="5" style="background:#f1f5f9;font-weight:800;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#475569;">{{ grupo }}</td>
+                            </tr>
+                            {% for area, rotulo in itens %}
                             {% set bloco = acesso.permissoes.get(area, {}) %}
                             <tr>
-                                <td>{{ rotulo }}</td>
-                                {% for acao in ['acessar', 'ver', 'alterar', 'excluir'] %}
+                                <td><strong>{{ rotulo }}</strong></td>
+                                {% for acao in acoes_acesso %}
                                 <td style="text-align:center;">
-                                    <input type="checkbox" name="perm_{{ area }}_{{ acao }}" value="1" data-perm="{{ area }}" data-acao="{{ acao }}" {% if bloco.get(acao) %}checked{% endif %}>
+                                    <input type="checkbox"
+                                           name="perm_{{ area }}_{{ acao }}"
+                                           value="1"
+                                           data-perm="{{ area }}"
+                                           data-acao="{{ acao }}"
+                                           title="{{ acoes_hint[acao] }}"
+                                           {% if bloco.get(acao) %}checked{% endif %}
+                                           {% if area in ['dashboard','auditoria'] and acao in ['alterar','excluir'] %}disabled{% endif %}
+                                           {% if area == 'contracheque' and acao == 'excluir' %}disabled{% endif %}>
                                 </td>
                                 {% endfor %}
                             </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr><td colspan="5" class="hint">Nenhuma tela liberada no plano desta escola.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
                 <p style="font-size:.85rem;color:#64748b;margin:12px 0 0;line-height:1.45;">
-                    <strong>Alterar cadastro</strong> libera editar aluno, turma, matrícula, matéria e cobrança.
-                    <strong>Excluir</strong> é separado: em Alunos apaga o aluno, o responsável ou o autorizado;
-                    em Turmas e matrículas apaga a turma, a matéria ou tira o aluno da turma;
-                    em Equipe apaga o colaborador; em Financeiro apaga a cobrança; em Usuários remove o acesso ao painel.
+                    Mesmo com a aba habilitada no plano da escola, a pessoa só mexe no que estiver marcado aqui.
+                    <strong>Alterar</strong> libera criar/editar; <strong>Excluir</strong> é separado.
                     Quem não tem a permissão não vê o botão. A pessoa precisa entrar de novo para a mudança valer.
+                    O histórico completo fica em Auditoria.
                 </p>
-                <p style="margin-top:14px;"><button class="btn btn-primary" type="submit">Salvar acesso</button></p>
+                <p style="margin-top:14px;"><button class="btn btn-primary" type="submit">Salvar permissões</button></p>
             </form>
             <script type="application/json" id="padroesAcesso">{{ padroes_acesso|tojson }}</script>
             <script type="application/json" id="papelAcesso">{{ acesso.papel|tojson }}</script>
@@ -319,12 +345,27 @@
         var papel = "funcionario";
         try { padroes = JSON.parse(bruto.textContent || "{}"); } catch (e) { padroes = {}; }
         try { papel = JSON.parse(papelEl.textContent || '"funcionario"'); } catch (e) { papel = "funcionario"; }
-        function aplicar() {
-            var mapa = padroes[papel] || padroes.funcionario || {};
+        function setar(el, ligado) {
+            if (el.disabled) return;
+            el.checked = !!ligado;
+        }
+        function aplicarMapa(mapa) {
             document.querySelectorAll("[data-perm]").forEach(function (el) {
-                var area = mapa[el.getAttribute("data-perm")] || {};
-                el.checked = !!area[el.getAttribute("data-acao")];
+                var area = (mapa && mapa[el.getAttribute("data-perm")]) || {};
+                setar(el, !!area[el.getAttribute("data-acao")]);
             });
+        }
+        function aplicarPadrao() {
+            aplicarMapa(padroes[papel] || padroes.funcionario || {});
+        }
+        function soVer() {
+            document.querySelectorAll("[data-perm]").forEach(function (el) {
+                var acao = el.getAttribute("data-acao");
+                setar(el, acao === "acessar" || acao === "ver");
+            });
+        }
+        function limpar() {
+            document.querySelectorAll("[data-perm]").forEach(function (el) { setar(el, false); });
         }
         document.querySelectorAll("[data-acao='alterar'], [data-acao='excluir']").forEach(function (el) {
             el.addEventListener("change", function () {
@@ -332,12 +373,25 @@
                 var area = el.getAttribute("data-perm");
                 document.querySelectorAll("[data-perm='" + area + "']").forEach(function (item) {
                     var acao = item.getAttribute("data-acao");
-                    if (acao === "acessar" || acao === "ver") item.checked = true;
+                    if (acao === "acessar" || acao === "ver") setar(item, true);
+                });
+            });
+        });
+        document.querySelectorAll("[data-acao='ver']").forEach(function (el) {
+            el.addEventListener("change", function () {
+                if (!el.checked) return;
+                var area = el.getAttribute("data-perm");
+                document.querySelectorAll("[data-perm='" + area + "'][data-acao='acessar']").forEach(function (item) {
+                    setar(item, true);
                 });
             });
         });
         var botao = document.getElementById("usarPadraoFuncao");
-        if (botao) botao.addEventListener("click", aplicar);
+        if (botao) botao.addEventListener("click", aplicarPadrao);
+        var verTudo = document.getElementById("marcarVerTudo");
+        if (verTudo) verTudo.addEventListener("click", soVer);
+        var limparBtn = document.getElementById("limparPermissoes");
+        if (limparBtn) limparBtn.addEventListener("click", limpar);
     })();
     </script>
 </body>

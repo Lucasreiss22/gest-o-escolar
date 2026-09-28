@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from database import obter_conexao_nova
+from permissoes import AREAS_ACESSO, ENDPOINTS
 from psycopg2.extras import RealDictCursor
 
 _FUSO = timezone(timedelta(hours=-3))
@@ -45,6 +46,7 @@ _CAMPOS = (
     ("escola_id", "Escola (id)"),
     ("turma_id", "Turma (id)"),
     ("funcionario_id", "Colaborador (id)"),
+    ("usuario_id", "Usuário (id)"),
     ("cpf", "CPF"),
     ("telefone", "Telefone"),
     ("celular", "Celular"),
@@ -68,40 +70,99 @@ _CAMPOS = (
     ("almoco", "Almoço"),
     ("decisao", "Decisão"),
     ("descontar", "Descontar"),
+    ("competencia", "Competência"),
+    ("regime", "Regime"),
+    ("turno", "Turno"),
+    ("ano_letivo", "Ano letivo"),
+    ("etapa", "Etapa"),
+    ("categoria", "Categoria"),
+    ("permissoes", "Permissões"),
 )
 
 _SENSIVEL = ("senha", "password", "secret", "token", "codigo", "arquivo", "foto")
 
 _ROTULOS = {
-    "criar_cobranca": "Gerou cobrança",
-    "editar_cobranca": "Alterou cobrança",
-    "dar_baixa": "Deu baixa na cobrança",
-    "dar_baixa_lote": "Deu baixa em lote",
-    "tirar_baixa": "Retirou a baixa da cobrança",
-    "tirar_baixa_lote": "Retirou a baixa em lote",
+    # Alunos
     "cadastrar_aluno": "Incluiu aluno",
     "cadastrar_aluno_simples": "Incluiu aluno",
+    "cadastrar_aluno_rota": "Incluiu aluno",
     "importar_alunos": "Importou alunos",
     "importar_alunos_simples": "Importou alunos",
     "editar_aluno": "Alterou aluno",
     "excluir_aluno_rota": "Excluiu aluno",
+    "excluir_alunos": "Excluiu aluno",
     "deletar_responsavel": "Excluiu responsável",
     "deletar_autorizado": "Excluiu pessoa autorizada",
+    "editar_autorizado": "Alterou pessoa autorizada",
+    "nao_autorizar_busca": "Bloqueou autorização de busca",
     "adicionar_responsavel": "Incluiu responsável",
     "salvar_responsavel": "Alterou responsável",
+    "editar_responsavel": "Alterou responsável",
+    "adicionar_autorizado": "Incluiu pessoa autorizada",
+    "enviar_autorizacao_busca": "Enviou autorização de busca",
+    # Pedagógico / turmas
     "criar_turma": "Incluiu turma",
     "nova_turma": "Incluiu turma",
     "excluir_turma": "Excluiu turma",
     "desvincular_aluno": "Tirou aluno da turma",
+    "desvincular": "Tirou aluno da turma",
     "vincular": "Vinculou aluno à turma",
+    "vincular_aluno": "Vinculou aluno à turma",
+    "incluir_aluno": "Incluiu aluno na turma",
     "criar_disciplina": "Incluiu matéria",
+    "criar_disciplina_turma": "Incluiu matéria na turma",
+    "editar_disciplina": "Alterou matéria",
     "excluir_disciplina": "Excluiu matéria",
+    "excluir_disciplina_turma": "Removeu matéria da turma",
+    "desativar_disciplina": "Desativou matéria",
+    "ativar_disciplina": "Ativou matéria",
+    "vincular_disciplina": "Vinculou matéria à turma",
+    "criar_prova_turma": "Criou prova da turma",
     "lancar_frequencia": "Lançou frequência",
+    "lancar_frequencia_aluno": "Lançou frequência",
     "adicionar_nota": "Incluiu nota",
+    "ajustar_prova_aluno": "Ajustou prova do aluno",
     "anexar_boletim": "Anexou boletim",
+    "sala_professor_enviar_pdf": "Enviou PDF da sala do professor",
+    # Equipe
+    "cadastrar_professor": "Incluiu colaborador",
+    "excluir_professor": "Excluiu colaborador",
+    "editar_professor": "Alterou colaborador",
+    "salvar_tempos_funcionario": "Alterou tempos de ponto",
+    # Financeiro
+    "criar_cobranca": "Gerou cobrança",
+    "editar_cobranca": "Alterou cobrança",
+    "excluir_financeiro": "Excluiu registro financeiro",
+    "dar_baixa": "Deu baixa na cobrança",
+    "dar_baixa_lote": "Deu baixa em lote",
+    "tirar_baixa": "Retirou a baixa da cobrança",
+    "tirar_baixa_lote": "Retirou a baixa em lote",
     "criar_custo": "Incluiu custo",
     "excluir_custo": "Excluiu custo",
     "importar_custos": "Importou custos",
+    "enviar_memoria_simples": "Enviou memória do Simples",
+    "enviar_contracheques_mes": "Enviou contra-cheques do mês",
+    "ajustar_contracheque": "Ajustou contra-cheque",
+    # Calendário
+    "cadastrar_evento": "Incluiu evento no calendário",
+    "editar_evento": "Alterou evento do calendário",
+    "excluir_evento": "Excluiu evento do calendário",
+    # Ponto
+    "bater_ponto": "Registrou batida de ponto",
+    "confirmar_atestado": "Confirmou atestado",
+    "confirmar_falta": "Confirmou falta",
+    "lancar_falta": "Lançou falta",
+    "enviar_atestado": "Enviou atestado",
+    "rejeitar_atestado": "Rejeitou atestado",
+    # Usuários / permissões / config
+    "salvar_acesso": "Alterou permissões de usuário",
+    "excluir_usuario_sistema": "Excluiu usuário do painel",
+    "excluir": "Excluiu registro",
+    "salvar_logo": "Alterou logo / mensagem",
+    "salvar_config": "Alterou configurações",
+    "salvar_escola": "Alterou dados da escola",
+    "redefinir_senha": "Redefiniu senha",
+    # Plataforma
     "criar_escola": "Incluiu escola",
     "definir_pacote": "Alterou o pacote da escola",
     "salvar_pacote": "Alterou pacote",
@@ -109,11 +170,11 @@ _ROTULOS = {
     "gerar_assinaturas": "Gerou assinaturas do mês",
     "atualizar_abertas": "Atualizou assinaturas em aberto",
     "excluir_cobranca": "Excluiu assinatura",
-    "redefinir_senha": "Redefiniu senha",
     "salvar_google": "Alterou o envio de e-mail",
     "pausar_escola": "Pausou escola",
     "reativar_escola": "Reativou escola",
     "excluir_escola": "Excluiu escola",
+    # NFS-e
     "salvar_nfse": "Alterou a nota fiscal",
     "salvar_nfse_plataforma": "Alterou a nota fiscal da plataforma",
     "emitir_nfse_plataforma": "Emitiu NFS-e da licença",
@@ -123,48 +184,43 @@ _ROTULOS = {
     "nfse_cancelar": "Cancelou NFS-e",
     "nfse_substituir": "Substituiu NFS-e",
     "nfse_lote": "Emitiu NFS-e em lote",
-    "salvar_tempos_funcionario": "Alterou tempos de ponto",
-    "bater_ponto": "Registrou batida de ponto",
-    "confirmar_atestado": "Confirmou atestado",
-    "confirmar_falta": "Confirmou falta",
-    "lancar_falta": "Lançou falta",
-    "enviar_atestado": "Enviou atestado",
+    "nfse_consultar": "Consultou NFS-e",
+}
+
+# Rótulos de tela alinhados às permissões (AREAS_ACESSO)
+_ROTULO_AREA = {codigo: rotulo for codigo, rotulo in AREAS_ACESSO}
+_ROTULO_AREA.update(
+    {
+        "dashboard": "Painel",
+        "alunos": "Alunos",
+        "pedagogico": "Pedagógico — visão, chamada e notas",
+        "pedagogico_cadastro": "Pedagógico — turmas, matérias e matrículas",
+        "professores": "Equipe",
+        "financeiro": "Financeiro",
+        "calendario": "Calendário / chamada",
+        "contracheque": "Contra-cheque",
+        "ponto": "Ponto",
+        "configuracoes": "Configurações",
+        "usuarios": "Usuários e permissões",
+        "auditoria": "Auditoria",
+        "nfse": "Notas fiscais (NFS-e)",
+    }
+)
+
+# Endpoints extras (plataforma / fora do ENDPOINTS)
+_MODULOS_EXTRA = {
+    "plataforma_escolas": "Plataforma",
+    "dashboard": "Painel",
+    "login": "Acesso",
+    "logout": "Acesso",
+    "Usuários e permissões": "Usuários e permissões",
 }
 
 _MODULOS = {
-    "pagina_alunos": "Alunos",
-    "detalhes_aluno": "Alunos",
-    "salvar_responsavel": "Alunos",
-    "adicionar_responsavel": "Alunos",
-    "excluir_aluno_rota": "Alunos",
-    "pagina_financeiro": "Financeiro",
-    "excluir_financeiro": "Financeiro",
-    "pagina_professores": "Equipe",
-    "cadastrar_professor": "Equipe",
-    "excluir_professor": "Equipe",
-    "detalhes_professor": "Equipe",
-    "pagina_pedagogico": "Pedagógico",
-    "excluir_turma": "Pedagógico",
-    "aluno_vincular_turma": "Pedagógico",
-    "lancar_frequencia_aluno": "Pedagógico",
-    "calendario_escolar": "Calendário",
-    "cadastrar_evento": "Calendário",
-    "pagina_configuracoes": "Configurações",
-    "gerenciar_usuarios": "Usuários",
-    "excluir_usuario_sistema": "Usuários",
-    "contracheque": "Contra-cheque",
-    "ajustar_contracheque": "Contra-cheque",
-    "ponto": "Ponto",
-    "ponto_gestao": "Ponto",
-    "atestado_ponto": "Ponto",
-    "plataforma_escolas": "Plataforma",
-    "pagina_notas_fiscais": "Notas fiscais",
-    "nfse_emitir": "Notas fiscais",
-    "nfse_cancelar": "Notas fiscais",
-    "nfse_substituir": "Notas fiscais",
-    "nfse_consultar": "Notas fiscais",
-    "nfse_lote": "Notas fiscais",
+    endpoint: _ROTULO_AREA.get(area, area.replace("_", " ").capitalize())
+    for endpoint, area in ENDPOINTS.items()
 }
+_MODULOS.update(_MODULOS_EXTRA)
 
 _TIPOS = {
     "inclusao": "Inclusão",
@@ -506,12 +562,13 @@ def _parse_detalhe(bruto):
     return [], raw
 
 
-def listar_auditoria(escola_id=None, tipo="", busca="", limite=_LIMITE):
+def listar_auditoria(escola_id=None, tipo="", busca="", limite=_LIMITE, modulo=""):
     garantir_auditoria()
     tipo = (tipo or "").strip().lower()
     if tipo not in _TIPOS:
         tipo = ""
     busca = (busca or "").strip()
+    modulo = (modulo or "").strip()
     limite = max(1, min(int(limite or _LIMITE), 500))
     filtros = []
     params = []
@@ -521,6 +578,9 @@ def listar_auditoria(escola_id=None, tipo="", busca="", limite=_LIMITE):
     if tipo:
         filtros.append("tipo = %s")
         params.append(tipo)
+    if modulo:
+        filtros.append("modulo ILIKE %s")
+        params.append(modulo)
     if busca:
         filtros.append(
             """
@@ -564,5 +624,51 @@ def listar_auditoria(escola_id=None, tipo="", busca="", limite=_LIMITE):
         conexao.close()
 
 
+def modulos_auditoria(escola_id=None):
+    """Lista de telas já registradas na auditoria (para filtro)."""
+    garantir_auditoria()
+    conexao = obter_conexao_nova()
+    if not conexao:
+        return list(_ROTULO_AREA.values())
+    try:
+        with conexao.cursor() as cursor:
+            if escola_id:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT modulo FROM plataforma_auditoria
+                    WHERE escola_id = %s AND modulo IS NOT NULL AND modulo <> ''
+                    ORDER BY modulo
+                    """,
+                    (int(escola_id),),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT modulo FROM plataforma_auditoria
+                    WHERE modulo IS NOT NULL AND modulo <> ''
+                    ORDER BY modulo
+                    """
+                )
+            encontrados = [row[0] for row in (cursor.fetchall() or []) if row and row[0]]
+    finally:
+        conexao.close()
+    base = list(_ROTULO_AREA.values()) + ["Plataforma", "Sistema"]
+    unidos = []
+    vistos = set()
+    for nome in encontrados + base:
+        if nome and nome not in vistos:
+            vistos.add(nome)
+            unidos.append(nome)
+    return unidos
+
+
 def modulo_da_rota(endpoint):
-    return _MODULOS.get(endpoint or "", "Sistema")
+    if not endpoint:
+        return "Sistema"
+    if endpoint in _MODULOS:
+        return _MODULOS[endpoint]
+    # fallback: tenta pelo mapa de áreas
+    area = ENDPOINTS.get(endpoint)
+    if area:
+        return _ROTULO_AREA.get(area, area.replace("_", " ").capitalize())
+    return "Sistema"
