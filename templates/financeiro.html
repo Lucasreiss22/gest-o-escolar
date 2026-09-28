@@ -1081,7 +1081,7 @@
             </div>
         </details>
 
-        {% if pode_alterar('nfse') %}
+        {% if nfse_liberada and pode_alterar('nfse') %}
         {% with alunos_nfse=alunos, aluno_id=nfse_aluno, destino='financeiro', destino_rota='pagina_financeiro', mes=mes_atual, status=status %}
         {% include '_nfse_emitir.html' %}
         {% endwith %}

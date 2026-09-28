@@ -477,7 +477,7 @@
             <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-wallet2 text-warning"></i> Extrato Financeiro / Mensalidades</span>
                 <span>
-                    {% if pode('nfse') %}
+                    {% if nfse_liberada and pode('nfse') %}
                     <a class="btn btn-sm btn-outline-primary" href="{{ url_for('pagina_notas_fiscais', aluno=aluno.id or aluno[0]) }}">Notas fiscais</a>
                     {% endif %}
                 <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#modalNovaCobranca">
@@ -628,10 +628,10 @@
 
         {% endif %}
 
-        {% if pode('nfse') and not pode('financeiro') %}
+        {% if nfse_liberada and pode('nfse') and not pode('financeiro') %}
         <div class="card border-0 shadow-sm mt-4">
             <div class="card-body">
-                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('pagina_notas_fiscais', aluno=aluno.id or aluno[0]) }}">Notas fiscais deste aluno</a>
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('pagina_notas_fiscais', aluno=aluno.id or aluno[0]) }}">Notas fiscais (NFS-e) deste aluno</a>
             </div>
         </div>
         {% endif %}

@@ -95,7 +95,7 @@
     </div>
     {% endif %}
 
-    {% if pode('financeiro') or pode('nfse') %}
+        {% if pode('financeiro') or (nfse_liberada and pode('nfse')) %}
     <div class="nav-section">
         <div class="nav-section-label">Financeiro</div>
         {% if pode('financeiro') %}
@@ -106,12 +106,12 @@
             <span>Financeiro</span>
         </a>
         {% endif %}
-        {% if pode('nfse') %}
+        {% if nfse_liberada and pode('nfse') %}
         <a href="{{ url_for('pagina_notas_fiscais') }}" class="{% if nav_active == 'nfse' %}active{% endif %}">
             <span class="nav-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg>
             </span>
-            <span>Notas fiscais</span>
+            <span>Notas fiscais (NFS-e)</span>
         </a>
         {% endif %}
     </div>

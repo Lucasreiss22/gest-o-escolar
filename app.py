@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1323,6 +1324,79 @@ _ROTAS_NFSE = {
 }
 
 
+def _escola_tem_nfse_no_plano():
+    telas = session.get("escola_telas")
+    if not isinstance(telas, (list, tuple, set)):
+        return True  # plano aberto / legado
+    return "nfse" in telas or "financeiro" in telas
+
+
+def _nfse_liberada_cached(forcar=False):
+    """
+    Só consulta a plataforma quando faz sentido.
+    Sem geração ligada (ou sem NFS-e no plano), a flag fica False — menu/permissões não mostram a tag.
+    """
+    # Escola sem NFS-e no pacote: nem consulta, nem mostra a tag
+    if not forcar and not session.get("super_admin") and not _escola_tem_nfse_no_plano():
+        session["nfse_liberada_cache"] = False
+        return False
+
+    agora = time.time()
+    ultimo = float(session.get("_nfse_check_em") or 0)
+    if (
+        not forcar
+        and "nfse_liberada_cache" in session
+        and (agora - ultimo) < 60
+    ):
+        return bool(session.get("nfse_liberada_cache"))
+    try:
+        ligada = bool(emissao_nfse_ligada())
+    except Exception:
+        ligada = False
+    session["nfse_liberada_cache"] = ligada
+    session["_nfse_check_em"] = agora
+    return ligada
+
+
+def _limpar_cache_nfse_sessao():
+    session.pop("nfse_liberada_cache", None)
+    session.pop("_nfse_check_em", None)
+
+
+def _atualizar_permissoes_sessao():
+    """Relê papel/permissões do banco a cada página — F5 já atualiza o menu."""
+    uid = session.get("usuario_id")
+    if not uid or session.get("super_admin"):
+        return
+    agora = time.time()
+    # Evita 2 consultas no mesmo segundo (redirect + carga); F5 sempre passa.
+    if (agora - float(session.get("permissoes_atualizado_em") or 0)) < 1.5:
+        return
+    conexao = obter_conexao()
+    if not conexao:
+        return
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                "SELECT papel, permissoes FROM usuarios WHERE id = %s",
+                (uid,),
+            )
+            row = cursor.fetchone()
+        if not row:
+            return
+        papel = normalizar_papel(row.get("papel") or session.get("usuario_papel") or "funcionario")
+        session["usuario_papel"] = papel
+        session["permissoes"] = permissoes_efetivas(papel, row.get("permissoes"))
+        session["permissoes_atualizado_em"] = agora
+    except Exception as erro:
+        print(f"atualizar permissoes sessao: {erro}")
+    # obter_conexao reusa o pool; close devolve ao worker
+    try:
+        conexao.close()
+    except Exception:
+        pass
+
+
 @app.before_request
 def proteger_rotas():
     endpoint = request.endpoint
@@ -1334,10 +1408,14 @@ def proteger_rotas():
     if endpoint in publicos:
         g.nfse_liberada = False
         return None
-    try:
-        g.nfse_liberada = emissao_nfse_ligada()
-    except Exception:
-        g.nfse_liberada = False
+    # Flag NFS-e só quando a geração pode estar ligada (plano/plataforma/rotas da nota)
+    precisa_nfse = (
+        session.get("super_admin")
+        or endpoint in _ROTAS_NFSE
+        or endpoint in {"pagina_configuracoes", "pagina_financeiro", "detalhes_aluno", "gerenciar_usuarios"}
+        or _escola_tem_nfse_no_plano()
+    )
+    g.nfse_liberada = _nfse_liberada_cached() if precisa_nfse else False
     if session.get("super_admin"):
         if endpoint not in {"plataforma_escolas", "plataforma_autorizar_gmail", "logout", "plataforma_voltar"}:
             return redirect(url_for("plataforma_escolas"))
@@ -1357,6 +1435,7 @@ def proteger_rotas():
     if endpoint == "plataforma_escolas":
         flash("Apenas o administrador da plataforma pode cadastrar novas escolas.", "danger")
         return redirect(url_for("dashboard"))
+    _atualizar_permissoes_sessao()
     papel = session.get("usuario_papel")
     acao_form = request.form.get("acao") if request.method == "POST" else ""
     if isinstance(session.get("escola_telas"), list) and not endpoint_no_plano(endpoint, session.get("escola_telas"), acao_form):
@@ -3186,6 +3265,8 @@ def plataforma_escolas():
                 with conexao.cursor() as cursor:
                     definir_emissao_habilitada(cursor, ligada)
                 conexao.commit()
+                _limpar_cache_nfse_sessao()
+                g.nfse_liberada = bool(ligada)
                 flash(
                     "A geração de NFS-e foi ligada em todas as escolas."
                     if ligada
@@ -12709,6 +12790,8 @@ def pagina_configuracoes():
                         conexao.commit()
                         if uid == session.get("usuario_id"):
                             session["permissoes"] = perm_salvas
+                            session["permissoes_atualizado_em"] = time.time()
+                            session["permissoes_atualizado_em"] = time.time()
                         # Detalhe completo para auditoria
                         mudancas = []
                         mapa_area = {a: r for a, r in AREAS_ACESSO}
@@ -12756,7 +12839,7 @@ def pagina_configuracoes():
                             )
                         except Exception as erro_aud:
                             print(f"auditoria permissões: {erro_aud}")
-                        flash("Acesso desta pessoa salvo. Vale no próximo login dela.", "success")
+                        flash("Permissões salvas. A pessoa vê as abas no próximo F5 (não precisa sair e entrar).", "success")
                 except Exception as e:
                     conexao.rollback()
                     flash(f"Não foi possível salvar o acesso: {e}", "danger")

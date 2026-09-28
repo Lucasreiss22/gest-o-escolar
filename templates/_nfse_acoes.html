@@ -10,7 +10,7 @@
     .nfse-tarja { flex-basis: 100%; margin: 0; padding: 8px 10px; background: #fef3c7; color: #78350f; border-radius: 8px; font-size: .78rem; line-height: 1.4; }
     .nfse-erro { flex-basis: 100%; margin: 0; font-size: .78rem; }
 </style>
-{% if pode('nfse') %}
+{% if nfse_liberada and pode('nfse') %}
 {% set nota = mensalidade.nfse if mensalidade is mapping and mensalidade.nfse is defined else none %}
 <div class="nfse-mini">
     {% if nota %}
