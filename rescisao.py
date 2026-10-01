@@ -19,6 +19,9 @@ import json
 from folha import (
     ALIQUOTA_FGTS,
     ALIQUOTA_FGTS_APRENDIZ,
+    ALIQUOTA_INSS_PATRONAL,
+    ALIQUOTA_RAT,
+    ALIQUOTA_SISTEMA_S,
     _eh_aprendiz,
     _num,
     hora_normal_clt,
@@ -176,19 +179,53 @@ def multa_fgts_aliquota(tipo_rescisao):
 
 
 def direitos_por_tipo(tipo_rescisao):
-    """Flags de verbas conforme o tipo de rescisão."""
+    """Flags de verbas conforme o tipo de rescisão.
+
+    - Justa causa: só saldo e férias vencidas + 1/3 (sem 13º proporcional — Dec. 57.155/65, art. 7º).
+    - Pedido de demissão: 13º e férias proporcionais (Súm. 261 TST); sem aviso indenizado, multa ou saque.
+    - Acordo (Art. 484-A): metade do aviso indenizado, multa 20%, saque de 80% do FGTS, sem seguro-desemprego.
+    - Culpa recíproca (Súm. 14 TST): 50% do aviso, do 13º e das férias proporcionais; multa 20%.
+    - Término do prazo: sem aviso e sem multa; saque do FGTS (Lei 8.036, art. 20, IX).
+    """
     t = tipo_rescisao or "sem_justa_causa"
     return {
         "saldo_salario": True,
-        "aviso_indenizado": t in ("sem_justa_causa", "acordo_mutuo", "culpa_reciproca", "termino_prazo"),
+        "aviso_indenizado": t in ("sem_justa_causa", "acordo_mutuo", "culpa_reciproca"),
         "aviso_desconto_pedido": t == "pedido_demissao",
-        "decimo_terceiro": True,  # Lei 4.090 — inclusive justa causa (avos do ano)
+        "decimo_terceiro": t != "justa_causa",
         "ferias_vencidas": True,
         "ferias_proporcionais": t != "justa_causa",
         "multa_fgts": multa_fgts_aliquota(t) > 0,
         "aviso_metade": t in ("acordo_mutuo", "culpa_reciproca"),
+        "fator_proporcionais": 0.5 if t == "culpa_reciproca" else 1.0,
         "saque_fgts": t in ("sem_justa_causa", "acordo_mutuo", "culpa_reciproca", "termino_prazo"),
+        "saque_fgts_percentual": 0.8 if t == "acordo_mutuo" else (
+            1.0 if t in ("sem_justa_causa", "culpa_reciproca", "termino_prazo") else 0.0
+        ),
+        "seguro_desemprego": t == "sem_justa_causa",
     }
+
+
+def obrigacoes_rescisao(data_desligamento, regime_tributario=None):
+    """Prazos de pagamento e recolhimento após o desligamento."""
+    fim = _as_date(data_desligamento) or date.today()
+    if fim.month == 12:
+        dia20 = date(fim.year + 1, 1, 20)
+    else:
+        dia20 = date(fim.year, fim.month + 1, 20)
+    dez = fim + timedelta(days=10)
+    itens = [
+        ("Pagamento das verbas ao trabalhador", dez, "Art. 477, § 6º, CLT — atraso gera multa de 1 salário (§ 8º)."),
+        ("FGTS rescisório (mês + multa) no FGTS Digital", dez, "Lei 8.036/90, art. 18 — guia rescisória até o 10º dia."),
+        ("Evento S-2299 (desligamento) no eSocial", dez, "Até 10 dias do desligamento."),
+        ("INSS retido do trabalhador (DCTFWeb)", dia20, "Lei 8.212/91, art. 30, I, b — até o dia 20 do mês seguinte."),
+        ("IRRF retido (DCTFWeb/DARF)", dia20, "Até o dia 20 do mês seguinte."),
+    ]
+    if (regime_tributario or "") not in ("", "simples_nacional"):
+        itens.append(
+            ("INSS patronal + RAT + terceiros (DCTFWeb)", dia20, "Fora do Simples a cota patronal é recolhida à parte.")
+        )
+    return [{"item": a, "prazo": b.isoformat(), "base": c} for a, b, c in itens]
 
 
 def projetar_aviso_dias(tipo_rescisao, aviso_modalidade, dias_aviso):
@@ -267,16 +304,24 @@ def calcular_rescisao(func, params):
         # Pedido sem cumprir: desconto de 30 dias (Art. 487 §2º), não o proporcional extra
         aviso_desconto = _money(diario * 30)
 
-    # 13º proporcional
+    fator = float(direitos.get("fator_proporcionais") or 1.0)
+
+    # 13º proporcional (os avos ganhos só pela projeção do aviso indenizado são 13º indenizado)
+    avos_sem_projecao = avos_13_ano_civil(admissao, deslig, 0)
     avos_13 = params.get("avos_13")
     if avos_13 in (None, ""):
         avos_13 = avos_13_ano_civil(admissao, deslig, proj_dias if aviso_mod == "indenizado" else 0)
     else:
         avos_13 = max(0, min(int(avos_13), 12))
+    avos_13_indenizado = max(avos_13 - avos_sem_projecao, 0)
     decimo = 0.0
+    decimo_indenizado = 0.0
     if direitos["decimo_terceiro"]:
-        decimo = _money(salario_mes * (avos_13 / 12.0))
-        decimo = _money(max(decimo - _num(params.get("decimo_ja_pago")), 0))
+        decimo_bruto = _money(salario_mes * (avos_13 / 12.0) * fator)
+        decimo_indenizado = _money(salario_mes * (avos_13_indenizado / 12.0) * fator)
+        decimo = _money(max(decimo_bruto - _num(params.get("decimo_ja_pago")), 0))
+        decimo_indenizado = min(decimo_indenizado, decimo)
+    decimo_trabalhado = _money(decimo - decimo_indenizado)
 
     # Férias
     ferias_simples = max(int(params.get("ferias_vencidas_simples") or 0), 0)
@@ -306,21 +351,42 @@ def calcular_rescisao(func, params):
     ferias_prop = 0.0
     terco_prop = 0.0
     if direitos["ferias_proporcionais"] and avos_fer > 0:
-        ferias_prop = _money(salario_mes * (avos_fer / 12.0))
+        ferias_prop = _money(salario_mes * (avos_fer / 12.0) * fator)
         terco_prop = _money(ferias_prop / 3.0)
+
+    outros_prov = _money(params.get("outros_proventos"))
+    outros_desc = _money(params.get("outros_descontos"))
+
+    # Incidência por verba:
+    # - saldo de salário (e outros proventos salariais): INSS, IRRF e FGTS
+    # - 13º: INSS e IRRF calculados à parte (tributação exclusiva); FGTS sim.
+    #   A parcela indenizada (projeção do aviso) não tem INSS.
+    # - aviso prévio indenizado: só FGTS (Súm. 305 TST); sem INSS (STJ Tema 478) e sem IRRF
+    # - férias indenizadas + 1/3 (vencidas, em dobro e proporcionais): sem INSS, IRRF e FGTS
+    #   (Lei 8.212/91, art. 28, § 9º, d; Súm. 125 e 386 STJ)
+    base_mensal = _money(saldo_salario + outros_prov)
+    inss_mensal = inss_empregado(base_mensal)
+    irrf_mensal = irrf_progressivo(max(base_mensal - inss_mensal, 0))
+    inss_13 = inss_empregado(decimo_trabalhado)
+    irrf_13 = irrf_progressivo(max(decimo - inss_13, 0))
+    inss = _money(inss_mensal + inss_13)
+    irrf = _money(irrf_mensal + irrf_13)
 
     # FGTS do mês + multa
     aliq = aliquota_fgts_contrato(func.get("tipo_contrato"))
-    base_fgts_mes = saldo_salario + decimo + (aviso_valor if aviso_mod == "indenizado" else 0.0)
+    base_fgts_mes = _money(base_mensal + decimo + (aviso_valor if aviso_mod == "indenizado" else 0.0))
     fgts_mes = _money(base_fgts_mes * aliq)
     saldo_depositos = _money(params.get("saldo_fgts_depositos"))
     # Inclui depósito do mês da rescisão na base da multa se informado
     base_multa = _money(saldo_depositos + fgts_mes)
     aliq_multa = multa_fgts_aliquota(tipo)
     multa_fgts = _money(base_multa * aliq_multa) if direitos["multa_fgts"] else 0.0
+    saque_pct = float(direitos.get("saque_fgts_percentual") or 0.0)
+    saque_fgts_estimado = _money((saldo_depositos + fgts_mes) * saque_pct + multa_fgts) if saque_pct else 0.0
 
-    outros_prov = _money(params.get("outros_proventos"))
-    outros_desc = _money(params.get("outros_descontos"))
+    atrasado, limite_pag = pagamento_em_atraso(deslig, params.get("data_pagamento"))
+    # Art. 477, § 8º: atraso na quitação gera multa de um salário ao trabalhador (verba indenizatória)
+    multa_art_477 = salario_mes if atrasado and params.get("data_pagamento") else 0.0
 
     proventos = _money(
         saldo_salario
@@ -331,22 +397,19 @@ def calcular_rescisao(func, params):
         + ferias_prop
         + terco_prop
         + outros_prov
+        + multa_art_477
     )
-    descontos = _money(aviso_desconto + outros_desc)
-
-    # INSS/IRRF aproximados sobre verbas tributáveis (saldo + 13º + aviso indenizado)
-    base_inss = saldo_salario + decimo + aviso_valor
-    inss = inss_empregado(base_inss)
-    irrf = irrf_progressivo(max(base_inss - inss, 0))
-    descontos = _money(descontos + inss + irrf)
-
+    descontos = _money(aviso_desconto + outros_desc + inss + irrf)
     total_liquido = _money(proventos - descontos)
 
-    # Custo da escola: verbas brutas ao trabalhador + FGTS do mês + multa rescisória
-    # (INSS/IRRF retidos saem do bolso da escola na quitação junto com o líquido)
-    custo_empregador = _money(total_liquido + inss + irrf + fgts_mes + multa_fgts)
+    # Cota patronal: no Simples (Anexos III e V) a CPP já está no DAS.
+    regime = (params.get("regime_tributario") or "simples_nacional").strip().lower()
+    base_patronal = _money(base_mensal + decimo_trabalhado)
+    aliq_patronal = 0.0 if regime == "simples_nacional" else (ALIQUOTA_INSS_PATRONAL + ALIQUOTA_RAT + ALIQUOTA_SISTEMA_S)
+    inss_patronal = _money(base_patronal * aliq_patronal)
 
-    atrasado, limite_pag = pagamento_em_atraso(deslig, params.get("data_pagamento"))
+    # Custo da escola: verbas ao trabalhador (líquido + retenções) + FGTS + multa + patronal
+    custo_empregador = _money(total_liquido + inss + irrf + fgts_mes + multa_fgts + inss_patronal)
 
     return {
         "tipo_rescisao": tipo,
@@ -362,7 +425,11 @@ def calcular_rescisao(func, params):
         "aviso_indenizado": aviso_valor,
         "aviso_desconto": aviso_desconto,
         "avos_13": avos_13,
+        "avos_13_indenizado": avos_13_indenizado,
         "decimo_terceiro": decimo,
+        "decimo_indenizado": decimo_indenizado,
+        "decimo_trabalhado": decimo_trabalhado,
+        "fator_proporcionais": fator,
         "ferias_vencidas_simples": ferias_simples,
         "ferias_vencidas_dobro": ferias_dobro,
         "ferias_vencidas": ferias_venc_valor,
@@ -377,14 +444,29 @@ def calcular_rescisao(func, params):
         "multa_fgts": multa_fgts,
         "outros_proventos": outros_prov,
         "outros_descontos": outros_desc,
+        "base_inss_mensal": base_mensal,
+        "inss_mensal": inss_mensal,
+        "irrf_mensal": irrf_mensal,
+        "inss_13": inss_13,
+        "irrf_13": irrf_13,
         "inss": inss,
         "irrf": irrf,
+        "base_fgts_mes": base_fgts_mes,
+        "saque_fgts_percentual": saque_pct,
+        "saque_fgts_estimado": saque_fgts_estimado,
+        "multa_art_477": multa_art_477,
+        "regime_tributario": regime,
+        "base_patronal": base_patronal,
+        "aliquota_patronal": aliq_patronal,
+        "inss_patronal": inss_patronal,
         "proventos": proventos,
         "descontos": descontos,
         "total_liquido": total_liquido,
         "custo_empregador": custo_empregador,
         "data_limite_pagamento": limite_pag.isoformat() if limite_pag else None,
         "pagamento_atrasado": atrasado,
+        "obrigacoes": obrigacoes_rescisao(deslig, regime),
+        "seguro_desemprego": bool(direitos.get("seguro_desemprego")),
         "direitos": direitos,
         "rotulo_tipo": dict(TIPOS_RESCISAO).get(tipo, tipo),
         "rotulo_aviso": dict(AVISO_MODALIDADES).get(aviso_mod, aviso_mod),

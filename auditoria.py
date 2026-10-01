@@ -650,7 +650,11 @@ def modulos_auditoria(escola_id=None):
                     ORDER BY modulo
                     """
                 )
-            encontrados = [row[0] for row in (cursor.fetchall() or []) if row and row[0]]
+            encontrados = []
+            for row in cursor.fetchall() or []:
+                valor = row.get("modulo") if isinstance(row, dict) else (row[0] if row else None)
+                if valor:
+                    encontrados.append(valor)
     finally:
         conexao.close()
     base = list(_ROTULO_AREA.values()) + ["Plataforma", "Sistema"]

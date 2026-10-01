@@ -170,7 +170,10 @@ def apurar_simples(
     meses_atividade,
     receita_mes,
     annualizado=False,
+    acrescimos_mora=0.0,
 ):
+    """DAS sobre a receita bruta. `acrescimos_mora` só é informado na tela:
+    juros/multa por atraso não compõem a receita bruta (Res. CGSN 140/2018, art. 2º, § 5º, II)."""
     rbt12, rbt_annualizada = annualizar(rbt_acumulado, meses_atividade)
     fs12, fs_annualizada = annualizar(fs_acumulado, meses_atividade)
     annualizado = annualizado or rbt_annualizada or fs_annualizada
@@ -201,6 +204,7 @@ def apurar_simples(
         "aliquota_efetiva": aliq,
         "aliquota_efetiva_pct": aliq * 100.0,
         "receita_mes": float(receita_mes or 0.0),
+        "acrescimos_mora": float(acrescimos_mora or 0.0),
         "das": das,
         "extrapolou_limite": extrapolou,
     }
@@ -228,18 +232,22 @@ PIS_LUCRO_REAL = 0.0165
 COFINS_LUCRO_REAL = 0.076
 
 
-def apurar_pis_cofins(receita_mes, regime):
+def apurar_pis_cofins(receita_mes, regime, acrescimos_mora=0.0):
     receita = float(receita_mes or 0.0)
+    mora = max(0.0, float(acrescimos_mora or 0.0))
+    base = receita + mora
     if regime == "lucro_real":
         pis_aliq, cofins_aliq = PIS_LUCRO_REAL, COFINS_LUCRO_REAL
         regime_pis = "não-cumulativo"
     else:
         pis_aliq, cofins_aliq = PIS_PRESUMIDO, COFINS_PRESUMIDO
         regime_pis = "cumulativo"
-    pis = receita * pis_aliq
-    cofins = receita * cofins_aliq
+    pis = base * pis_aliq
+    cofins = base * cofins_aliq
     return {
         "receita_mes": receita,
+        "acrescimos_mora": mora,
+        "base": base,
         "pis_aliquota": pis_aliq,
         "cofins_aliquota": cofins_aliq,
         "pis": pis,
@@ -283,22 +291,33 @@ def acrescimos_recebimento(valor, juros_percentual, multa_valor):
     }
 
 
-def apurar_lucro_presumido(receita_mes, itens_folha, receita_trimestre=None):
+def apurar_lucro_presumido(
+    receita_mes,
+    itens_folha,
+    receita_trimestre=None,
+    acrescimos_mora=0.0,
+    acrescimos_trimestre=None,
+):
     """
     Tributos sobre o faturamento + encargos cheios da folha CLT.
-    Base de IRPJ/CSLL: 32% da receita bruta (serviços educacionais).
-    ISS estimado em 5%. Adicional de IRPJ (10%) só se o lucro presumido
-    trimestral superar R$ 60.000,00.
+    Base de IRPJ/CSLL: 32% da receita bruta (serviços educacionais)
+    + 100% dos juros/multa de mora recebidos (Lei 9.430/96, art. 25, II).
+    PIS/COFINS cumulativos também alcançam juros/multa (STJ, Tema 1.237).
+    ISS estimado em 5% só sobre o preço do serviço.
+    Adicional de IRPJ (10%) só se a base trimestral superar R$ 60.000,00.
     """
     receita = float(receita_mes or 0.0)
-    pis = receita * PIS_PRESUMIDO
-    cofins = receita * COFINS_PRESUMIDO
+    mora = max(0.0, float(acrescimos_mora or 0.0))
+    pis = (receita + mora) * PIS_PRESUMIDO
+    cofins = (receita + mora) * COFINS_PRESUMIDO
     iss = receita * ISS_ESTIMADO
-    base_presumida = receita * PRESUNCAO_SERVICOS
+    base_servicos = receita * PRESUNCAO_SERVICOS
+    base_presumida = base_servicos + mora
     csll = base_presumida * CSLL_ALIQUOTA
     irpj = base_presumida * IRPJ_ALIQUOTA
     receita_tri = float(receita * 3.0 if receita_trimestre is None else receita_trimestre)
-    base_trimestral = receita_tri * PRESUNCAO_SERVICOS
+    mora_tri = float(mora * 3.0 if acrescimos_trimestre is None else acrescimos_trimestre)
+    base_trimestral = receita_tri * PRESUNCAO_SERVICOS + mora_tri
     irpj_adicional_trimestre = 0.0
     if base_trimestral > IRPJ_ADICIONAL_LIMITE_TRIMESTRE:
         irpj_adicional_trimestre = (base_trimestral - IRPJ_ADICIONAL_LIMITE_TRIMESTRE) * IRPJ_ADICIONAL_ALIQUOTA
@@ -308,14 +327,19 @@ def apurar_lucro_presumido(receita_mes, itens_folha, receita_trimestre=None):
     folha = [dict(item) for item in (itens_folha or [])]
     folha_total = sum(float(item.get("total") or 0) for item in folha)
     salario_bruto = sum(float(item.get("salario") or 0) for item in folha)
-    caixa = receita - tributos - folha_total
-    carga_pct = ((tributos + folha_total) / receita * 100.0) if receita else 0.0
+    entradas = receita + mora
+    caixa = entradas - tributos - folha_total
+    carga_pct = ((tributos + folha_total) / entradas * 100.0) if entradas else 0.0
 
     return {
         "receita_mes": receita,
+        "acrescimos_mora": mora,
+        "acrescimos_trimestre": mora_tri,
+        "base_pis_cofins": receita + mora,
         "pis": pis,
         "cofins": cofins,
         "iss": iss,
+        "base_servicos": base_servicos,
         "base_presumida": base_presumida,
         "csll": csll,
         "irpj": irpj,

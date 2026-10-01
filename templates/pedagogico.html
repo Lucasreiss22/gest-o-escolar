@@ -234,7 +234,7 @@
                     {% for n in aluno_notas %}
                     <tr>
                         <td>{{ n.materia or '—' }}</td>
-                        <td>{{ n.titulo_avaliacao or '—' }}{% if n.trimestre %} · T{{ n.trimestre }}{% endif %}</td>
+                        <td>{{ n.titulo_avaliacao or '—' }}{% if n.trimestre %} · {{ n.trimestre }}º bim.{% endif %}</td>
                         <td><strong>{{ n.nota if n.nota is not none else '—' }}</strong></td>
                         <td>{{ n.data_aplicacao or '—' }}</td>
                     </tr>
@@ -811,10 +811,11 @@
                         <input type="time" name="horario_prova" class="form-control form-control-sm" required>
                     </div>
                     <div class="col-md-1">
-                        <select name="trimestre_prova" class="form-select form-select-sm">
-                            <option value="1">1º</option>
-                            <option value="2">2º</option>
-                            <option value="3">3º</option>
+                        <select name="trimestre_prova" class="form-select form-select-sm" title="Bimestre" aria-label="Bimestre">
+                            <option value="1">1º bim.</option>
+                            <option value="2">2º bim.</option>
+                            <option value="3">3º bim.</option>
+                            <option value="4">4º bim.</option>
                         </select>
                     </div>
                     <div class="col-md-2 d-grid">

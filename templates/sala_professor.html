@@ -36,7 +36,7 @@
     {% include '_nav.html' %}
     <div class="content">
         <h2>Minhas provas</h2>
-        <p style="color:#64748b;margin:0 0 16px;">{{ pessoa.nome_completo }}. Clique em uma prova para lançar notas, anexar PDF do aluno e ajustar datas.</p>
+        <p style="color:#64748b;margin:0 0 16px;">{% if pessoa %}{{ pessoa.nome_completo }}. {% endif %}Clique em uma prova para lançar notas, anexar PDF do aluno e ajustar datas.</p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}{% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}{% endif %}

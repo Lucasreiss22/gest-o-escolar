@@ -116,6 +116,7 @@
         .fin-item-top { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
         .fin-item-top strong { font-size: 0.95rem; }
         .fin-item-meta { color: #64748b; font-size: 0.8rem; margin-bottom: 8px; }
+        .mora-info { color: #b45309; font-size: 0.78rem; }
         .fin-item-acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
         @media(max-width: 960px) {
             .fin-periodo { top: 56px; border-radius: 0; margin: -16px -14px 12px; padding: 10px 14px; }
@@ -308,6 +309,18 @@
                 <span class="hint" style="color: #e67e22;">Abrir relatório</span>
                 {% endif %}
             </a>
+            {% if totais.juros_multa_mes %}
+            <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="card-resumo atrasado" title="Juros e multa cobrados nas baixas deste mês">
+                <h4>Juros e multa recebidos</h4>
+                <div class="valor">R$ {{ (totais.juros_multa_mes)|moeda }}</div>
+                <span class="hint" style="color:#b45309;">
+                    Juros R$ {{ (totais.juros_mes or 0)|moeda }} · multa R$ {{ (totais.multa_mes or 0)|moeda }} · {{ totais.qtd_com_mora or 0 }} baixa(s)<br>
+                    {% if regime_atual == 'simples_nacional' %}Fora da receita bruta do DAS (Res. CGSN 140/2018, art. 2º, § 5º, II)
+                    {% elif regime_atual == 'lucro_presumido' %}Somados 100% na base de IRPJ/CSLL e no PIS/COFINS
+                    {% else %}Somados na base de PIS/COFINS{% endif %}
+                </span>
+            </a>
+            {% endif %}
             {% if isencao_aprendiz and isencao_aprendiz.valor > 0 %}
             <button type="button" class="card-resumo isencao" data-abre="dlg-isencao-aprendiz" style="text-align:left; cursor:pointer; border:none; width:100%;">
                 <h4>Isenção de imposto / encargos</h4>
@@ -510,6 +523,9 @@
                     <div class="calc-passo"><strong>Faixa do anexo {{ ap.anexo }}</strong>Faixa {{ ap.faixa }}, alíquota nominal {{ "%.2f"|format(aliq_nom) }}%, parcela a deduzir R$ {{ (ap.parcela_deduzir)|moeda }}.</div>
                     <div class="calc-passo"><strong>Alíquota efetiva</strong>((R$ {{ (ap.rbt12)|moeda }} × {{ "%.2f"|format(aliq_nom) }}%) − R$ {{ (ap.parcela_deduzir)|moeda }}) ÷ R$ {{ (ap.rbt12)|moeda }} = {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</div>
                     <div class="calc-passo"><strong>DAS</strong>R$ {{ (ap.receita_mes)|moeda }} × {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% = R$ {{ (ap.das)|moeda }}</div>
+                    {% if ap.acrescimos_mora %}
+                    <div class="calc-passo"><strong>Juros e multa por atraso</strong>R$ {{ (ap.acrescimos_mora)|moeda }} recebidos neste mês ficam fora da receita bruta do Simples (Res. CGSN 140/2018, art. 2º, § 5º, II). Entram no caixa, não no DAS.</div>
+                    {% endif %}
                     {% with campo='das' %}{% include '_simples_envio.html' %}{% endwith %}
                 </div>
             </dialog>
@@ -626,6 +642,7 @@
             <summary>Uso do caixa no mês</summary>
             <div class="fin-bloco-body">
                 <div class="fin-linha"><span>(+) Recebido nas mensalidades</span><strong>R$ {{ (totais.recebido)|moeda }}</strong></div>
+                <div class="fin-linha"><span>(+) Juros e multa por atraso recebidos</span><strong>R$ {{ (totais.juros_multa_mes or 0)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(−) Folha e encargos (custo da escola)</span><strong>R$ {{ (totais.folha_pagamento)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(−) Tributos da empresa</span><strong>R$ {{ (totais.tributos)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(−) Compras e custos fixos (aluguel, energia, material)</span><strong>R$ {{ (totais.custos_compras or 0)|moeda }}</strong></div>
@@ -1214,6 +1231,14 @@
                             </label>
                             <strong>R$ {{ (item.valor|float if item.valor else 0)|moeda }}</strong>
                         </div>
+                        {% set mora_item = (item.juros_valor|float if item.juros_valor else 0) + (item.multa_valor|float if item.multa_valor else 0) %}
+                        {% if mora_item > 0 %}
+                        <div class="fin-item-meta mora-info">
+                            + juros R$ {{ (item.juros_valor|float if item.juros_valor else 0)|moeda }}{% if item.juros_percentual and item.juros_percentual|float > 0 %} ({{ item.juros_percentual|float|round(2) }}%){% endif %}
+                            · multa R$ {{ (item.multa_valor|float if item.multa_valor else 0)|moeda }}
+                            · <strong>total pago R$ {{ ((item.valor|float if item.valor else 0) + mora_item)|moeda }}</strong>
+                        </div>
+                        {% endif %}
                         <div class="fin-item-meta">
                             {{ item.descricao or '-' }} · vence {{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}
                             · <span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span>
@@ -1323,7 +1348,16 @@
                                     {% if item.turma_nome %}<span class="cobranca-turma">{{ item.turma_nome }}</span>{% endif %}
                                 </td>
                                 <td>{{ item.descricao or '-' }}</td>
-                                <td>R$ {{ (item.valor|float if item.valor else 0)|moeda }}</td>
+                                {% set mora_item = (item.juros_valor|float if item.juros_valor else 0) + (item.multa_valor|float if item.multa_valor else 0) %}
+                                <td>
+                                    R$ {{ (item.valor|float if item.valor else 0)|moeda }}
+                                    {% if mora_item > 0 %}
+                                    <span class="mora-info" style="display:block;" title="Juros e multa por atraso cobrados na baixa">
+                                        + juros R$ {{ (item.juros_valor|float if item.juros_valor else 0)|moeda }} · multa R$ {{ (item.multa_valor|float if item.multa_valor else 0)|moeda }}
+                                        <strong style="display:block;">pago R$ {{ ((item.valor|float if item.valor else 0) + mora_item)|moeda }}</strong>
+                                    </span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ item.data_vencimento.strftime('%d/%m/%Y') if item.data_vencimento else '-' }}</td>
                                 <td><span class="badge badge-{{ st }}">{{ item.status or 'Atrasado' }}</span></td>
                                 <td>

@@ -115,12 +115,15 @@ def primeira_competencia_sistema(cursor, regime_apuracao="competencia"):
 
 
 def receita_sistema_mes(cursor, competencia, regime_apuracao="competencia"):
+    """Receita bruta do mês (só a mensalidade).
+
+    Juros e multa por atraso ficam fora: no Simples não compõem a receita bruta
+    (Res. CGSN 140/2018, art. 2º, § 5º, II). Veja acrescimos_mora_mes().
+    """
     if normalizar_regime_apuracao(regime_apuracao) == "caixa":
         cursor.execute(
             """
-            SELECT COALESCE(SUM(
-                valor::numeric + COALESCE(juros_valor, 0) + COALESCE(multa_valor, 0)
-            ), 0) AS total
+            SELECT COALESCE(SUM(valor::numeric), 0) AS total
             FROM financeiro_mensalidades
             WHERE LOWER(COALESCE(status, '')) = 'pago'
               AND data_pagamento IS NOT NULL
@@ -139,6 +142,28 @@ def receita_sistema_mes(cursor, competencia, regime_apuracao="competencia"):
             (competencia,),
         )
     return float((cursor.fetchone() or {}).get("total") or 0)
+
+
+def acrescimos_mora_mes(cursor, competencia):
+    """Juros e multa efetivamente recebidos no mês (pela data da baixa)."""
+    cursor.execute(
+        """
+        SELECT COALESCE(SUM(COALESCE(juros_valor, 0)), 0) AS juros,
+               COALESCE(SUM(COALESCE(multa_valor, 0)), 0) AS multa,
+               COUNT(*) FILTER (
+                   WHERE COALESCE(juros_valor, 0) > 0 OR COALESCE(multa_valor, 0) > 0
+               ) AS qtd
+        FROM financeiro_mensalidades
+        WHERE LOWER(COALESCE(status, '')) = 'pago'
+          AND data_pagamento IS NOT NULL
+          AND TO_CHAR(data_pagamento, 'YYYY-MM') = %s
+        """,
+        (competencia,),
+    )
+    row = cursor.fetchone() or {}
+    juros = round(float(row.get("juros") or 0), 2)
+    multa = round(float(row.get("multa") or 0), 2)
+    return {"juros": juros, "multa": multa, "total": round(juros + multa, 2), "qtd": int(row.get("qtd") or 0)}
 
 
 def resumo_emitido_e_caixa(cursor, competencia):

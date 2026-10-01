@@ -339,29 +339,70 @@
                 {% if calculo.aviso_desconto %}
                 <div class="linha"><span>Desconto aviso não cumprido</span><strong>− R$ {{ calculo.aviso_desconto|moeda }}</strong></div>
                 {% endif %}
-                <div class="linha"><span>13º proporcional ({{ calculo.avos_13 }}/12)</span><strong>R$ {{ calculo.decimo_terceiro|moeda }}</strong></div>
+                <div class="linha"><span>13º proporcional ({{ calculo.avos_13 }}/12{% if calculo.fator_proporcionais < 1 %} · 50% culpa recíproca{% endif %}){% if calculo.decimo_indenizado %} · indenizado R$ {{ calculo.decimo_indenizado|moeda }}{% endif %}</span><strong>R$ {{ calculo.decimo_terceiro|moeda }}</strong></div>
                 <div class="linha"><span>Férias vencidas</span><strong>R$ {{ calculo.ferias_vencidas|moeda }}</strong></div>
                 <div class="linha"><span>1/3 sobre férias vencidas</span><strong>R$ {{ calculo.terco_ferias_vencidas|moeda }}</strong></div>
-                <div class="linha"><span>Férias proporcionais ({{ calculo.avos_ferias_proporcionais }}/12)</span><strong>R$ {{ calculo.ferias_proporcionais|moeda }}</strong></div>
+                <div class="linha"><span>Férias proporcionais ({{ calculo.avos_ferias_proporcionais }}/12{% if calculo.fator_proporcionais < 1 %} · 50%{% endif %})</span><strong>R$ {{ calculo.ferias_proporcionais|moeda }}</strong></div>
                 <div class="linha"><span>1/3 sobre férias proporcionais</span><strong>R$ {{ calculo.terco_ferias_proporcionais|moeda }}</strong></div>
                 {% if calculo.outros_proventos %}
                 <div class="linha"><span>Outros proventos</span><strong>R$ {{ calculo.outros_proventos|moeda }}</strong></div>
                 {% endif %}
-                <div class="linha"><span>FGTS do mês ({{ (calculo.aliquota_fgts * 100)|round(1) }}%)</span><strong>R$ {{ calculo.fgts_mes|moeda }}</strong></div>
-                <div class="linha"><span>Multa FGTS ({{ (calculo.aliquota_multa_fgts * 100)|round(0) }}%)</span><strong>R$ {{ calculo.multa_fgts|moeda }}</strong></div>
-                <div class="linha"><span>INSS (estimativa)</span><strong>− R$ {{ calculo.inss|moeda }}</strong></div>
-                <div class="linha"><span>IRRF (estimativa)</span><strong>− R$ {{ calculo.irrf|moeda }}</strong></div>
+                {% if calculo.multa_art_477 %}
+                <div class="linha"><span>Multa Art. 477 § 8º (atraso na quitação)</span><strong>R$ {{ calculo.multa_art_477|moeda }}</strong></div>
+                {% endif %}
+                <div class="linha"><span>INSS sobre saldo/salário (R$ {{ calculo.base_inss_mensal|moeda }})</span><strong>− R$ {{ calculo.inss_mensal|moeda }}</strong></div>
+                <div class="linha"><span>INSS sobre 13º (calculado à parte)</span><strong>− R$ {{ calculo.inss_13|moeda }}</strong></div>
+                <div class="linha"><span>IRRF sobre saldo/salário</span><strong>− R$ {{ calculo.irrf_mensal|moeda }}</strong></div>
+                <div class="linha"><span>IRRF sobre 13º (tributação exclusiva)</span><strong>− R$ {{ calculo.irrf_13|moeda }}</strong></div>
                 {% if calculo.outros_descontos %}
                 <div class="linha"><span>Outros descontos</span><strong>− R$ {{ calculo.outros_descontos|moeda }}</strong></div>
                 {% endif %}
                 <div class="linha total"><span>Total proventos</span><strong>R$ {{ calculo.proventos|moeda }}</strong></div>
                 <div class="linha"><span>Total descontos</span><strong>R$ {{ calculo.descontos|moeda }}</strong></div>
-                <div class="linha total"><span>Líquido estimado</span><strong>R$ {{ calculo.total_liquido|moeda }}</strong></div>
+                <div class="linha total"><span>Líquido ao trabalhador</span><strong>R$ {{ calculo.total_liquido|moeda }}</strong></div>
+
+                <h4 style="margin:16px 0 6px;">Encargos da escola</h4>
+                <div class="linha"><span>FGTS do mês ({{ (calculo.aliquota_fgts * 100)|round(1) }}% de R$ {{ calculo.base_fgts_mes|moeda }})</span><strong>R$ {{ calculo.fgts_mes|moeda }}</strong></div>
+                <div class="linha"><span>Multa FGTS ({{ (calculo.aliquota_multa_fgts * 100)|round(0) }}%)</span><strong>R$ {{ calculo.multa_fgts|moeda }}</strong></div>
+                {% if calculo.inss_patronal %}
+                <div class="linha"><span>INSS patronal + RAT + terceiros ({{ (calculo.aliquota_patronal * 100)|round(1) }}% de R$ {{ calculo.base_patronal|moeda }})</span><strong>R$ {{ calculo.inss_patronal|moeda }}</strong></div>
+                {% else %}
+                <div class="linha"><span>INSS patronal</span><strong>no DAS (Simples)</strong></div>
+                {% endif %}
                 <div class="linha total"><span>Custo da escola (Financeiro)</span><strong>R$ {{ calculo.custo_empregador|moeda }}</strong></div>
+                {% if calculo.saque_fgts_percentual %}
+                <div class="linha"><span>Saque do FGTS pelo trabalhador ({{ (calculo.saque_fgts_percentual * 100)|round(0) }}% do saldo + multa)</span><strong>≈ R$ {{ calculo.saque_fgts_estimado|moeda }}</strong></div>
+                {% endif %}
+                <div class="linha"><span>Seguro-desemprego</span><strong>{{ 'Tem direito' if calculo.seguro_desemprego else 'Não tem direito' }}</strong></div>
+
+                <h4 style="margin:16px 0 6px;">Incidência por verba</h4>
+                <table>
+                    <thead><tr><th>Verba</th><th>INSS</th><th>IRRF</th><th>FGTS</th></tr></thead>
+                    <tbody>
+                        <tr><td>Saldo de salário</td><td>Sim</td><td>Sim</td><td>Sim</td></tr>
+                        <tr><td>13º proporcional</td><td>Sim (à parte; não na parte indenizada)</td><td>Sim (exclusivo)</td><td>Sim</td></tr>
+                        <tr><td>Aviso prévio indenizado</td><td>Não</td><td>Não</td><td>Sim (Súm. 305 TST)</td></tr>
+                        <tr><td>Férias indenizadas + 1/3</td><td>Não</td><td>Não</td><td>Não</td></tr>
+                        <tr><td>Multa FGTS / multa Art. 477</td><td>Não</td><td>Não</td><td>Não</td></tr>
+                    </tbody>
+                </table>
+
+                {% if calculo.obrigacoes %}
+                <h4 style="margin:16px 0 6px;">Prazos de pagamento e recolhimento</h4>
+                <table>
+                    <thead><tr><th>Obrigação</th><th>Prazo</th><th>Base</th></tr></thead>
+                    <tbody>
+                    {% for ob in calculo.obrigacoes %}
+                        <tr><td>{{ ob.item }}</td><td>{{ ob.prazo }}</td><td class="hint">{{ ob.base }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
                 <p class="hint" style="margin-top:12px;">
-                    Ao confirmar, este custo da escola é lançado automaticamente em Financeiro (categoria Rescisão):
-                    líquido + INSS + IRRF + FGTS do mês + multa FGTS.
+                    Ao confirmar, o custo da escola é lançado em Financeiro (categoria Rescisão):
+                    líquido + INSS + IRRF retidos + FGTS do mês + multa FGTS{% if calculo.inss_patronal %} + cota patronal{% endif %}.
                     Projeção do aviso indenizado: {{ calculo.dias_aviso_projecao }} dia(s) para 13º/férias.
+                    Valores estimados sem dependentes de IR; confira com a contabilidade antes da homologação.
                 </p>
             </div>
             {% endif %}

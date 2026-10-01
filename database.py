@@ -543,12 +543,56 @@ def _seed_materias_bncc(cursor):
             )
 
 
+def _ajustar_unicidade_frequencia(cursor):
+    """Frequência é por aluno + dia + matéria. Remove a unicidade antiga (aluno + dia)."""
+    cursor.execute("UPDATE frequencia SET disciplina = '' WHERE disciplina IS NULL")
+    cursor.execute(
+        """
+        SELECT c.conname,
+               ARRAY(
+                   SELECT a.attname::text FROM pg_attribute a
+                   WHERE a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+                   ORDER BY a.attname
+               ) AS colunas
+        FROM pg_constraint c
+        WHERE c.conrelid = 'frequencia'::regclass AND c.contype = 'u'
+        """
+    )
+    tem_tripla = False
+    for row in cursor.fetchall() or []:
+        nome = row["conname"] if isinstance(row, dict) else row[0]
+        colunas = list(row["colunas"] if isinstance(row, dict) else row[1])
+        if colunas == ["aluno_id", "data_aula"]:
+            cursor.execute(f'ALTER TABLE frequencia DROP CONSTRAINT IF EXISTS "{nome}"')
+        elif colunas == ["aluno_id", "data_aula", "disciplina"]:
+            tem_tripla = True
+    if tem_tripla:
+        return
+    cursor.execute(
+        """
+        DELETE FROM frequencia f
+        USING frequencia g
+        WHERE f.aluno_id = g.aluno_id
+          AND f.data_aula = g.data_aula
+          AND COALESCE(f.disciplina, '') = COALESCE(g.disciplina, '')
+          AND f.id < g.id
+        """
+    )
+    cursor.execute(
+        """
+        ALTER TABLE frequencia
+        ADD CONSTRAINT frequencia_aluno_dia_disc_key
+        UNIQUE (aluno_id, data_aula, disciplina)
+        """
+    )
+
+
 def garantir_tabelas_pedagogicas():
     """Cria tabelas de frequência, boletins anexos e vínculos de disciplina."""
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ped_bncc_v4"
+    chave = f"{schema}:ped_bncc_v5"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -576,9 +620,9 @@ def garantir_tabelas_pedagogicas():
                     turma_id INT REFERENCES turmas(id) ON DELETE SET NULL,
                     data_aula DATE NOT NULL,
                     status VARCHAR(20) NOT NULL DEFAULT 'presente',
-                    disciplina VARCHAR(100),
+                    disciplina VARCHAR(100) DEFAULT '',
                     observacao TEXT,
-                    UNIQUE (aluno_id, data_aula)
+                    CONSTRAINT frequencia_aluno_dia_disc_key UNIQUE (aluno_id, data_aula, disciplina)
                 );
 
                 CREATE TABLE IF NOT EXISTS boletins_anexos (
@@ -669,6 +713,10 @@ def garantir_tabelas_pedagogicas():
                 ("provas_notas", "justificativa", "TEXT"),
                 ("provas_notas", "data_aplicacao", "DATE"),
                 ("turmas", "etapa_ensino", "VARCHAR(30) DEFAULT 'FUNDAMENTAL'"),
+                ("calendario_eventos", "periodo", "VARCHAR(20)"),
+                ("calendario_eventos", "aluno_id", "INT"),
+                ("calendario_eventos", "horario", "TIME"),
+                ("calendario_eventos", "professor_id", "INT"),
             ):
                 _garantir_coluna(cursor, tabela, coluna, spec, mapa)
             cursor.execute(
@@ -741,6 +789,7 @@ def garantir_tabelas_pedagogicas():
                         """,
                         (nome, etapa, mins, _json.dumps(matriz, ensure_ascii=False)),
                     )
+            cursor.execute("SAVEPOINT sp_provas_notas_idx")
             try:
                 cursor.execute(
                     """
@@ -749,8 +798,9 @@ def garantir_tabelas_pedagogicas():
                     WHERE prova_criada_id IS NOT NULL
                     """
                 )
+                cursor.execute("RELEASE SAVEPOINT sp_provas_notas_idx")
             except Exception:
-                pass
+                cursor.execute("ROLLBACK TO SAVEPOINT sp_provas_notas_idx")
             cursor.execute(
                 """
                 UPDATE disciplinas
@@ -806,26 +856,7 @@ def garantir_tabelas_pedagogicas():
                 """
             )
             if "frequencia" in mapa:
-                try:
-                    cursor.execute("UPDATE frequencia SET disciplina = '' WHERE disciplina IS NULL;")
-                except Exception:
-                    pass
-                cursor.execute(
-                    """
-                    SELECT 1 FROM pg_constraint WHERE conname = 'frequencia_aluno_dia_disc_key'
-                    """
-                )
-                if not cursor.fetchone():
-                    try:
-                        cursor.execute(
-                            """
-                            ALTER TABLE frequencia
-                            ADD CONSTRAINT frequencia_aluno_dia_disc_key
-                            UNIQUE (aluno_id, data_aula, disciplina)
-                            """
-                        )
-                    except Exception:
-                        pass
+                _ajustar_unicidade_frequencia(cursor)
             conexao.commit()
             _tabelas_ok.add(chave)
     except Exception as e:

@@ -49,6 +49,7 @@ from simples_nacional import (
     carregar_sistema,
     janela_competencias,
     receita_sistema_mes,
+    acrescimos_mora_mes,
     resumo_emitido_e_caixa,
     listar_recebimentos_mes,
     folha_sistema_mes,
@@ -275,7 +276,18 @@ def _erro_interno(e):
 
 @app.errorhandler(404)
 def _pagina_nao_encontrada(e):
-    # Evita a tela “Not Found” do Werkzeug — manda de volta ao login
+    # Recursos buscados pelo navegador (favicon, imagens, scripts) não podem
+    # deixar flash na sessão, senão a mensagem aparece na próxima tela.
+    caminho = (request.path or "").lower()
+    navegacao = (
+        request.method == "GET"
+        and "text/html" in (request.headers.get("Accept") or "")
+        and not caminho.startswith("/static/")
+        and not caminho.startswith("/midia/")
+        and not caminho.endswith((".ico", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js", ".map", ".json", ".txt", ".xml", ".woff", ".woff2"))
+    )
+    if not navegacao:
+        return "Não encontrado", 404, {"Content-Type": "text/plain; charset=utf-8"}
     try:
         if session.get("usuario_id") and not session.get("super_admin"):
             flash("Página não encontrada.", "danger")
@@ -1596,7 +1608,8 @@ def _lancar_frequencia_materias(cursor, aluno_id, turma_id, data_aula, status, d
     if disc in ("__todas__", "todas"):
         materias = _materias_da_turma(cursor, turma_id)
         if not materias:
-            raise ValueError("Cadastre as matérias desta turma para lançar em todas.")
+            _upsert_frequencia(cursor, aluno_id, turma_id, data_aula, status, "")
+            return
         for nome in materias:
             _upsert_frequencia(cursor, aluno_id, turma_id, data_aula, status, nome)
         return
@@ -1954,6 +1967,7 @@ def _horario_turno(turno, offset_min=0):
 
 def _criar_rotinas_turma(cursor, turma_id, turma_nome, turno, disc_grades, prof_por_disc, ano_letivo=None):
     """Cria eventos de rotina (periodo=semana) no calendário de cada professor."""
+    cursor.execute("ALTER TABLE calendario_eventos ADD COLUMN IF NOT EXISTS periodo VARCHAR(20)")
     criados = 0
     base = date.today()
     if ano_letivo:
@@ -2538,6 +2552,7 @@ def _titulos_base_imposto(cursor, mes_filtro, regime_apuracao):
     cursor.execute(
         """
         SELECT f.data_pagamento, f.data_vencimento, f.descricao, f.forma_pagamento, f.valor,
+               COALESCE(f.juros_valor, 0) AS juros_valor, COALESCE(f.multa_valor, 0) AS multa_valor,
                a.nome_completo
         FROM financeiro_mensalidades f
         LEFT JOIN alunos a ON a.id = f.aluno_id
@@ -2651,7 +2666,10 @@ def _porque_custo(item):
 def listar_lancamentos_mes(cursor, mes_filtro, status=None):
     sql = """
         SELECT f.id, a.nome_completo, f.descricao, f.valor, f.data_vencimento,
-               f.data_pagamento, f.status
+               f.data_pagamento, f.status,
+               COALESCE(f.juros_percentual, 0) AS juros_percentual,
+               COALESCE(f.juros_valor, 0) AS juros_valor,
+               COALESCE(f.multa_valor, 0) AS multa_valor
         FROM financeiro_mensalidades f
         LEFT JOIN alunos a ON f.aluno_id = a.id
         WHERE TO_CHAR(f.data_vencimento, 'YYYY-MM') = %s
@@ -2670,7 +2688,12 @@ def calcular_apuracao_simples(cursor, mes_filtro):
     quadro = montar_quadro_simples(cursor, mes_filtro, regime)
     n_meses = quadro["meses_validos"] or 1
     colaboradores, _folha_mes = montar_folha_colaboradores(cursor)
-    apuracao = apurar_simples(quadro["rbt12"], quadro["fs12"], n_meses, quadro["receita_mes"])
+    mora = acrescimos_mora_mes(cursor, mes_filtro)
+    apuracao = apurar_simples(
+        quadro["rbt12"], quadro["fs12"], n_meses, quadro["receita_mes"],
+        acrescimos_mora=mora["total"],
+    )
+    apuracao["mora"] = mora
     ano, mes = parse_mes(mes_filtro)
     inicio_janela, fim_janela = janela_12_meses_anteriores(ano, mes)
     apuracao["inicio_janela"] = inicio_janela
@@ -2679,6 +2702,10 @@ def calcular_apuracao_simples(cursor, mes_filtro):
     apuracao["quadro"] = quadro
     apuracao["regime_apuracao"] = regime
     return apuracao, colaboradores
+
+
+def mora_do_trimestre(cursor, mes_filtro):
+    return round(sum(acrescimos_mora_mes(cursor, comp)["total"] for comp in meses_do_trimestre(mes_filtro)), 2)
 
 
 def nome_mes_extenso(mes_filtro):
@@ -4503,6 +4530,8 @@ def pagina_rescisao():
                     flash("Sem permissão para calcular rescisão.", "danger")
                     return redirect(url_for("pagina_rescisao", fid=fid, modo=modo))
                 params = _params_rescisao_do_form(request.form)
+                cursor.execute("SELECT regime_tributario FROM configuracoes WHERE id = 1")
+                params["regime_tributario"] = ((cursor.fetchone() or {}).get("regime_tributario") or "simples_nacional")
                 calculo = calcular_rescisao(dict(selecionado), params)
                 # Espelha avos/dias calculados nos campos ajustáveis
                 params["dias_aviso"] = str(calculo.get("dias_aviso") or "")
@@ -5002,6 +5031,10 @@ def _ids_alunos_da_turma(cursor, turma_id):
 
 
 def _trimestre_da_data(data_ref):
+    """Bimestre letivo da data (a coluna no banco segue chamada `trimestre`).
+
+    1º fev–abr · 2º mai–jul · 3º ago–set · 4º out–dez (janeiro conta no 1º).
+    """
     if not data_ref:
         data_ref = date.today()
     if isinstance(data_ref, str):
@@ -5011,9 +5044,11 @@ def _trimestre_da_data(data_ref):
     mes = int(data_ref.month)
     if mes <= 4:
         return 1
-    if mes <= 8:
+    if mes <= 7:
         return 2
-    return 3
+    if mes <= 9:
+        return 3
+    return 4
 
 
 def _nota_para_cadastro(valor):
@@ -5437,13 +5472,27 @@ def _ajustar_data_prova_aluno(
 
 
 def _professor_da_sessao(cursor, funcionario_id):
-    if not funcionario_id:
+    pessoa = None
+    if funcionario_id:
+        cursor.execute(
+            "SELECT id, nome_completo FROM funcionarios WHERE id = %s",
+            (funcionario_id,),
+        )
+        pessoa = cursor.fetchone()
+    if not pessoa:
+        # Sessão antiga (ex.: recontratação) pode guardar um id que não existe mais
+        novo_id = _id_funcionario_da_sessao()
+        if novo_id and novo_id != funcionario_id:
+            cursor.execute(
+                "SELECT id, nome_completo FROM funcionarios WHERE id = %s",
+                (novo_id,),
+            )
+            pessoa = cursor.fetchone()
+            if pessoa:
+                session["funcionario_id"] = novo_id
+                funcionario_id = novo_id
+    if not pessoa:
         return None, []
-    cursor.execute(
-        "SELECT id, nome_completo FROM funcionarios WHERE id = %s",
-        (funcionario_id,),
-    )
-    pessoa = cursor.fetchone()
     cursor.execute(
         """
         SELECT DISTINCT t.id, t.nome
@@ -5487,9 +5536,17 @@ def sala_professor():
                 flash(
                     "Seu usuário não está ligado a um professor da equipe. "
                     "Peça à secretaria para vincular seu login ao cadastro em Equipe / Professores.",
-                    "danger",
+                    "warning",
                 )
-                return redirect(url_for("dashboard"))
+                return render_template(
+                    "sala_professor.html",
+                    pessoa=None,
+                    turmas=[],
+                    arquivos=[],
+                    provas=[],
+                    turma_filtro=None,
+                    escola={},
+                )
             if request.method == "POST":
                 acao = request.form.get("acao")
                 if acao == "enviar_arquivo":
@@ -6008,7 +6065,6 @@ def sala_professor():
             if acao_erro == "enviar_arquivo":
                 return redirect(url_for("sala_professor_enviar_pdf"))
             return redirect(url_for("sala_professor"))
-        return redirect(url_for("dashboard"))
     finally:
         conexao.close()
     return render_template(
@@ -6399,14 +6455,15 @@ def calendario_escolar():
                             raise ValueError("Selecione o dia da aula.")
                         if not lancamentos:
                             raise ValueError("Nenhum aluno para lançar presença.")
+                        disciplina_freq = request.form.get("disciplina") or ("__todas__" if turma_id else "")
                         for aluno_freq, status in lancamentos:
                             _lancar_frequencia_materias(
                                 cursor,
-                                aluno_freq,
+                                int(aluno_freq),
                                 turma_id,
                                 data_aula,
                                 status,
-                                request.form.get("disciplina") or "",
+                                disciplina_freq,
                             )
                         conexao.commit()
                         flash("✅ Frequência registrada.", "success")
@@ -6456,6 +6513,35 @@ def calendario_escolar():
                                 raise ValueError("Escolha o professor da rotina.")
                             if papel_cal == "professor" and not meu_professor_id:
                                 raise ValueError("Seu usuário não está ligado a um professor da equipe.")
+                            cursor.execute(
+                                """
+                                SELECT titulo FROM calendario_eventos
+                                WHERE tipo = 'prova' AND professor_id = %s AND data_evento = %s
+                                  AND LOWER(TRIM(titulo)) LIKE LOWER(TRIM(%s)) || '%%'
+                                LIMIT 1
+                                """,
+                                (professor_id, data_evento, titulo or ""),
+                            )
+                            prova_igual = cursor.fetchone()
+                            if prova_igual:
+                                raise ValueError(
+                                    f"Já existe a prova “{prova_igual['titulo']}” nesse dia na sua agenda. "
+                                    "Provas são criadas em Minhas provas; a rotina não precisa repetir."
+                                )
+                        cursor.execute(
+                            """
+                            SELECT 1 FROM calendario_eventos
+                            WHERE LOWER(TRIM(COALESCE(titulo, ''))) = LOWER(TRIM(COALESCE(%s, '')))
+                              AND data_evento = %s AND COALESCE(tipo, '') = %s
+                              AND COALESCE(turma_id, 0) = COALESCE(%s::int, 0)
+                              AND COALESCE(professor_id, 0) = COALESCE(%s::int, 0)
+                              AND COALESCE(aluno_id, 0) = COALESCE(%s::int, 0)
+                            LIMIT 1
+                            """,
+                            (titulo, data_evento, tipo, turma_id, professor_id, aluno_id),
+                        )
+                        if cursor.fetchone():
+                            raise ValueError("Esse evento já está no calendário nesse dia.")
                         cursor.execute(
                             '''
                             INSERT INTO calendario_eventos (titulo, descricao, data_evento, tipo, turma_id, professor_id, aluno_id, horario, periodo)
@@ -6600,11 +6686,19 @@ def calendario_escolar():
                         """,
                         (contexto_aluno_id, mes, ano),
                     )
+                    peso_status = {"falta": 0, "justificada": 1}
                     for row in cursor.fetchall():
-                        frequencia_mes[row["data_aula"].isoformat()] = row["status"]
+                        dia_iso = row["data_aula"].isoformat()
+                        atual = frequencia_mes.get(dia_iso)
+                        if atual is None or peso_status.get(row["status"], 2) < peso_status.get(atual, 2):
+                            frequencia_mes[dia_iso] = row["status"]
                     if dia_sel:
                         cursor.execute(
-                            "SELECT * FROM frequencia WHERE aluno_id = %s AND data_aula = %s",
+                            """
+                            SELECT * FROM frequencia WHERE aluno_id = %s AND data_aula = %s
+                            ORDER BY CASE status WHEN 'falta' THEN 0 WHEN 'justificada' THEN 1 ELSE 2 END
+                            LIMIT 1
+                            """,
                             (contexto_aluno_id, dia_sel),
                         )
                         frequencia_aluno_dia = cursor.fetchone()
@@ -6618,7 +6712,12 @@ def calendario_escolar():
                             SELECT a.id, a.nome_completo, a.matricula, f.status
                             FROM turma_alunos ta
                             JOIN alunos a ON a.id = ta.aluno_id
-                            LEFT JOIN frequencia f ON f.aluno_id = a.id AND f.data_aula = %s
+                            LEFT JOIN LATERAL (
+                                SELECT status FROM frequencia
+                                WHERE aluno_id = a.id AND data_aula = %s
+                                ORDER BY CASE status WHEN 'falta' THEN 0 WHEN 'justificada' THEN 1 ELSE 2 END
+                                LIMIT 1
+                            ) f ON TRUE
                             WHERE ta.turma_id = %s
                             ORDER BY a.nome_completo
                             """,
@@ -7994,7 +8093,8 @@ def detalhes_aluno(aluno_id):
                 turmas_aluno = cursor.fetchall()
 
                 cursor.execute("""
-                    SELECT id, descricao, valor, data_vencimento, data_pagamento, status, forma_pagamento
+                    SELECT id, descricao, valor, data_vencimento, data_pagamento, status, forma_pagamento,
+                           COALESCE(juros_valor, 0) AS juros_valor, COALESCE(multa_valor, 0) AS multa_valor
                     FROM financeiro_mensalidades
                     WHERE aluno_id = %s
                     ORDER BY data_vencimento DESC;
@@ -9072,6 +9172,11 @@ def lancar_frequencia_aluno(aluno_id):
                 data_aula = request.form.get("data_aula")
                 if not data_aula:
                     raise ValueError("Informe a data.")
+                if not turma_id:
+                    cursor.execute("SELECT turma_id FROM turma_alunos WHERE aluno_id = %s", (aluno_id,))
+                    turmas_aluno = [r["turma_id"] if isinstance(r, dict) else r[0] for r in cursor.fetchall() or []]
+                    if len(turmas_aluno) == 1:
+                        turma_id = turmas_aluno[0]
                 if disciplina in ("__todas__", "todas") and not turma_id:
                     raise ValueError("Escolha a turma para lançar em todas as matérias.")
                 _lancar_frequencia_materias(cursor, aluno_id, turma_id, data_aula, status, disciplina)
@@ -10979,18 +11084,23 @@ def pagina_financeiro():
                 apuracao_pis_cofins = None
                 apuracao_presumido = None
                 receita_mes_bruta = receita_do_mes(cursor, mes_filtro, regime_apuracao)
+                mora_mes = acrescimos_mora_mes(cursor, mes_filtro)
+                totais["juros_mes"] = mora_mes["juros"]
+                totais["multa_mes"] = mora_mes["multa"]
+                totais["juros_multa_mes"] = mora_mes["total"]
+                totais["qtd_com_mora"] = mora_mes["qtd"]
 
                 if regime_tributario == "simples_nacional":
                     apuracao_simples, _colabs_fator_r = calcular_apuracao_simples(cursor, mes_filtro)
                     quadro_simples = apuracao_simples.get("quadro")
                     totais["tributos"] = apuracao_simples["das"]
                     totais["receita_bruta_mes"] = apuracao_simples["receita_mes"]
-                    totais["liquido"] = totais["recebido"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
+                    totais["liquido"] = totais["recebido"] + totais["juros_multa_mes"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
                 elif regime_tributario == "lucro_real":
-                    apuracao_pis_cofins = apurar_pis_cofins(receita_mes_bruta, "lucro_real")
+                    apuracao_pis_cofins = apurar_pis_cofins(receita_mes_bruta, "lucro_real", mora_mes["total"])
                     totais["tributos"] = 0.0
                     totais["receita_bruta_mes"] = receita_mes_bruta
-                    totais["liquido"] = totais["recebido"] - totais["folha_pagamento"] - totais["custos"]
+                    totais["liquido"] = totais["recebido"] + totais["juros_multa_mes"] - totais["folha_pagamento"] - totais["custos"]
                 else:
                     colaboradores_folha, _folha_cheia = montar_folha_colaboradores(cursor)
                     receita_tri = sum(
@@ -10998,16 +11108,21 @@ def pagina_financeiro():
                         for comp in meses_do_trimestre(mes_filtro)
                     )
                     apuracao_presumido = apurar_lucro_presumido(
-                        receita_mes_bruta, colaboradores_folha, receita_tri
+                        receita_mes_bruta, colaboradores_folha, receita_tri,
+                        acrescimos_mora=mora_mes["total"],
+                        acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
                     )
                     totais["tributos"] = apuracao_presumido["tributos"]
                     totais["receita_bruta_mes"] = receita_mes_bruta
-                    totais["liquido"] = totais["recebido"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
+                    totais["liquido"] = totais["recebido"] + totais["juros_multa_mes"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
 
                 # Restante das consultas de lançamentos...[cite: 5]
                 query_lancamentos = """
                     SELECT f.id, f.aluno_id, a.nome_completo, f.descricao, f.valor, f.data_vencimento,
                            f.data_pagamento, f.status, f.forma_pagamento,
+                           COALESCE(f.juros_percentual, 0) AS juros_percentual,
+                           COALESCE(f.juros_valor, 0) AS juros_valor,
+                           COALESCE(f.multa_valor, 0) AS multa_valor,
                            (
                                SELECT t.nome FROM turma_alunos ta
                                JOIN turmas t ON t.id = ta.turma_id
@@ -11480,13 +11595,21 @@ def relatorio_cartao_financeiro(tipo):
                         receita_sistema_mes(cursor, comp, regime_apuracao)
                         for comp in meses_do_trimestre(mes_filtro)
                     )
-                    tributos = float(apurar_lucro_presumido(receita_mes, colaboradores, receita_tri).get("tributos") or 0)
-                total = recebido - folha - tributos - custos["compras"] - custos["servicos"] - custos.get("rescisoes", 0)
+                    tributos = float(
+                        apurar_lucro_presumido(
+                            receita_mes, colaboradores, receita_tri,
+                            acrescimos_mora=acrescimos_mora_mes(cursor, mes_filtro)["total"],
+                            acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
+                        ).get("tributos") or 0
+                    )
+                mora_caixa = acrescimos_mora_mes(cursor, mes_filtro)["total"]
+                total = recebido + mora_caixa - folha - tributos - custos["compras"] - custos["servicos"] - custos.get("rescisoes", 0)
                 buffer = pdf_caixa_restante(
                     escola,
                     mes_label,
                     [
                         ("(+) Recebido nas mensalidades", recebido),
+                        ("(+) Juros e multa por atraso recebidos", mora_caixa),
                         ("(−) Folha e encargos", folha),
                         ("(−) Tributos da empresa", tributos),
                         ("(−) Compras e custos fixos", custos["compras"]),
@@ -11604,7 +11727,8 @@ def relatorio_tributario():
                 resumo = cursor.fetchone() or {}
                 colaboradores, folha_mes = montar_folha_colaboradores(cursor)
                 receita_mes = receita_do_mes(cursor, mes_filtro, regime_apuracao)
-                pis_cofins = apurar_pis_cofins(receita_mes, regime)
+                mora_mes = acrescimos_mora_mes(cursor, mes_filtro)
+                pis_cofins = apurar_pis_cofins(receita_mes, regime, mora_mes["total"])
                 totais = {
                     "recebido": float(resumo.get("recebido") or 0),
                     "pendente": float(resumo.get("pendente") or 0),
@@ -11612,6 +11736,9 @@ def relatorio_tributario():
                     "folha_pagamento": folha_mes,
                     "receita_bruta_mes": receita_mes,
                     "tributos": pis_cofins["total"] if regime == "lucro_presumido" else 0.0,
+                    "juros_mes": mora_mes["juros"],
+                    "multa_mes": mora_mes["multa"],
+                    "juros_multa_mes": mora_mes["total"],
                 }
                 recebidos = listar_lancamentos_mes(cursor, mes_filtro, "Pago")
                 pendentes = listar_lancamentos_mes(cursor, mes_filtro, "Pendente")
@@ -11626,7 +11753,11 @@ def relatorio_tributario():
                         receita_sistema_mes(cursor, comp, regime_apuracao)
                         for comp in meses_do_trimestre(mes_filtro)
                     )
-                    apuracao_p = apurar_lucro_presumido(receita_mes, colaboradores, receita_tri)
+                    apuracao_p = apurar_lucro_presumido(
+                        receita_mes, colaboradores, receita_tri,
+                        acrescimos_mora=mora_mes["total"],
+                        acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
+                    )
                     _itens_folha, totais_folha = montar_folha_contratos(cursor, regime, mes_filtro)
                     totais["tributos"] = apuracao_p["tributos"]
                     totais["folha_pagamento"] = totais_folha.get("custo_escola") or 0

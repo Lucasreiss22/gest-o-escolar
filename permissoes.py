@@ -526,9 +526,22 @@ def modulo_no_plano(modulo, telas):
     return False
 
 
+_SALA_PROFESSOR = {
+    "sala_professor",
+    "sala_professor_nova",
+    "sala_professor_enviar_pdf",
+    "sala_professor_detalhe",
+    "prova_pdf",
+    "arquivo_professor",
+    "pasta_professor_pdf",
+}
+
+
 def endpoint_no_plano(endpoint, telas, acao_form=None):
     if not isinstance(telas, (list, tuple, set)):
         return True
+    if endpoint in _SALA_PROFESSOR:
+        return "pedagogico" in telas or "pedagogico_cadastro" in telas
     if endpoint == "detalhes_aluno":
         return "alunos" in telas or "pedagogico" in telas
     if endpoint == "ficha_pedagogica_pdf":
@@ -549,6 +562,13 @@ def pode_requisicao(papel, endpoint, metodo, salvo=None, acao_form=None):
     if endpoint == "pagina_pedagogico" and (metodo or "GET").upper() == "GET":
         return (
             pode_acao(papel, "pedagogico", "acessar", salvo)
+            or pode_acao(papel, "pedagogico_cadastro", "acessar", salvo)
+        )
+    # Minhas provas: área própria do professor (provas e notas das turmas dele)
+    if endpoint in _SALA_PROFESSOR:
+        return (
+            normalizar_papel(papel) == "professor"
+            or pode_acao(papel, "pedagogico", "acessar", salvo)
             or pode_acao(papel, "pedagogico_cadastro", "acessar", salvo)
         )
     acao, modulo = classificar_requisicao(endpoint, metodo, acao_form)

@@ -274,25 +274,36 @@ def _anexar_titulos_base(pdf, titulos, regime_apuracao, base_oficial=None):
         )
     linhas = []
     total = 0.0
+    total_mora = 0.0
     for item in titulos:
         valor = float(item.get("valor") or 0)
+        mora = float(item.get("juros_valor") or 0) + float(item.get("multa_valor") or 0)
         total += valor
+        total_mora += mora
         linhas.append([
             (item.get("nome_completo") or "Aluno")[:18],
-            (item.get("descricao") or "—")[:22],
+            (item.get("descricao") or "—")[:20],
             _data_br(item.get("data_vencimento")),
             _data_br(item.get("data_pagamento")) if item.get("data_pagamento") else "—",
             _brl(valor),
+            _brl(mora) if mora else "—",
         ])
     if linhas:
         pdf.tabela(
-            ["Aluno", "Descrição", "Vencimento", "Data da baixa", "Valor"],
+            ["Aluno", "Descrição", "Vencimento", "Baixa", "Mensalidade", "Juros+multa"],
             linhas,
-            [40, 48, 32, 36, 34],
+            [36, 40, 26, 26, 31, 31],
         )
     else:
         pdf.paragrafo("Nenhuma mensalidade compõe a base deste mês.")
     pdf.linha("Soma das mensalidades", _brl(total), negrito=True)
+    if total_mora:
+        pdf.linha("Juros e multa por atraso destes títulos", _brl(total_mora))
+        pdf.paragrafo(
+            "Juros e multa aparecem à parte: o tratamento fiscal deles segue a apuração do regime "
+            "(veja o quadro de tributos acima).",
+            tamanho=9,
+        )
     if base_oficial is not None and abs(float(base_oficial) - total) > 0.05:
         pdf.paragrafo(
             "A apuração usa "
@@ -682,6 +693,18 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
     pdf.linha("Alíquota efetiva", f"{float(ap.get('aliquota_efetiva_pct') or 0):.4f}%")
     pdf.paragrafo("DAS = receita bruta do mês × alíquota efetiva")
     pdf.linha("DAS", _brl(ap.get("das")), negrito=True)
+    mora = ap.get("mora") or {}
+    mora_total = float(mora.get("total") or ap.get("acrescimos_mora") or 0)
+    pdf.secao("Juros e multa por atraso recebidos no mês")
+    pdf.linha("Juros recebidos", _brl(mora.get("juros")))
+    pdf.linha("Multa recebida", _brl(mora.get("multa")))
+    pdf.linha("Total de acréscimos", _brl(mora_total), negrito=True)
+    pdf.paragrafo(
+        "No Simples Nacional, juros, multa e encargos cobrados pelo atraso não compõem a receita bruta "
+        "(Resolução CGSN 140/2018, art. 2º, § 5º, II). Por isso entram no caixa e no resultado, "
+        "mas não aumentam a base do DAS nem a RBT12.",
+        tamanho=9,
+    )
     _anexar_titulos_base(pdf, titulos, regime_apuracao or ap.get("regime_apuracao"), ap.get("receita_mes"))
     if dre:
         receita = float(dre.get("receita") or 0)
@@ -689,7 +712,7 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
         folha = float(dre.get("folha") or 0)
         compras = float(dre.get("compras") or 0)
         servicos = float(dre.get("servicos") or 0)
-        apos_das = receita - das
+        apos_das = receita + mora_total - das
         resultado = apos_das - folha - compras - servicos
         _pagina_resultado(
             pdf,
@@ -697,6 +720,7 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
             f"{escola} · {mes_label} · Simples Nacional",
             [
                 ("(+) Receita bruta de serviços", receita, False),
+                ("(+) Juros e multa por atraso (fora do DAS)", mora_total, False),
                 ("(−) DAS", das, False),
                 ("(=) Receita após o DAS", apos_das, True),
                 ("(−) Folha e encargos", folha, False),
@@ -716,17 +740,21 @@ def pdf_lucro_real(escola, mes_label, regime, totais, recebidos, pendentes, atra
     pdf.paragrafo(f"{escola} · {mes_label} · {nome_regime(regime)}")
     ap = pis_cofins or {}
     receita = float(ap.get("receita_mes") or 0)
+    mora = float(ap.get("acrescimos_mora") or 0)
+    base = float(ap.get("base") or (receita + mora))
     pdf.paragrafo(
-        "PIS e COFINS não cumulativos incidem sobre a receita bruta do mês: "
-        "PIS 1,65% e COFINS 7,6%."
+        "PIS e COFINS não cumulativos incidem sobre a receita do mês, incluindo juros e multa "
+        "por atraso recebidos (STJ, Tema 1.237): PIS 1,65% e COFINS 7,6%."
     )
     pdf.linha("Receita bruta do mês", _brl(receita))
+    pdf.linha("Juros e multa por atraso recebidos", _brl(mora))
+    pdf.linha("Base de PIS/COFINS", _brl(base), negrito=True)
     pdf.linha("PIS 1,65%", _brl(ap.get("pis")))
     pdf.linha("COFINS 7,6%", _brl(ap.get("cofins")))
     pdf.linha("PIS + COFINS", _brl(ap.get("total")), negrito=True)
     pdf.paragrafo(
-        f"Conta: {_brl(receita)} × 1,65% = {_brl(ap.get('pis'))}. "
-        f"{_brl(receita)} × 7,6% = {_brl(ap.get('cofins'))}."
+        f"Conta: {_brl(base)} × 1,65% = {_brl(ap.get('pis'))}. "
+        f"{_brl(base)} × 7,6% = {_brl(ap.get('cofins'))}."
     )
     _anexar_titulos_base(pdf, titulos, regime_apuracao, receita)
     tot = totais or {}
@@ -756,20 +784,27 @@ def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos, 
     pdf = RelatorioPDF("Apuração — Lucro Presumido")
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label}")
+    mora = float(ap.get("acrescimos_mora") or 0)
     pdf.linha("Receita bruta do mês", _brl(ap.get("receita_mes")))
+    pdf.linha("Juros e multa por atraso recebidos", _brl(mora))
+    pdf.linha("Base de PIS/COFINS (receita + juros/multa)", _brl(ap.get("base_pis_cofins")))
     pdf.linha("PIS (0,65%)", _brl(ap.get("pis")))
     pdf.linha("COFINS (3%)", _brl(ap.get("cofins")))
-    pdf.linha("ISS estimado (5%)", _brl(ap.get("iss")))
-    pdf.linha("Base de IRPJ/CSLL (32%)", _brl(ap.get("base_presumida")))
+    pdf.linha("ISS estimado (5% da mensalidade)", _brl(ap.get("iss")))
+    pdf.linha("32% da receita de serviços", _brl(ap.get("base_servicos")))
+    pdf.linha("(+) Juros e multa (100%)", _brl(mora))
+    pdf.linha("Base de IRPJ/CSLL", _brl(ap.get("base_presumida")), negrito=True)
     pdf.linha("CSLL (9% da base)", _brl(ap.get("csll")))
     pdf.linha("IRPJ (15% da base)", _brl(ap.get("irpj")))
     if ap.get("aplica_adicional_irpj"):
         pdf.linha("Adicional de IRPJ (10%)", _brl(ap.get("irpj_adicional")))
     pdf.linha("Total de tributos", _brl(ap.get("tributos")), negrito=True)
     pdf.paragrafo(
-        "PIS = receita × 0,65%. COFINS = receita × 3%. ISS estimado = receita × 5%. "
-        "IRPJ e CSLL usam 32% da receita de serviços educacionais: IRPJ 15% dessa base e CSLL 9%. "
-        "O adicional de 10% de IRPJ só entra se a base presumida do trimestre passar de R$ 60.000, "
+        "PIS = (receita + juros/multa) × 0,65%. COFINS = (receita + juros/multa) × 3% (STJ, Tema 1.237). "
+        "ISS estimado = mensalidade × 5% (juros de mora não são preço do serviço). "
+        "IRPJ e CSLL: 32% da receita de serviços educacionais + 100% dos juros e multa recebidos, "
+        "que não sofrem presunção (Lei 9.430/96, art. 25, II). IRPJ 15% e CSLL 9% dessa base. "
+        "O adicional de 10% de IRPJ só entra se a base do trimestre passar de R$ 60.000, "
         "e o mês mostra um terço desse adicional."
     )
     _anexar_titulos_base(pdf, titulos, regime_apuracao, ap.get("receita_mes"))
@@ -779,7 +814,7 @@ def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos, 
     folha = float(tot.get("folha_pagamento") or ap.get("folha_total") or 0)
     compras = float(tot.get("custos_compras") or 0)
     servicos = float(tot.get("custos_servicos") or 0)
-    apos_tributos = receita - tributos
+    apos_tributos = receita + mora - tributos
     resultado = apos_tributos - folha - compras - servicos
     _pagina_resultado(
         pdf,
@@ -787,6 +822,7 @@ def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos, 
         f"{escola} · {mes_label}",
         [
             ("(+) Receita bruta de serviços", receita, False),
+            ("(+) Juros e multa por atraso", mora, False),
             ("(−) PIS, COFINS, ISS, IRPJ e CSLL", tributos, False),
             ("(=) Resultado após tributos", apos_tributos, True),
             ("(−) Folha e encargos", folha, False),
@@ -868,7 +904,7 @@ def pdf_boletim(escola, aluno, notas, faltas_resumo, turmas=None):
             n.get("nota") or "-",
         ])
     if linhas:
-        pdf.tabela(["Matéria / prova", "Trim.", "Nota"], linhas, [90, 30, 40])
+        pdf.tabela(["Matéria / prova", "Bim.", "Nota"], linhas, [90, 30, 40])
     else:
         pdf.paragrafo("Sem notas lançadas.")
     return _saida(pdf)
@@ -920,14 +956,14 @@ def pdf_ficha_pedagogica(
     if linhas_notas:
         if completo:
             pdf.tabela(
-                ["Matéria", "Prova", "Trim.", "Nota", "Data"],
+                ["Matéria", "Prova", "Bim.", "Nota", "Data"],
                 [[a, b, c, d, e] for a, b, c, d, e in linhas_notas],
                 [42, 48, 18, 22, 30],
             )
         else:
             # Resumo: últimas 12
             reduzidas = [[a, b, c, d] for a, b, c, d, _e in linhas_notas[:12]]
-            pdf.tabela(["Matéria", "Prova", "Trim.", "Nota"], reduzidas, [50, 55, 22, 30])
+            pdf.tabela(["Matéria", "Prova", "Bim.", "Nota"], reduzidas, [50, 55, 22, 30])
             if len(linhas_notas) > 12:
                 pdf.paragrafo(f"… e mais {len(linhas_notas) - 12} registro(s). Use a ficha completa.", tamanho=9)
     else:
@@ -1874,8 +1910,21 @@ def pdf_cobranca_mensalidade(escola, cobranca, aluno=None):
     if hasattr(venc, "strftime"):
         venc = venc.strftime("%d/%m/%Y")
     pdf.linha("Vencimento", venc or "-")
-    pdf.linha("Valor", br_money(cobranca.get("valor")), negrito=True)
+    valor = float(cobranca.get("valor") or 0)
+    juros_pct = float(cobranca.get("juros_percentual") or 0)
+    juros = float(cobranca.get("juros_valor") or 0)
+    multa = float(cobranca.get("multa_valor") or 0)
+    pdf.linha("Valor da mensalidade", br_money(valor), negrito=not (juros or multa))
+    if juros or multa:
+        pdf.linha("Juros por atraso", f"{juros_pct:g}% = {br_money(juros)}" if juros_pct else br_money(juros))
+        pdf.linha("Multa por atraso", br_money(multa))
+        pdf.linha("Total com acréscimos", br_money(valor + juros + multa), negrito=True)
     pdf.linha("Status", cobranca.get("status") or "Pendente")
+    pago = cobranca.get("data_pagamento")
+    if pago:
+        pdf.linha("Data da baixa", pago.strftime("%d/%m/%Y") if hasattr(pago, "strftime") else str(pago)[:10])
+        if cobranca.get("forma_pagamento"):
+            pdf.linha("Forma de pagamento", cobranca.get("forma_pagamento"))
     pdf.paragrafo("Aviso de cobrança da mensalidade. Confirme o pagamento com a secretaria.")
     return _saida(pdf)
 
@@ -1901,30 +1950,79 @@ def _linha_rescisao_calc(pdf, calculo):
     pdf.linha("1/3 férias proporcionais", _brl(c.get("terco_ferias_proporcionais")))
     if float(c.get("outros_proventos") or 0) > 0:
         pdf.linha("Outros proventos", _brl(c.get("outros_proventos")))
+    if float(c.get("multa_art_477") or 0) > 0:
+        pdf.linha("Multa Art. 477 § 8º (atraso)", _brl(c.get("multa_art_477")))
     pdf.ln(2)
-    pdf.secao("Encargos e descontos")
+    pdf.secao("Descontos do trabalhador")
+    tem_detalhe = "inss_mensal" in c
+    if tem_detalhe:
+        pdf.linha(f"INSS sobre saldo (base {_brl(c.get('base_inss_mensal'))})", f"- {_brl(c.get('inss_mensal'))}")
+        pdf.linha("INSS sobre 13º (à parte)", f"- {_brl(c.get('inss_13'))}")
+        pdf.linha("IRRF sobre saldo", f"- {_brl(c.get('irrf_mensal'))}")
+        pdf.linha("IRRF sobre 13º (exclusivo)", f"- {_brl(c.get('irrf_13'))}")
+    else:
+        pdf.linha("INSS (estimativa)", f"- {_brl(c.get('inss'))}")
+        pdf.linha("IRRF (estimativa)", f"- {_brl(c.get('irrf'))}")
+    if float(c.get("outros_descontos") or 0) > 0:
+        pdf.linha("Outros descontos", f"- {_brl(c.get('outros_descontos'))}")
+    pdf.ln(2)
+    pdf.secao("Encargos da escola")
     aliq = float(c.get("aliquota_fgts") or 0) * 100
     aliq_m = float(c.get("aliquota_multa_fgts") or 0) * 100
     pdf.linha(f"FGTS do mês ({aliq:.1f}%)", _brl(c.get("fgts_mes")))
     pdf.linha(f"Multa FGTS ({aliq_m:.0f}%)", _brl(c.get("multa_fgts")))
-    pdf.linha("INSS (estimativa)", f"- {_brl(c.get('inss'))}")
-    pdf.linha("IRRF (estimativa)", f"- {_brl(c.get('irrf'))}")
-    if float(c.get("outros_descontos") or 0) > 0:
-        pdf.linha("Outros descontos", f"- {_brl(c.get('outros_descontos'))}")
+    if float(c.get("inss_patronal") or 0) > 0:
+        aliq_p = float(c.get("aliquota_patronal") or 0) * 100
+        pdf.linha(f"INSS patronal + RAT + terceiros ({aliq_p:.1f}%)", _brl(c.get("inss_patronal")))
+    elif tem_detalhe:
+        pdf.linha("INSS patronal", "incluído no DAS (Simples)")
     pdf.ln(2)
     pdf.secao("Totais")
     pdf.linha("Proventos", _brl(c.get("proventos")))
     pdf.linha("Descontos", _brl(c.get("descontos")))
     pdf.linha("Líquido ao trabalhador", _brl(c.get("total_liquido")), negrito=True)
     pdf.linha("Custo total da escola", _brl(c.get("custo_empregador")), negrito=True)
+    if float(c.get("saque_fgts_percentual") or 0) > 0:
+        pct = float(c.get("saque_fgts_percentual")) * 100
+        pdf.linha(f"Saque do FGTS ({pct:.0f}% + multa)", f"≈ {_brl(c.get('saque_fgts_estimado'))}")
+    if tem_detalhe:
+        pdf.linha("Seguro-desemprego", "Tem direito" if c.get("seguro_desemprego") else "Não tem direito")
     if c.get("data_limite_pagamento"):
         pdf.paragrafo(
             f"Prazo Art. 477 §6º CLT: quitação até {c.get('data_limite_pagamento')}."
             + (" Atenção: pagamento em atraso." if c.get("pagamento_atrasado") else "")
         )
+    if tem_detalhe:
+        pdf.secao("Incidência por verba")
+        pdf.tabela(
+            ["Verba", "INSS", "IRRF", "FGTS"],
+            [
+                ["Saldo de salário", "Sim", "Sim", "Sim"],
+                ["13º proporcional", "Sim*", "Sim (exclusivo)", "Sim"],
+                ["Aviso prévio indenizado", "Não", "Não", "Sim"],
+                ["Férias indenizadas + 1/3", "Não", "Não", "Não"],
+                ["Multa FGTS / Art. 477", "Não", "Não", "Não"],
+            ],
+            [70, 35, 45, 30],
+        )
+        pdf.paragrafo(
+            "* A parte do 13º gerada só pela projeção do aviso indenizado não tem INSS. "
+            "Bases: Lei 8.212/91, art. 28, § 9º; Súmulas 305 TST, 125 e 386 STJ; STJ Tema 478.",
+            tamanho=9,
+        )
+    obrigacoes = c.get("obrigacoes") or []
+    if obrigacoes:
+        pdf.secao("Prazos de pagamento e recolhimento")
+        pdf.tabela(
+            ["Obrigação", "Prazo"],
+            [[str(o.get("item"))[:70], _data_br(o.get("prazo"))] for o in obrigacoes],
+            [140, 40],
+        )
     pdf.paragrafo(
-        "Custo da escola = líquido + INSS + IRRF + FGTS do mês + multa FGTS. "
-        "A multa e o FGTS vão à conta vinculada; o líquido é pago ao trabalhador."
+        "Custo da escola = líquido + INSS + IRRF retidos + FGTS do mês + multa FGTS"
+        + (" + cota patronal" if float(c.get("inss_patronal") or 0) > 0 else "")
+        + ". A multa e o FGTS vão à conta vinculada; o líquido é pago ao trabalhador. "
+        "Valores estimados sem dependentes de IR; confira com a contabilidade."
     )
 
 

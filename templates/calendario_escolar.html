@@ -375,6 +375,9 @@
         <details class="card-box" open>
             <summary style="cursor:pointer;font-weight:700;color:#1e3a5f;">Rotina do professor</summary>
             <p style="color:#64748b;font-size:0.9rem;">Dia, semana ou mês. Outro professor não vê esta rotina. A semana aparece em todos os dias dela; o mês fica na faixa acima do calendário.</p>
+            {% if papel_atual == 'professor' %}
+            <p style="color:#7c3aed;font-size:0.9rem;margin-top:-4px;">Prova da turma não é rotina: crie em <a href="{{ url_for('sala_professor_nova') }}">Minhas provas → Criar prova</a> e ela entra sozinha na agenda e no cadastro dos alunos.</p>
+            {% endif %}
             <form method="POST">
                 <input type="hidden" name="acao" value="criar_evento">
                 <input type="hidden" name="tipo" value="rotina">
