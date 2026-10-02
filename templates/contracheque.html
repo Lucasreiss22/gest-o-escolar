@@ -107,18 +107,24 @@
                     </p>
                     <div class="grade-ajuste">
                         <div>
-                            <label>Horas extras 50% (dias úteis)</label>
-                            {% with hora_name='horas_extras', hora_valor=item.horas_extras or 0 %}{% include '_hora_picker.html' %}{% endwith %}
+                            <label>Horas extras 50% (dias úteis){% if item.horas_extras_ponto %} além do ponto{% endif %}</label>
+                            {% with hora_name='horas_extras', hora_valor=item.horas_extras_manual or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div>
-                            <label>Horas extras 100% (domingo/feriado)</label>
-                            {% with hora_name='horas_extras_100', hora_valor=item.horas_extras_100 or 0 %}{% include '_hora_picker.html' %}{% endwith %}
+                            <label>Horas extras 100% (domingo/feriado){% if item.horas_extras_100_ponto %} além do ponto{% endif %}</label>
+                            {% with hora_name='horas_extras_100', hora_valor=item.horas_extras_100_manual or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div>
                             <label>Valor da hora extra 50% (vazio = automático)</label>
                             <input name="valor_hora_extra" id="vhe50" data-moeda placeholder="Digite o valor" value="{{ item.valor_hora_extra_cadastro|moeda_campo }}">
                         </div>
                     </div>
+                    {% if item.horas_extras_ponto or item.horas_extras_100_ponto %}
+                    <p class="hint" style="margin:6px 0 0;">
+                        O ponto eletrônico do sistema já lançou {{ item.horas_extras_ponto|hora_br }} a 50% e {{ item.horas_extras_100_ponto|hora_br }} a 100% neste mês.
+                        Os campos acima são só para horas extras fora do ponto.
+                    </p>
+                    {% endif %}
                     <p class="hint" id="he-preview">
                         Hora normal: R$ {{ (item.hora_normal or 0)|moeda }}.
                         Extra 50% automática: R$ {{ ((item.hora_normal or 0) * 1.5)|moeda }}.
@@ -135,10 +141,10 @@
             <div class="linha"><span>Salário</span><strong>R$ {{ (item.salario)|moeda }}</strong></div>
             {% endif %}
             {% if item.adicional_he_50 %}
-            <div class="linha"><span>Hora extra 50% ({{ item.horas_extras }} h × R$ {{ (item.valor_hora_extra)|moeda }})</span><strong>R$ {{ (item.adicional_he_50)|moeda }}</strong></div>
+            <div class="linha"><span>Hora extra 50% ({{ item.horas_extras|hora_br }} × R$ {{ (item.valor_hora_extra)|moeda }}){% if item.horas_extras_ponto %}<br><small class="hint">{{ item.horas_extras_ponto|hora_br }} vindas do ponto eletrônico do sistema{% if item.horas_extras_manual %} + {{ item.horas_extras_manual|hora_br }} lançadas à mão{% endif %}</small>{% endif %}</span><strong>R$ {{ (item.adicional_he_50)|moeda }}</strong></div>
             {% endif %}
             {% if item.adicional_he_100 %}
-            <div class="linha"><span>Hora extra 100% ({{ item.horas_extras_100 }} h × R$ {{ (item.valor_hora_extra_100)|moeda }})</span><strong>R$ {{ (item.adicional_he_100)|moeda }}</strong></div>
+            <div class="linha"><span>Hora extra 100% ({{ item.horas_extras_100|hora_br }} × R$ {{ (item.valor_hora_extra_100)|moeda }}){% if item.horas_extras_100_ponto %}<br><small class="hint">{{ item.horas_extras_100_ponto|hora_br }} vindas do ponto eletrônico do sistema{% if item.horas_extras_100_manual %} + {{ item.horas_extras_100_manual|hora_br }} lançadas à mão{% endif %}</small>{% endif %}</span><strong>R$ {{ (item.adicional_he_100)|moeda }}</strong></div>
             {% endif %}
             {% if item.dsr_he %}
             <div class="linha"><span>DSR sobre horas extras (1/6)</span><strong>R$ {{ (item.dsr_he)|moeda }}</strong></div>
@@ -168,6 +174,8 @@
     <script>
     (function () {
         var horaNormal = {{ item.hora_normal if item else 0 }};
+        var pontoHe50 = {{ (item.horas_extras_ponto or 0) if item else 0 }};
+        var pontoHe100 = {{ (item.horas_extras_100_ponto or 0) if item else 0 }};
         var form = document.querySelector("#holerite form") || document.querySelector("form");
         var he50 = form ? form.querySelector("[name='horas_extras']") : null;
         var he100 = form ? form.querySelector("[name='horas_extras_100']") : null;
@@ -181,8 +189,8 @@
         }
         function atualizar() {
             if (!preview) return;
-            var h50 = num(he50);
-            var h100 = num(he100);
+            var h50 = num(he50) + pontoHe50;
+            var h100 = num(he100) + pontoHe100;
             var informado = num(vhe50);
             var v50 = informado > 0 ? informado : horaNormal * 1.5;
             var v100 = horaNormal * 2;

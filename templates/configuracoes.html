@@ -118,11 +118,11 @@
         </div>
 
         <div class="card-box" id="ponto-tempos">
-            <h3 class="card-title">Ponto — tempos de café e almoço</h3>
+            <h3 class="card-title">Ponto eletrônico — tempos, assinatura e horas extras</h3>
             <p style="color:#64748b;font-size:0.9rem;line-height:1.45;">
                 Defina o tempo máximo de café da manhã e de almoço. Na tela de ponto do colaborador aparece um contador
                 a partir da saída para o café ou para o almoço até a volta, com o limite estipulado aqui.
-                Entrada e saída da escola não têm contador.
+                Entrada e saída da escola não têm contador. O nome e o cargo abaixo saem na assinatura do PDF da folha de ponto.
             </p>
             <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
                 <input type="hidden" name="acao" value="salvar_ponto_tempos">
@@ -135,8 +135,34 @@
                         <label>Tempo máximo de almoço (minutos)</label>
                         <input type="number" name="ponto_minutos_almoco" min="1" max="240" value="{{ config.ponto_minutos_almoco or 60 }}">
                     </div>
+                    <div class="form-group">
+                        <label>Quem assina pela escola (nome)</label>
+                        <input type="text" name="ponto_responsavel_nome" maxlength="150" placeholder="Ex.: Maria da Silva" value="{{ config.ponto_responsavel_nome or '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Cargo de quem assina</label>
+                        <input type="text" name="ponto_responsavel_cargo" maxlength="100" list="cargosResponsavelPonto" placeholder="Ex.: Diretor(a), Secretaria, RH" value="{{ config.ponto_responsavel_cargo or '' }}">
+                        <datalist id="cargosResponsavelPonto">
+                            <option value="Diretor(a)">
+                            <option value="Secretaria">
+                            <option value="Responsável pelo RH">
+                            <option value="Coordenação administrativa">
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label>Horas extras do ponto</label>
+                        <select name="ponto_he_folha">
+                            <option value="folha" {% if config.ponto_he_folha is not sameas false %}selected{% endif %}>Levar para o contracheque e o financeiro</option>
+                            <option value="banco" {% if config.ponto_he_folha is sameas false %}selected{% endif %}>Manter só no banco de horas</option>
+                        </select>
+                    </div>
                 </div>
-                <button type="submit" class="btn btn-primary">Salvar tempos do ponto</button>
+                <p style="color:#64748b;font-size:0.85rem;line-height:1.45;margin-top:0;">
+                    Para contrato CLT, o saldo do ponto no mês vira hora extra na folha: tolerância de 10 min por dia (art. 58 §1º CLT),
+                    compensação entre dias a mais e a menos no próprio mês (art. 59 §6º), 50% nos dias normais e 100% em domingo e feriado
+                    cadastrado no calendário. No contracheque aparece como vinda do ponto eletrônico do sistema.
+                </p>
+                <button type="submit" class="btn btn-primary">Salvar configurações do ponto</button>
             </form>
         </div>
 

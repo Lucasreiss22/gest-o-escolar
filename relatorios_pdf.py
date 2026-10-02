@@ -247,6 +247,14 @@ def pdf_prova(
     return _saida(pdf)
 
 
+def _horas_br(valor):
+    try:
+        minutos = int(round(float(valor or 0) * 60))
+    except (TypeError, ValueError):
+        minutos = 0
+    return f"{minutos // 60}h{minutos % 60:02d}"
+
+
 def _assinaturas_prova(pdf, professor=None):
     """Assinatura do aluno ao entregar e do professor após corrigir e lançar a nota."""
     altura_bloco = 46
@@ -2052,6 +2060,11 @@ def pdf_contracheque(escola, mes_label, item):
             "Hora extra 100% (domingo/feriado)",
             f"{item.get('horas_extras_100') or 0:g} h × {_brl(item.get('valor_hora_extra_100'))} = {_brl(item.get('adicional_he_100'))}",
         )
+    if (item or {}).get("horas_extras_ponto") or (item or {}).get("horas_extras_100_ponto"):
+        pdf.linha(
+            "Origem: ponto eletrônico do sistema",
+            f"{_horas_br(item.get('horas_extras_ponto'))} a 50% e {_horas_br(item.get('horas_extras_100_ponto'))} a 100%",
+        )
     if (item or {}).get("dsr_he"):
         pdf.linha("DSR sobre horas extras", _brl(item.get("dsr_he")))
     if (item or {}).get("adicional_he") and not (item or {}).get("adicional_he_50") and not (item or {}).get("adicional_he_100"):
@@ -2072,7 +2085,78 @@ def pdf_contracheque(escola, mes_label, item):
     return _saida(pdf)
 
 
-def pdf_ponto(escola, colaborador, periodo_rotulo, registros, faltas=None, atestados=None, resumo=None):
+def _assinaturas_ponto(pdf, colaborador=None, colaborador_cargo=None, responsavel_nome=None, responsavel_cargo=None):
+    """Ciência do funcionário e conferência de quem responde pela escola (direção, secretaria ou RH)."""
+    altura_bloco = 52
+    pagina_nova = pdf.get_y() + altura_bloco > pdf.page_break_trigger
+    if pagina_nova:
+        pdf.add_page()
+    esquerda = pdf.l_margin
+    meio = 10
+    largura = (pdf.epw - meio) / 2
+    direita = esquerda + largura + meio
+
+    pdf.ln(4)
+    pdf.set_font(pdf.fonte, "", 9)
+    pdf.set_text_color(70, 70, 70)
+    pdf.multi_cell(
+        pdf.epw,
+        4.5,
+        "Declaro que as marcações acima conferem com os horários que cumpri no período.",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(16)
+    y_linha = pdf.get_y()
+    pdf.set_draw_color(40, 40, 40)
+    pdf.set_line_width(0.3)
+    pdf.line(esquerda, y_linha, esquerda + largura, y_linha)
+    pdf.line(direita, y_linha, direita + largura, y_linha)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(0.2)
+
+    pdf.set_text_color(40, 40, 40)
+    pdf.set_font(pdf.fonte, "", 10)
+    pdf.set_xy(esquerda, y_linha + 1)
+    pdf.cell(largura, 5, "Assinatura do(a) funcionário(a)", align="C")
+    pdf.set_xy(direita, y_linha + 1)
+    pdf.cell(largura, 5, "Assinatura do(a) responsável", align="C")
+
+    pdf.set_font(pdf.fonte, "", 9)
+    pdf.set_text_color(90, 90, 90)
+    pdf.set_xy(esquerda, y_linha + 6)
+    pdf.cell(largura, 5, (colaborador or "").strip()[:60], align="C")
+    pdf.set_xy(direita, y_linha + 6)
+    nome = (responsavel_nome or "").strip()
+    pdf.cell(largura, 5, nome[:60] if nome else "Nome: ______________________________", align="C")
+    pdf.set_xy(esquerda, y_linha + 11)
+    pdf.cell(largura, 5, (colaborador_cargo or "").strip()[:60], align="C")
+    pdf.set_xy(direita, y_linha + 11)
+    pdf.cell(largura, 5, ((responsavel_cargo or "").strip() or "Direção / RH")[:60], align="C")
+
+    pdf.set_font(pdf.fonte, "", 10)
+    pdf.set_text_color(40, 40, 40)
+    pdf.set_xy(esquerda, y_linha + 18)
+    pdf.cell(largura, 6, "Data: ____/____/______", align="C")
+    pdf.set_xy(direita, y_linha + 18)
+    pdf.cell(largura, 6, "Data: ____/____/______", align="C")
+    pdf.set_text_color(20, 20, 20)
+    pdf.set_y(y_linha + 26)
+
+
+def pdf_ponto(
+    escola,
+    colaborador,
+    periodo_rotulo,
+    registros,
+    faltas=None,
+    atestados=None,
+    resumo=None,
+    colaborador_cargo=None,
+    responsavel_nome=None,
+    responsavel_cargo=None,
+    extras_folha=None,
+):
     pdf = RelatorioPDF("Relatório de ponto")
     pdf.add_page()
     pdf.paragrafo(f"{escola or 'Gestão Escolar'} · {colaborador or 'Colaborador'}")
@@ -2087,6 +2171,19 @@ def pdf_ponto(escola, colaborador, periodo_rotulo, registros, faltas=None, atest
         pdf.linha("Total em café", resumo.get("cafe_fmt") or "—")
         pdf.linha("Total em almoço", resumo.get("almoco_fmt") or "—")
         pdf.linha("Total horas trabalhadas", resumo.get("trabalhado_fmt") or "—")
+    if extras_folha:
+        pdf.secao("Horas extras apuradas pelo ponto eletrônico do sistema")
+        pdf.linha("Hora extra 50% (dias normais)", extras_folha.get("he50") or "0h00", negrito=True)
+        pdf.linha("Hora extra 100% (domingo e feriado)", extras_folha.get("he100") or "0h00", negrito=True)
+        if extras_folha.get("vai_para_folha"):
+            destino = "Lançadas no contracheque e no financeiro do mês como horas extras do ponto eletrônico."
+        else:
+            destino = "A escola optou por manter essas horas só no banco de horas (não vão para a folha)."
+        pdf.paragrafo(
+            "Tolerância de 10 min por dia (art. 58 §1º CLT). Dias a mais compensam dias a menos no mesmo mês "
+            "(art. 59 §6º CLT). Domingo e feriado trabalhados valem 100% (Lei 605/1949, Súmula 146 TST). "
+            + destino
+        )
 
     pdf.secao("Batidas detalhadas")
     linhas = []
@@ -2175,6 +2272,7 @@ def pdf_ponto(escola, colaborador, periodo_rotulo, registros, faltas=None, atest
         "Falta não justificada confirmada com desconto: dia + DSR da semana (Lei 605/1949). "
         "Atestado aprovado gera falta justificada sem desconto."
     )
+    _assinaturas_ponto(pdf, colaborador, colaborador_cargo, responsavel_nome, responsavel_cargo)
     return _saida(pdf)
 
 

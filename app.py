@@ -132,6 +132,7 @@ from folha import (
     contrato_vigente,
     dia_pagamento_valido,
     aplicar_ajuste_competencia,
+    _contrato_clt,
 )
 from rescisao import (
     TIPOS_RESCISAO,
@@ -467,6 +468,15 @@ def hora_h(valor):
     except (TypeError, ValueError):
         return 0
     return int(n)
+
+
+@app.template_filter("hora_br")
+def hora_br(valor):
+    try:
+        minutos = int(round(float(valor or 0) * 60))
+    except (TypeError, ValueError):
+        minutos = 0
+    return f"{minutos // 60}h{minutos % 60:02d}"
 
 
 @app.template_filter("hora_m")
@@ -2396,6 +2406,138 @@ def _descontos_ponto_folha(cursor, funcionario_id, competencia, func=None):
     }
 
 
+TOLERANCIA_PONTO_MIN = 10
+
+
+def _feriados_do_mes(cursor, ano, mes):
+    """Feriados gerais do calendário da escola (não de uma turma ou aluno)."""
+    cursor.execute("SAVEPOINT feriados_mes")
+    try:
+        cursor.execute(
+            """
+            SELECT data_evento
+            FROM calendario_eventos
+            WHERE tipo = 'feriado' AND turma_id IS NULL AND aluno_id IS NULL
+              AND EXTRACT(YEAR FROM data_evento) = %s
+              AND EXTRACT(MONTH FROM data_evento) = %s
+            """,
+            (ano, mes),
+        )
+        datas = set()
+        for row in cursor.fetchall() or []:
+            d = row["data_evento"] if isinstance(row, dict) else row[0]
+            if d and not hasattr(d, "weekday"):
+                d = datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+            if d:
+                datas.add(d)
+        cursor.execute("RELEASE SAVEPOINT feriados_mes")
+        return datas
+    except Exception:
+        cursor.execute("ROLLBACK TO SAVEPOINT feriados_mes")
+        return set()
+
+
+def _horas_extras_ponto(cursor, funcionario_id, competencia):
+    """Horas extras do mês apuradas pelo ponto eletrônico (CLT).
+
+    - Diferença de até 10 min no dia não conta (art. 58 §1º).
+    - Dias úteis: o que passou da jornada compensa o que faltou no mesmo mês (art. 59 §6º);
+      o saldo positivo é hora extra 50% (art. 7º XVI da CF).
+    - Domingo e feriado trabalhados: hora extra 100% (Lei 605/1949, Súmula 146 TST).
+    - Faltas ficam de fora: já são descontadas na folha com o DSR.
+    """
+    resultado = {
+        "horas_extras_ponto": 0.0,
+        "horas_extras_100_ponto": 0.0,
+        "positivo_min": 0,
+        "negativo_min": 0,
+        "domingo_feriado_min": 0,
+        "dias_com_extra": 0,
+    }
+    if not funcionario_id or not competencia:
+        return resultado
+    ano, mes = parse_mes(str(competencia)[:7])
+    cursor.execute(
+        """
+        SELECT data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+        FROM ponto_registros
+        WHERE funcionario_id = %s
+          AND EXTRACT(YEAR FROM data_ref) = %s
+          AND EXTRACT(MONTH FROM data_ref) = %s
+        """,
+        (funcionario_id, ano, mes),
+    )
+    registros = cursor.fetchall() or []
+    if not registros:
+        return resultado
+    jornada = _ler_jornada_ponto(cursor, funcionario_id)
+    feriados = _feriados_do_mes(cursor, ano, mes)
+    agora = _agora_ponto_br()
+    for row in registros:
+        dref = row["data_ref"]
+        if not hasattr(dref, "weekday"):
+            dref = datetime.strptime(str(dref)[:10], "%Y-%m-%d").date()
+        calc = _saldo_dia_ponto(_mapa_registro_ponto(row), jornada, dref, agora)
+        if calc["incompleto"]:
+            continue
+        if dref.weekday() == 6 or dref in feriados:
+            if calc["trabalhado_min"] > TOLERANCIA_PONTO_MIN:
+                resultado["domingo_feriado_min"] += calc["trabalhado_min"]
+                resultado["dias_com_extra"] += 1
+            continue
+        saldo = int(calc["saldo_min"])
+        if abs(saldo) <= TOLERANCIA_PONTO_MIN:
+            continue
+        if saldo > 0:
+            resultado["positivo_min"] += saldo
+            resultado["dias_com_extra"] += 1
+        else:
+            resultado["negativo_min"] += -saldo
+    liquido = max(0, resultado["positivo_min"] - resultado["negativo_min"])
+    resultado["horas_extras_ponto"] = round(liquido / 60.0, 2)
+    resultado["horas_extras_100_ponto"] = round(resultado["domingo_feriado_min"] / 60.0, 2)
+    return resultado
+
+
+def _ponto_he_na_folha(cursor):
+    cursor.execute("SELECT ponto_he_folha FROM configuracoes WHERE id = 1")
+    row = cursor.fetchone() or {}
+    valor = row.get("ponto_he_folha") if isinstance(row, dict) else None
+    return valor is not False
+
+
+def _aplicar_he_ponto(cursor, dados, competencia):
+    """Soma às horas extras digitadas as horas extras apuradas no ponto (só contratos CLT)."""
+    if not competencia or not _contrato_clt(dados.get("tipo_contrato")):
+        return dados
+    cursor.execute("SAVEPOINT he_ponto")
+    try:
+        _garantir_ponto()
+        if not _ponto_he_na_folha(cursor):
+            cursor.execute("RELEASE SAVEPOINT he_ponto")
+            return dados
+        info = _horas_extras_ponto(cursor, dados.get("id"), competencia)
+        cursor.execute("RELEASE SAVEPOINT he_ponto")
+    except Exception as erro:
+        cursor.execute("ROLLBACK TO SAVEPOINT he_ponto")
+        print(f"[folha] horas extras do ponto ({dados.get('id')}): {erro}")
+        return dados
+    ponto_50 = info["horas_extras_ponto"]
+    ponto_100 = info["horas_extras_100_ponto"]
+    if not ponto_50 and not ponto_100:
+        return dados
+    dados = dict(dados)
+    manual_50 = float(dados.get("horas_extras") or 0)
+    manual_100 = float(dados.get("horas_extras_100") or 0)
+    dados["horas_extras_manual"] = manual_50
+    dados["horas_extras_100_manual"] = manual_100
+    dados["horas_extras_ponto"] = ponto_50
+    dados["horas_extras_100_ponto"] = ponto_100
+    dados["horas_extras"] = round(manual_50 + ponto_50, 2)
+    dados["horas_extras_100"] = round(manual_100 + ponto_100, 2)
+    return dados
+
+
 def _func_com_ajuste(cursor, func, competencia):
     dados = dict(func or {})
     dados = aplicar_ajuste_competencia(dados, _ajuste_folha(cursor, dados.get("id"), competencia))
@@ -2405,7 +2547,7 @@ def _func_com_ajuste(cursor, func, competencia):
             dados.update(info)
     except Exception:
         pass
-    return dados
+    return _aplicar_he_ponto(cursor, dados, competencia)
 
 
 def montar_folha_contratos(cursor, regime, mes_filtro=None):
@@ -2438,14 +2580,15 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
     }
     for row in funcionarios:
         dados = aplicar_ajuste_competencia(dict(row), ajustes.get(row.get("id")))
+        if not contrato_vigente(dados, ano, mes):
+            continue
         try:
             info = _descontos_ponto_folha(cursor, dados.get("id"), mes_filtro, dados)
             if info:
                 dados.update(info)
         except Exception:
             pass
-        if not contrato_vigente(dados, ano, mes):
-            continue
+        dados = _aplicar_he_ponto(cursor, dados, mes_filtro)
         calc = calcular_folha_pessoa(dados, regime, ano, mes)
         calc["rotulo_contrato"] = rotulo_contrato(calc["tipo_contrato"])
         try:
@@ -2510,6 +2653,11 @@ def _registrar_folha_item(cursor, item, competencia):
                 "adicional_he_50": item.get("adicional_he_50") or 0,
                 "adicional_he_100": item.get("adicional_he_100") or 0,
                 "dsr_he": item.get("dsr_he") or 0,
+                "horas_extras_ponto": item.get("horas_extras_ponto") or 0,
+                "horas_extras_100_ponto": item.get("horas_extras_100_ponto") or 0,
+                "origem_horas_extras_ponto": "Ponto eletrônico do sistema" if (
+                    item.get("horas_extras_ponto") or item.get("horas_extras_100_ponto")
+                ) else None,
                 "dia_pagamento": item.get("dia_pagamento") or 5,
             }),
         ),
@@ -2602,6 +2750,13 @@ def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
                     continue
                 if dia_pagamento_valido(dados.get("dia_pagamento")) != hoje.day:
                     continue
+                try:
+                    info = _descontos_ponto_folha(cursor, dados.get("id"), competencia, dados)
+                    if info:
+                        dados.update(info)
+                except Exception:
+                    pass
+                dados = _aplicar_he_ponto(cursor, dados, competencia)
                 item = calcular_folha_pessoa(dados, regime, hoje.year, hoje.month)
                 item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
                 _registrar_folha_item(cursor, item, competencia)
@@ -12546,7 +12701,7 @@ def _garantir_ponto():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ponto_v5"
+    chave = f"{schema}:ponto_v6"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -12635,6 +12790,9 @@ def _garantir_ponto():
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT DEFAULT 15",
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT DEFAULT 60",
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_jornada_minutos INT DEFAULT 480",
+                "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_responsavel_nome VARCHAR(150)",
+                "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_responsavel_cargo VARCHAR(100)",
+                "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_he_folha BOOLEAN DEFAULT TRUE",
                 "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT",
                 "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT",
                 "ALTER TABLE funcionarios ADD COLUMN IF NOT EXISTS ponto_jornada_minutos INT",
@@ -12645,6 +12803,7 @@ def _garantir_ponto():
         _tabelas_ok.discard(f"{schema}:ponto_v2")
         _tabelas_ok.discard(f"{schema}:ponto_v3")
         _tabelas_ok.discard(f"{schema}:ponto_v4")
+        _tabelas_ok.discard(f"{schema}:ponto_v5")
         _tabelas_ok.add(chave)
     except Exception:
         try:
@@ -13632,10 +13791,16 @@ def ponto_relatorio_pdf():
         return redirect(url_for("ponto"))
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT nome_escola FROM configuracoes WHERE id = 1")
-            escola = (cursor.fetchone() or {}).get("nome_escola") or "Gestão Escolar"
             cursor.execute(
-                "SELECT id, nome_completo FROM funcionarios WHERE id = %s",
+                """
+                SELECT nome_escola, ponto_responsavel_nome, ponto_responsavel_cargo
+                FROM configuracoes WHERE id = 1
+                """
+            )
+            cfg_ponto = cursor.fetchone() or {}
+            escola = cfg_ponto.get("nome_escola") or "Gestão Escolar"
+            cursor.execute(
+                "SELECT id, nome_completo, cargo FROM funcionarios WHERE id = %s",
                 (funcionario_id,),
             )
             pessoa = cursor.fetchone()
@@ -13643,6 +13808,26 @@ def ponto_relatorio_pdf():
                 flash("Colaborador não encontrado.", "danger")
                 return redirect(url_for("ponto"))
             jornada = _ler_jornada_ponto(cursor, funcionario_id)
+            extras_folha = None
+            if periodo in {"mes", "banco"}:
+                try:
+                    cursor.execute("SAVEPOINT pdf_he_ponto")
+                    cursor.execute(
+                        "SELECT tipo_contrato FROM funcionarios WHERE id = %s",
+                        (funcionario_id,),
+                    )
+                    contrato = cursor.fetchone() or {}
+                    if _contrato_clt(contrato.get("tipo_contrato")):
+                        he = _horas_extras_ponto(cursor, funcionario_id, inicio.strftime("%Y-%m"))
+                        extras_folha = {
+                            "he50": _fmt_minutos_banco(int(round(he["horas_extras_ponto"] * 60))),
+                            "he100": _fmt_minutos_banco(int(round(he["horas_extras_100_ponto"] * 60))),
+                            "vai_para_folha": _ponto_he_na_folha(cursor),
+                        }
+                    cursor.execute("RELEASE SAVEPOINT pdf_he_ponto")
+                except Exception:
+                    cursor.execute("ROLLBACK TO SAVEPOINT pdf_he_ponto")
+                    extras_folha = None
             agora = _agora_ponto_br()
             cursor.execute(
                 """
@@ -13788,6 +13973,10 @@ def ponto_relatorio_pdf():
             faltas,
             atestados,
             resumo=resumo,
+            colaborador_cargo=pessoa.get("cargo"),
+            responsavel_nome=cfg_ponto.get("ponto_responsavel_nome"),
+            responsavel_cargo=cfg_ponto.get("ponto_responsavel_cargo"),
+            extras_folha=extras_folha,
         )
         nome = secure_filename(
             f"ponto_{periodo}_{pessoa.get('nome_completo') or funcionario_id}.pdf"
@@ -14271,6 +14460,9 @@ def pagina_configuracoes():
                 minutos_cafe, minutos_almoco = 15, 60
             minutos_cafe = max(1, min(minutos_cafe, 240))
             minutos_almoco = max(1, min(minutos_almoco, 240))
+            responsavel_nome = (request.form.get("ponto_responsavel_nome") or "").strip()[:150] or None
+            responsavel_cargo = (request.form.get("ponto_responsavel_cargo") or "").strip()[:100] or None
+            he_folha = request.form.get("ponto_he_folha") != "banco"
             if conexao:
                 try:
                     with conexao.cursor() as cursor:
@@ -14286,16 +14478,22 @@ def pagina_configuracoes():
                         )
                         cursor.execute(
                             """
-                            INSERT INTO configuracoes (id, ponto_minutos_cafe, ponto_minutos_almoco)
-                            VALUES (1, %s, %s)
+                            INSERT INTO configuracoes (
+                                id, ponto_minutos_cafe, ponto_minutos_almoco,
+                                ponto_responsavel_nome, ponto_responsavel_cargo, ponto_he_folha
+                            )
+                            VALUES (1, %s, %s, %s, %s, %s)
                             ON CONFLICT (id) DO UPDATE
                             SET ponto_minutos_cafe = EXCLUDED.ponto_minutos_cafe,
-                                ponto_minutos_almoco = EXCLUDED.ponto_minutos_almoco
+                                ponto_minutos_almoco = EXCLUDED.ponto_minutos_almoco,
+                                ponto_responsavel_nome = EXCLUDED.ponto_responsavel_nome,
+                                ponto_responsavel_cargo = EXCLUDED.ponto_responsavel_cargo,
+                                ponto_he_folha = EXCLUDED.ponto_he_folha
                             """,
-                            (minutos_cafe, minutos_almoco),
+                            (minutos_cafe, minutos_almoco, responsavel_nome, responsavel_cargo, he_folha),
                         )
                         conexao.commit()
-                        flash("Tempos de café e almoço do ponto salvos.", "success")
+                        flash("Configurações do ponto salvas.", "success")
                 except Exception as e:
                     conexao.rollback()
                     flash(f"Não foi possível salvar os tempos do ponto: {e}", "danger")

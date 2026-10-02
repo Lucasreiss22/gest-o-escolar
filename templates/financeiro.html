@@ -726,10 +726,10 @@
                     <div class="fin-linha"><span>DSR (1/6 ou equivalente do mês)</span><strong>R$ {{ (prof.dsr)|moeda }}</strong></div>
                     {% endif %}
                     {% if prof.adicional_he_50 %}
-                    <div class="fin-linha"><span>Hora extra 50% ({{ prof.horas_extras }} h)</span><strong>R$ {{ (prof.adicional_he_50)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Hora extra 50% ({{ prof.horas_extras|hora_br }}){% if prof.horas_extras_ponto %}<br><small class="fin-item-meta">{{ prof.horas_extras_ponto|hora_br }} vindas do ponto eletrônico do sistema{% if prof.horas_extras_manual %} + {{ prof.horas_extras_manual|hora_br }} lançadas à mão{% endif %}</small>{% endif %}</span><strong>R$ {{ (prof.adicional_he_50)|moeda }}</strong></div>
                     {% endif %}
                     {% if prof.adicional_he_100 %}
-                    <div class="fin-linha"><span>Hora extra 100% ({{ prof.horas_extras_100 }} h)</span><strong>R$ {{ (prof.adicional_he_100)|moeda }}</strong></div>
+                    <div class="fin-linha"><span>Hora extra 100% ({{ prof.horas_extras_100|hora_br }}){% if prof.horas_extras_100_ponto %}<br><small class="fin-item-meta">{{ prof.horas_extras_100_ponto|hora_br }} vindas do ponto eletrônico do sistema{% if prof.horas_extras_100_manual %} + {{ prof.horas_extras_100_manual|hora_br }} lançadas à mão{% endif %}</small>{% endif %}</span><strong>R$ {{ (prof.adicional_he_100)|moeda }}</strong></div>
                     {% endif %}
                     {% if prof.dsr_he %}
                     <div class="fin-linha"><span>DSR sobre horas extras</span><strong>R$ {{ (prof.dsr_he)|moeda }}</strong></div>
@@ -805,12 +805,12 @@
                             <input type="number" name="dia_pagamento" min="1" max="28" value="{{ prof.dia_pagamento or 5 }}">
                         </div>
                         <div class="form-group" data-contratos="clt_horista">
-                            <label>Horas extras 50% (dias úteis)</label>
-                            {% with hora_name='horas_extras', hora_valor=prof.horas_extras or 0 %}{% include '_hora_picker.html' %}{% endwith %}
+                            <label>Horas extras 50% (dias úteis){% if prof.horas_extras_ponto %} além do ponto{% endif %}</label>
+                            {% with hora_name='horas_extras', hora_valor=prof.horas_extras_manual or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div class="form-group" data-contratos="clt_horista">
-                            <label>Horas extras 100% (domingo/feriado)</label>
-                            {% with hora_name='horas_extras_100', hora_valor=prof.horas_extras_100 or 0 %}{% include '_hora_picker.html' %}{% endwith %}
+                            <label>Horas extras 100% (domingo/feriado){% if prof.horas_extras_100_ponto %} além do ponto{% endif %}</label>
+                            {% with hora_name='horas_extras_100', hora_valor=prof.horas_extras_100_manual or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div class="form-group">
                             <label>Valor da hora extra 50% (vazio = CLT automático)</label>

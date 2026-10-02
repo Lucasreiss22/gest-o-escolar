@@ -285,6 +285,10 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         "adicional_he_50": he["adicional_he_50"],
         "adicional_he_100": he["adicional_he_100"],
         "adicional_he": adicional_he,
+        "horas_extras_ponto": _num(func.get("horas_extras_ponto")),
+        "horas_extras_100_ponto": _num(func.get("horas_extras_100_ponto")),
+        "horas_extras_manual": _num(func.get("horas_extras_manual", func.get("horas_extras"))),
+        "horas_extras_100_manual": _num(func.get("horas_extras_100_manual", func.get("horas_extras_100"))),
         "dia_pagamento": dia_pagamento_valido(func.get("dia_pagamento")),
         "aliquota_fgts": ALIQUOTA_FGTS,
         "fgts_cheio": 0.0,
@@ -378,6 +382,18 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         if dsr_he:
             partes.append(f"DSR sobre extras {br_money(dsr_he)} (1/6, Súmula 172 TST)")
         resultado["observacao"] += " Horas extras CLT: " + "; ".join(partes) + "."
+        ponto_50 = resultado["horas_extras_ponto"]
+        ponto_100 = resultado["horas_extras_100_ponto"]
+        if ponto_50 or ponto_100:
+            origem = []
+            if ponto_50:
+                origem.append(f"{ponto_50:g} h a 50%")
+            if ponto_100:
+                origem.append(f"{ponto_100:g} h a 100%")
+            resultado["observacao"] += (
+                f" Desse total, {' e '.join(origem)} vieram do ponto eletrônico do sistema"
+                " (compensação no mês, art. 59 §6º CLT; tolerância de 10 min/dia, art. 58 §1º)."
+            )
 
     inss_f = inss_empregado(bruto)
     irrf = irrf_progressivo(bruto - inss_f)
