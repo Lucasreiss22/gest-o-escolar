@@ -420,6 +420,13 @@ def _float_form(nome, padrao=0.0):
     return _parse_moeda(request.form.get(nome), padrao)
 
 
+def _valor_hora_extra_form():
+    """0 = valor da CLT calculado pelo salário; acima de 0 = valor fixo por hora."""
+    if request.form.get("modo_hora_extra") == "clt":
+        return 0.0
+    return max(0.0, _float_form("valor_hora_extra"))
+
+
 def _moeda_br(valor, vazio_se_zero=False):
     try:
         n = float(valor or 0)
@@ -2512,7 +2519,6 @@ def _aplicar_he_ponto(cursor, dados, competencia):
         return dados
     cursor.execute("SAVEPOINT he_ponto")
     try:
-        _garantir_ponto()
         if not _ponto_he_na_folha(cursor):
             cursor.execute("RELEASE SAVEPOINT he_ponto")
             return dados
@@ -4462,7 +4468,7 @@ def gerenciar_usuarios():
                         dia_pagamento_valido(request.form.get("dia_pagamento")),
                         _float_form("horas_extras"),
                         _float_form("horas_extras_100"),
-                        _float_form("valor_hora_extra"),
+                        _valor_hora_extra_form(),
                         request.form.get("enviar_contracheque", "1") != "0",
                         ativo, uid,
                     )
@@ -4703,9 +4709,12 @@ def gerenciar_usuarios():
                     cfg_folha = cursor.fetchone() or {}
                     regime_folha = cfg_folha.get("regime_tributario") or regime_folha
                     if frow.get("id"):
-                        agora = datetime.now()
-                        preview_folha = calcular_folha_pessoa(dict(frow), regime_folha, agora.year, agora.month)
+                        agora = _agora_ponto_br()
+                        competencia_preview = agora.strftime("%Y-%m")
+                        dados_preview = _func_com_ajuste(cursor, frow, competencia_preview)
+                        preview_folha = calcular_folha_pessoa(dados_preview, regime_folha, agora.year, agora.month)
                         preview_folha["rotulo_contrato"] = rotulo_contrato(preview_folha["tipo_contrato"])
+                        preview_folha["competencia_rotulo"] = nome_mes_extenso(competencia_preview)
         except Exception as e:
             _log(f"Erro ao listar usuários: {e}")
         finally:
@@ -11628,7 +11637,7 @@ def pagina_financeiro():
                         horas_mes = _float_form("horas_mes")
                         horas_extras = float((request.form.get("horas_extras") or "0").replace(",", ".") or 0)
                         horas_extras_100 = float((request.form.get("horas_extras_100") or "0").replace(",", ".") or 0)
-                        valor_hora_extra = float((request.form.get("valor_hora_extra") or "0").replace(",", ".") or 0)
+                        valor_hora_extra = _valor_hora_extra_form()
                         cursor.execute(
                             """
                             UPDATE funcionarios SET
@@ -14159,7 +14168,7 @@ def ajustar_contracheque():
         return redirect(url_for("contracheque", mes=mes_filtro))
     horas_extras = _float_form("horas_extras")
     horas_extras_100 = _float_form("horas_extras_100")
-    valor_hora_extra = _float_form("valor_hora_extra")
+    valor_hora_extra = _valor_hora_extra_form()
     garantir_tabelas_folha()
     conexao = obter_conexao()
     if not conexao:

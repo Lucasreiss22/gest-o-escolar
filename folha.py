@@ -203,12 +203,17 @@ def detalhe_horas_extras(func):
     horas_50 = max(_num(func.get("horas_extras")), 0.0)
     horas_100 = max(_num(func.get("horas_extras_100")), 0.0)
     informado = _num(func.get("valor_hora_extra"))
-    valor_50 = round(informado, 4) if informado > 0 else round(hora_n * ADICIONAL_HE_50, 4)
-    valor_100 = round(hora_n * ADICIONAL_HE_100, 4)
+    tipo = (func.get("tipo_contrato") or "clt_mensalista").strip().lower()
+    minimo_50 = hora_n * ADICIONAL_HE_50
+    if informado > 0:
+        valor_50 = max(informado, minimo_50) if _contrato_clt(tipo) else informado
+    else:
+        valor_50 = minimo_50
+    valor_50 = round(valor_50, 4)
+    valor_100 = round(max(hora_n * ADICIONAL_HE_100, valor_50), 4)
     adicional_50 = round(horas_50 * valor_50, 2)
     adicional_100 = round(horas_100 * valor_100, 2)
     adicional = round(adicional_50 + adicional_100, 2)
-    tipo = (func.get("tipo_contrato") or "clt_mensalista").strip().lower()
     dsr_he = round(adicional / 6.0, 2) if adicional > 0 and _contrato_clt(tipo) else 0.0
     return {
         "hora_normal": hora_n,

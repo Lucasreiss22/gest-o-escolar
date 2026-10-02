@@ -306,9 +306,18 @@
                         <label>Horas extras 100% (domingos e feriados)</label>
                         {% with hora_name='horas_extras_100', hora_valor=cadastro.horas_extras_100 or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                     </div>
-                    <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
-                        <label>Valor da hora extra 50% (R$). Vazio = salário ÷ 220 × 1,5 (CLT)</label>
-                        <input name="valor_hora_extra" data-moeda placeholder="Digite o valor" value="{{ cadastro.valor_hora_extra|moeda_campo }}">
+                    {% set he_fixo = (cadastro.valor_hora_extra or 0)|float > 0 %}
+                    <div class="form-group" data-contratos="clt_mensalista clt_horista jovem_aprendiz rpa pj">
+                        <label>Valor da hora extra</label>
+                        <select name="modo_hora_extra" data-modo-he>
+                            <option value="clt" {% if not he_fixo %}selected{% endif %}>Automático pela CLT (pelo salário)</option>
+                            <option value="fixo" {% if he_fixo %}selected{% endif %}>Valor fixo por hora</option>
+                        </select>
+                        <small class="hint" data-he-clt>Hora normal = salário ÷ 220 (horista: valor da hora-aula). Extra 50% = hora normal × 1,5; domingo e feriado = × 2 (art. 7º XVI da CF, art. 59 §1º CLT).</small>
+                        <div data-he-fixo>
+                            <input name="valor_hora_extra" data-moeda placeholder="Valor da hora extra 50% (R$)" value="{{ cadastro.valor_hora_extra|moeda_campo }}">
+                            <small class="hint">Na CLT o sistema nunca paga menos que a hora normal × 1,5. Domingo e feriado: hora normal × 2 (ou o valor fixo, se for maior).</small>
+                        </div>
                     </div>
                     <div class="form-group" data-contratos="clt_mensalista clt_horista rpa pj">
                         <label>Enviar contra-cheque no dia</label>
@@ -347,14 +356,23 @@
 
                 {% if preview_folha %}
                 <div class="regra-box" style="margin-bottom: 16px;">
-                    <strong>Simulação no regime {{ regime_folha }} — {{ preview_folha.rotulo_contrato }}</strong>
+                    <strong>Simulação de {{ preview_folha.competencia_rotulo }} no regime {{ regime_folha }} — {{ preview_folha.rotulo_contrato }}</strong>
                     <p style="margin: 6px 0 8px;">{{ preview_folha.observacao }}</p>
                     {% if preview_folha.tipo_contrato in ['clt_horista','horista'] %}
                     <div class="fin-linha-mini"><span>Horas × valor</span><strong>R$ {{ (preview_folha.salario)|moeda }}</strong></div>
                     <div class="fin-linha-mini"><span>DSR</span><strong>R$ {{ (preview_folha.dsr)|moeda }}</strong></div>
                     {% endif %}
-                    {% if preview_folha.adicional_he %}
-                    <div class="fin-linha-mini"><span>Horas extras</span><strong>R$ {{ (preview_folha.adicional_he)|moeda }}</strong></div>
+                    {% if preview_folha.adicional_he_50 %}
+                    <div class="fin-linha-mini"><span>Hora extra 50% ({{ preview_folha.horas_extras|hora_br }} × R$ {{ (preview_folha.valor_hora_extra)|moeda }}){% if preview_folha.horas_extras_ponto %} — {{ preview_folha.horas_extras_ponto|hora_br }} do ponto eletrônico do sistema{% endif %}</span><strong>R$ {{ (preview_folha.adicional_he_50)|moeda }}</strong></div>
+                    {% endif %}
+                    {% if preview_folha.adicional_he_100 %}
+                    <div class="fin-linha-mini"><span>Hora extra 100% ({{ preview_folha.horas_extras_100|hora_br }} × R$ {{ (preview_folha.valor_hora_extra_100)|moeda }}){% if preview_folha.horas_extras_100_ponto %} — {{ preview_folha.horas_extras_100_ponto|hora_br }} do ponto eletrônico do sistema{% endif %}</span><strong>R$ {{ (preview_folha.adicional_he_100)|moeda }}</strong></div>
+                    {% endif %}
+                    {% if preview_folha.dsr_he %}
+                    <div class="fin-linha-mini"><span>DSR sobre horas extras (1/6)</span><strong>R$ {{ (preview_folha.dsr_he)|moeda }}</strong></div>
+                    {% endif %}
+                    {% if not preview_folha.adicional_he and preview_folha.tipo_contrato in ['clt_mensalista','clt_horista','horista','jovem_aprendiz','aprendiz'] %}
+                    <div class="fin-linha-mini"><span>Horas extras</span><strong>Nenhuma no mês até agora</strong></div>
                     {% endif %}
                     <div class="fin-linha-mini"><span>Bruto</span><strong>R$ {{ (preview_folha.bruto)|moeda }}</strong></div>
                     {% if preview_folha.tipo_contrato not in ['pj'] %}

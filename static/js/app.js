@@ -725,6 +725,31 @@
     else iniciar();
 })();
 
+/* Valor da hora extra: "clt" esconde o campo de valor fixo; "fixo" mostra. */
+(function () {
+    function aplicar(seletor, focar) {
+        var form = seletor.form || document;
+        var fixo = seletor.value === "fixo";
+        form.querySelectorAll("[data-he-fixo]").forEach(function (bloco) {
+            bloco.hidden = !fixo;
+            var campo = bloco.querySelector("input[name='valor_hora_extra']");
+            if (campo && fixo && focar) campo.focus();
+        });
+        form.querySelectorAll("[data-he-clt]").forEach(function (bloco) { bloco.hidden = fixo; });
+    }
+
+    document.addEventListener("change", function (event) {
+        var alvo = event.target;
+        if (alvo && alvo.matches && alvo.matches("[data-modo-he]")) aplicar(alvo, true);
+    });
+
+    function iniciar() {
+        document.querySelectorAll("[data-modo-he]").forEach(function (seletor) { aplicar(seletor, false); });
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", iniciar);
+    else iniciar();
+})();
+
 /* Snapshot dos valores iniciais do formulário → auditoria "antes → depois" */
 (function () {
     var IGNORAR = /^(auditoria_antes|acao|csrf_token|form_login|permanecer_logado)$/i;

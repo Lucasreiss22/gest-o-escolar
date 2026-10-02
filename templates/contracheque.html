@@ -115,8 +115,14 @@
                             {% with hora_name='horas_extras_100', hora_valor=item.horas_extras_100_manual or 0 %}{% include '_hora_picker.html' %}{% endwith %}
                         </div>
                         <div>
-                            <label>Valor da hora extra 50% (vazio = automático)</label>
-                            <input name="valor_hora_extra" id="vhe50" data-moeda placeholder="Digite o valor" value="{{ item.valor_hora_extra_cadastro|moeda_campo }}">
+                            <label>Valor da hora extra</label>
+                            <select name="modo_hora_extra" id="modoHe" data-modo-he>
+                                <option value="clt" {% if not item.valor_hora_extra_cadastro %}selected{% endif %}>Automático pela CLT (pelo salário)</option>
+                                <option value="fixo" {% if item.valor_hora_extra_cadastro %}selected{% endif %}>Valor fixo por hora</option>
+                            </select>
+                            <div data-he-fixo>
+                                <input name="valor_hora_extra" id="vhe50" data-moeda placeholder="Valor da hora extra 50% (R$)" value="{{ item.valor_hora_extra_cadastro|moeda_campo }}">
+                            </div>
                         </div>
                     </div>
                     {% if item.horas_extras_ponto or item.horas_extras_100_ponto %}
@@ -145,6 +151,9 @@
             {% endif %}
             {% if item.adicional_he_100 %}
             <div class="linha"><span>Hora extra 100% ({{ item.horas_extras_100|hora_br }} × R$ {{ (item.valor_hora_extra_100)|moeda }}){% if item.horas_extras_100_ponto %}<br><small class="hint">{{ item.horas_extras_100_ponto|hora_br }} vindas do ponto eletrônico do sistema{% if item.horas_extras_100_manual %} + {{ item.horas_extras_100_manual|hora_br }} lançadas à mão{% endif %}</small>{% endif %}</span><strong>R$ {{ (item.adicional_he_100)|moeda }}</strong></div>
+            {% endif %}
+            {% if item.tipo_contrato in ['clt_mensalista','clt_horista','horista','jovem_aprendiz','aprendiz'] and not item.horas_extras_ponto and not item.horas_extras_100_ponto %}
+            <div class="linha"><span>Horas extras do ponto eletrônico do sistema</span><strong>Nenhuma em {{ mes_label }} até agora</strong></div>
             {% endif %}
             {% if item.dsr_he %}
             <div class="linha"><span>DSR sobre horas extras (1/6)</span><strong>R$ {{ (item.dsr_he)|moeda }}</strong></div>
@@ -191,9 +200,10 @@
             if (!preview) return;
             var h50 = num(he50) + pontoHe50;
             var h100 = num(he100) + pontoHe100;
-            var informado = num(vhe50);
-            var v50 = informado > 0 ? informado : horaNormal * 1.5;
-            var v100 = horaNormal * 2;
+            var modoHe = document.getElementById("modoHe");
+            var informado = modoHe && modoHe.value === "clt" ? 0 : num(vhe50);
+            var v50 = Math.max(informado, horaNormal * 1.5);
+            var v100 = Math.max(horaNormal * 2, v50);
             var a50 = h50 * v50;
             var a100 = h100 * v100;
             var dsr = (a50 + a100) / 6;
