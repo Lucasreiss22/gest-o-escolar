@@ -1,0 +1,358 @@
+<style>
+    .materias-box { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+    .materia-item { display: flex; align-items: center; gap: 6px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 12px; padding: 4px 6px 4px 8px; }
+    .materia-item select { border: 1px solid #cbd5e1; background: #fff; padding: 6px 8px; min-width: 190px; border-radius: 8px; }
+    .materia-item .nova-materia { min-width: 200px; }
+    .materia-item .rem-materia { border: none; background: #e2e8f0; color: #475569; border-radius: 999px; width: 26px; height: 26px; cursor: pointer; font-weight: 700; }
+    .btn-mais { background: #ecfdf5; color: #047857; border: 1px dashed #10b981; }
+    .questao-box { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-top: 14px; background: #f8fafc; }
+    .questao-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .questao-topo strong { font-size: 1rem; color: #0f172a; }
+    .questao-acoes { display: flex; gap: 6px; }
+    .questao-acoes button { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 4px 9px; cursor: pointer; font-weight: 700; color: #334155; }
+    .questao-acoes .remover { color: #b91c1c; border-color: #fecaca; }
+    .questao-box textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+    .alternativas { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-top: 10px; }
+    .alternativas .form-group label { font-size: .78rem; }
+    .espaco-resposta { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-top: 10px; }
+    .fotos-area { margin-top: 10px; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 10px; background: #fff; }
+    .fotos-lista { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+    .foto-mini { position: relative; width: 110px; height: 90px; border-radius: 8px; overflow: hidden; border: 1px solid #cbd5e1; background: #fff; display: flex; align-items: center; justify-content: center; }
+    .foto-mini img { width: 100%; height: 100%; object-fit: cover; }
+    .foto-mini .pdf-icone { font-weight: 800; color: #b91c1c; font-size: .9rem; text-align: center; padding: 4px; word-break: break-all; white-space: pre-line; font-size: .72rem; }
+    .foto-mini button { position: absolute; top: 3px; right: 3px; border: none; background: rgba(185, 28, 28, .9); color: #fff; border-radius: 999px; width: 22px; height: 22px; cursor: pointer; font-weight: 700; line-height: 1; }
+    .foto-mini .nova { position: absolute; left: 3px; bottom: 3px; background: rgba(16, 185, 129, .9); color: #fff; font-size: .68rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; }
+    .add-pergunta { width: 100%; margin-top: 14px; padding: 14px; border: 2px dashed #3498db; border-radius: 12px; background: #eff6ff; color: #1d4ed8; font-weight: 800; font-size: 1rem; cursor: pointer; }
+    .add-pergunta:hover { background: #dbeafe; }
+    .dica { color: #64748b; font-size: .85rem; margin: 6px 0 0; }
+</style>
+
+<div class="form-group" style="margin-top:14px;">
+    <label>Matéria(s) da prova (obrigatório)</label>
+    <div class="materias-box" id="listaMaterias"></div>
+    <p class="dica">Escolha pelo menos uma matéria, nas disciplinas da BNCC (MEC) ou da escola. Para uma matéria extracurricular, use “+ Nova matéria”. Com mais de uma matéria, cada pergunta indica a sua e o PDF separa por matéria.</p>
+</div>
+
+<div id="listaQuestoes"></div>
+<button type="button" class="add-pergunta" id="btnAddPergunta">+ Adicionar pergunta</button>
+
+<script>
+(function () {
+    var questoesIniciais = {{ (questoes_iniciais or []) | tojson }};
+    var materiasIniciais = {{ (materias_iniciais or []) | tojson }};
+    var materiasPorTurma = {{ (materias_por_turma or {}) | tojson }};
+    var catalogo = {{ (catalogo_materias or {}) | tojson }};
+    var urlMidia = "{{ url_for('servir_midia', midia_id=0) }}".replace(/0$/, "");
+    var LETRAS = ["a", "b", "c", "d", "e"];
+    var LINHAS_PADRAO = 5;
+    var NOVA = "__nova__";
+    var listaMat = document.getElementById("listaMaterias");
+    var listaQ = document.getElementById("listaQuestoes");
+    var turmaSel = document.querySelector("select[name='turma_id']");
+    var contador = 0;
+
+    function el(tag, attrs, texto) {
+        var e = document.createElement(tag);
+        Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+        if (texto !== undefined) e.textContent = texto;
+        return e;
+    }
+    function igual(a, b) { return (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase(); }
+
+    function materiasDaTurma() {
+        if (turmaSel) return materiasPorTurma[turmaSel.value] || [];
+        return materiasPorTurma.fixa || [];
+    }
+
+    function montarOpcoes(sel, valor) {
+        sel.innerHTML = "";
+        sel.appendChild(el("option", { value: "" }, "Selecione a matéria"));
+        var vistos = [];
+        function grupo(rotulo, nomes) {
+            var g = el("optgroup", { label: rotulo });
+            (nomes || []).forEach(function (n) {
+                if (!n || vistos.some(function (v) { return igual(v, n); })) return;
+                vistos.push(n);
+                g.appendChild(el("option", { value: n }, n));
+            });
+            if (g.children.length) sel.appendChild(g);
+        }
+        grupo("Matérias da turma", materiasDaTurma());
+        grupo("Base Nacional Comum Curricular (BNCC / MEC)", catalogo.bncc);
+        grupo("Extracurriculares da escola", catalogo.escola);
+        grupo("Usadas em provas anteriores", catalogo.usadas);
+        sel.appendChild(el("option", { value: NOVA }, "+ Nova matéria (extracurricular)…"));
+        var achado = vistos.filter(function (v) { return igual(v, valor); })[0];
+        sel.value = achado || "";
+        return !!achado;
+    }
+
+    function materiasAtuais() {
+        var nomes = [];
+        listaMat.querySelectorAll("input[name='materias']").forEach(function (campo) {
+            var v = (campo.value || "").trim();
+            if (v && !nomes.some(function (n) { return igual(n, v); })) nomes.push(v);
+        });
+        return nomes;
+    }
+
+    function atualizarSelectsMateria() {
+        var nomes = materiasAtuais();
+        listaQ.querySelectorAll(".questao-box").forEach(function (bloco) {
+            var sel = bloco.querySelector("select[name='materia_questao']");
+            var atual = sel.getAttribute("data-inicial") || sel.value || "";
+            sel.innerHTML = "";
+            var opcoes = nomes.length ? nomes.slice() : [""];
+            opcoes.forEach(function (n) { sel.appendChild(el("option", { value: n }, n || "—")); });
+            var achado = opcoes.filter(function (n) { return igual(n, atual); })[0];
+            sel.value = achado !== undefined ? achado : opcoes[0];
+            sel.removeAttribute("data-inicial");
+            sel.closest(".form-group").style.display = nomes.length > 1 ? "" : "none";
+        });
+    }
+
+    function addMateria(valor) {
+        var item = el("div", { "class": "materia-item" });
+        var sel = el("select", { "aria-label": "Matéria" });
+        var nova = el("input", { type: "text", "class": "nova-materia", placeholder: "Nome da nova matéria", maxlength: "100" });
+        var oculto = el("input", { type: "hidden", name: "materias" });
+        var rem = el("button", { type: "button", "class": "rem-materia", title: "Remover matéria" }, "×");
+        function sincronizar() {
+            var ehNova = sel.value === NOVA;
+            nova.style.display = ehNova ? "" : "none";
+            oculto.value = ehNova ? (nova.value || "").trim() : sel.value;
+            atualizarSelectsMateria();
+        }
+        item._remontar = function () {
+            var atual = oculto.value;
+            if (sel.value === NOVA) return;
+            if (!montarOpcoes(sel, atual) && atual) { sel.value = NOVA; nova.value = atual; }
+            sincronizar();
+        };
+        if (!montarOpcoes(sel, valor) && valor) { sel.value = NOVA; nova.value = valor; }
+        sel.addEventListener("change", function () { sincronizar(); if (sel.value === NOVA) nova.focus(); });
+        nova.addEventListener("input", sincronizar);
+        rem.addEventListener("click", function () {
+            if (listaMat.querySelectorAll(".materia-item").length <= 1) { sel.value = ""; nova.value = ""; }
+            else { item.remove(); }
+            sincronizar();
+        });
+        item.appendChild(sel);
+        item.appendChild(nova);
+        item.appendChild(oculto);
+        item.appendChild(rem);
+        listaMat.insertBefore(item, listaMat.querySelector(".btn-add-materia"));
+        sincronizar();
+        return sel;
+    }
+
+    function renumerar() {
+        listaQ.querySelectorAll(".questao-box").forEach(function (bloco, i) {
+            bloco.querySelector(".numero").textContent = "Pergunta " + (i + 1);
+        });
+    }
+
+    function miniAnexo(src, rotulo, nova, aoRemover) {
+        var box = el("div", { "class": "foto-mini" });
+        if (src) box.appendChild(el("img", { src: src, alt: "Anexo da pergunta" }));
+        else box.appendChild(el("span", { "class": "pdf-icone" }, rotulo));
+        if (nova) box.appendChild(el("span", { "class": "nova" }, "novo"));
+        var rem = el("button", { type: "button", title: "Tirar anexo" }, "×");
+        rem.addEventListener("click", function () { aoRemover(box); });
+        box.appendChild(rem);
+        return box;
+    }
+
+    function addQuestao(dados, foco) {
+        dados = dados || {};
+        contador += 1;
+        var chave = "q" + Date.now().toString(36) + contador;
+        var bloco = el("div", { "class": "questao-box" });
+        bloco.innerHTML =
+            '<div class="questao-topo"><strong class="numero"></strong>' +
+            '<div class="questao-acoes">' +
+            '<button type="button" class="subir" title="Subir">↑</button>' +
+            '<button type="button" class="descer" title="Descer">↓</button>' +
+            '<button type="button" class="remover">Remover</button></div></div>' +
+            '<input type="hidden" name="questao_chave" value="' + chave + '">' +
+            '<div class="form-grid">' +
+            '<div class="form-group"><label>Tipo de resposta</label><select name="tipo_questao">' +
+            '<option value="descritiva">Discursiva (pergunta e resposta escrita)</option>' +
+            '<option value="multipla">Múltipla escolha</option></select></div>' +
+            '<div class="form-group"><label>Matéria da pergunta</label><select name="materia_questao"></select></div>' +
+            '</div>' +
+            '<div class="fotos-area"><label style="font-size:.82rem;font-weight:700;color:#334155;">Imagem ou PDF (aparece antes da pergunta)</label><br>' +
+            '<input type="file" class="input-fotos" name="fotos_' + chave + '" accept="image/*,.heic,.heif,application/pdf,.pdf" multiple>' +
+            '<div class="fotos-lista"></div>' +
+            '<p class="dica" style="margin-top:4px;">JPG, PNG, WEBP, GIF, BMP, TIFF, HEIC ou PDF (cada página do PDF vira uma imagem na prova).</p></div>' +
+            '<div class="form-group" style="margin-top:10px;"><label>Pergunta</label>' +
+            '<textarea name="enunciado" rows="3" placeholder="Escreva a pergunta"></textarea></div>' +
+            '<div class="alternativas">' +
+            LETRAS.map(function (l) {
+                return '<div class="form-group"><label>Alternativa ' + l.toUpperCase() + '</label><input type="text" name="alt_' + l + '"></div>';
+            }).join("") +
+            '</div>' +
+            '<div class="espaco-resposta">' +
+            '<div class="form-group"><label>Espaço da resposta</label><select name="pauta_resposta">' +
+            '<option value="com">Com linhas (pauta para escrever reto)</option>' +
+            '<option value="sem">Sem linhas (espaço em branco)</option></select></div>' +
+            '<div class="form-group"><label>Quantidade de linhas</label>' +
+            '<input type="number" name="linhas_resposta" min="1" max="80" value="' + LINHAS_PADRAO + '" inputmode="numeric"></div>' +
+            '</div>' +
+            '<div class="form-group" style="margin-top:10px;"><label>Resposta esperada (sai só no gabarito)</label>' +
+            '<textarea name="resposta" rows="2" placeholder="Resposta ou letra correta"></textarea></div>';
+
+        var tipo = bloco.querySelector("select[name='tipo_questao']");
+        var alternativas = bloco.querySelector(".alternativas");
+        var espaco = bloco.querySelector(".espaco-resposta");
+        function mostrarPorTipo() {
+            var multipla = tipo.value === "multipla";
+            alternativas.style.display = multipla ? "" : "none";
+            espaco.style.display = multipla ? "none" : "";
+        }
+        tipo.addEventListener("change", mostrarPorTipo);
+
+        tipo.value = dados.tipo === "multipla" ? "multipla" : "descritiva";
+        bloco.querySelector("textarea[name='enunciado']").value = dados.enunciado || "";
+        bloco.querySelector("textarea[name='resposta']").value = dados.resposta || "";
+        bloco.querySelector("select[name='pauta_resposta']").value = dados.com_linhas === false ? "sem" : "com";
+        bloco.querySelector("input[name='linhas_resposta']").value = dados.linhas || LINHAS_PADRAO;
+        (dados.alternativas || []).forEach(function (txt, i) {
+            if (i < LETRAS.length) bloco.querySelector("input[name='alt_" + LETRAS[i] + "']").value = txt || "";
+        });
+        var selMat = bloco.querySelector("select[name='materia_questao']");
+        if (dados.materia) selMat.setAttribute("data-inicial", dados.materia);
+        mostrarPorTipo();
+
+        var fotosLista = bloco.querySelector(".fotos-lista");
+        (dados.fotos || []).forEach(function (midiaId) {
+            var oculto = el("input", { type: "hidden", name: "fotos_existentes_" + chave, value: String(midiaId) });
+            var mini = miniAnexo(urlMidia + midiaId, "", false, function (box) { box.remove(); });
+            mini.appendChild(oculto);
+            fotosLista.appendChild(mini);
+        });
+        var inputFotos = bloco.querySelector(".input-fotos");
+        inputFotos.addEventListener("change", function () {
+            fotosLista.querySelectorAll(".foto-mini.nova-sel").forEach(function (n) { n.remove(); });
+            Array.prototype.forEach.call(inputFotos.files || [], function (arq, idx) {
+                var ehPdf = /pdf$/i.test(arq.type) || /\.pdf$/i.test(arq.name);
+                var exibivel = /^image\/(jpeg|png|gif|webp|bmp)$/i.test(arq.type);
+                var src = exibivel ? URL.createObjectURL(arq) : "";
+                var rotulo = ehPdf ? "PDF\n" + arq.name : arq.name;
+                var mini = miniAnexo(src, rotulo, true, function () {
+                    var dt = new DataTransfer();
+                    Array.prototype.forEach.call(inputFotos.files, function (f, j) { if (j !== idx) dt.items.add(f); });
+                    inputFotos.files = dt.files;
+                    inputFotos.dispatchEvent(new Event("change"));
+                });
+                mini.classList.add("nova-sel");
+                fotosLista.appendChild(mini);
+            });
+        });
+
+        bloco.querySelector(".remover").addEventListener("click", function () {
+            if (listaQ.querySelectorAll(".questao-box").length <= 1) {
+                alert("A prova precisa de pelo menos uma pergunta.");
+                return;
+            }
+            if (!confirm("Remover esta pergunta?")) return;
+            bloco.remove();
+            renumerar();
+        });
+        bloco.querySelector(".subir").addEventListener("click", function () {
+            var ant = bloco.previousElementSibling;
+            if (ant) { listaQ.insertBefore(bloco, ant); renumerar(); }
+        });
+        bloco.querySelector(".descer").addEventListener("click", function () {
+            var prox = bloco.nextElementSibling;
+            if (prox) { listaQ.insertBefore(prox, bloco); renumerar(); }
+        });
+
+        listaQ.appendChild(bloco);
+        renumerar();
+        atualizarSelectsMateria();
+        if (foco) {
+            bloco.scrollIntoView({ behavior: "smooth", block: "center" });
+            bloco.querySelector("textarea[name='enunciado']").focus();
+        }
+    }
+
+    var btnMat = el("button", { type: "button", "class": "btn btn-mais btn-add-materia" }, "+ Adicionar matéria");
+    btnMat.addEventListener("click", function () { addMateria("").focus(); });
+    listaMat.appendChild(btnMat);
+    (materiasIniciais.length ? materiasIniciais : [""]).forEach(function (m) { addMateria(m); });
+
+    if (questoesIniciais.length) questoesIniciais.forEach(function (q) { addQuestao(q, false); });
+    else addQuestao({}, false);
+
+    document.getElementById("btnAddPergunta").addEventListener("click", function () {
+        var anterior = listaQ.querySelector(".questao-box:last-child");
+        var base = {};
+        if (anterior) {
+            base.materia = anterior.querySelector("select[name='materia_questao']").value;
+            base.tipo = anterior.querySelector("select[name='tipo_questao']").value;
+            base.com_linhas = anterior.querySelector("select[name='pauta_resposta']").value !== "sem";
+            base.linhas = parseInt(anterior.querySelector("input[name='linhas_resposta']").value, 10) || LINHAS_PADRAO;
+        }
+        addQuestao(base, true);
+    });
+
+    if (turmaSel) {
+        turmaSel.addEventListener("change", function () {
+            listaMat.querySelectorAll(".materia-item").forEach(function (item) { item._remontar(); });
+            var daTurma = materiasDaTurma();
+            var itens = listaMat.querySelectorAll(".materia-item");
+            if (daTurma.length === 1 && itens.length === 1 && !materiasAtuais().length) {
+                var sel = itens[0].querySelector("select");
+                sel.value = daTurma[0];
+                sel.dispatchEvent(new Event("change"));
+            }
+        });
+    }
+
+    var form = listaQ.closest("form");
+    if (form) {
+        form.addEventListener("submit", function (ev) {
+            var novaVazia = Array.prototype.some.call(listaMat.querySelectorAll(".materia-item"), function (item) {
+                return item.querySelector("select").value === NOVA && !(item.querySelector(".nova-materia").value || "").trim();
+            });
+            if (novaVazia) {
+                ev.preventDefault();
+                alert("Digite o nome da nova matéria ou remova o campo.");
+                return;
+            }
+            if (!materiasAtuais().length) {
+                ev.preventDefault();
+                alert("Escolha pelo menos uma matéria para a prova.");
+                var primeira = listaMat.querySelector("select");
+                if (primeira) { primeira.scrollIntoView({ behavior: "smooth", block: "center" }); primeira.focus(); }
+                return;
+            }
+            var blocos = listaQ.querySelectorAll(".questao-box");
+            var validas = 0;
+            for (var i = 0; i < blocos.length; i++) {
+                var b = blocos[i];
+                var texto = (b.querySelector("textarea[name='enunciado']").value || "").trim();
+                var temFoto = b.querySelectorAll(".foto-mini").length > 0;
+                if (!texto && !temFoto) continue;
+                validas += 1;
+                if (b.querySelector("select[name='tipo_questao']").value === "multipla") {
+                    var preenchidas = LETRAS.filter(function (l) {
+                        return (b.querySelector("input[name='alt_" + l + "']").value || "").trim();
+                    }).length;
+                    if (preenchidas < 2) {
+                        ev.preventDefault();
+                        alert("Pergunta " + (i + 1) + ": múltipla escolha precisa de pelo menos 2 alternativas.");
+                        b.scrollIntoView({ behavior: "smooth", block: "center" });
+                        return;
+                    }
+                }
+            }
+            if (!validas) {
+                ev.preventDefault();
+                alert("Escreva pelo menos uma pergunta.");
+            }
+        });
+    }
+})();
+</script>

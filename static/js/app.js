@@ -636,6 +636,95 @@
     }
 })();
 
+/* Enter nos campos passa para o próximo campo em vez de enviar o formulário.
+   No último campo, o foco vai para o botão de salvar (Enter de novo envia).
+   Senha e o último campo de formulários de busca (GET) continuam enviando.
+   Para manter o envio direto num formulário ou campo, use data-enter-envia. */
+(function () {
+    var TIPOS_IGNORADOS = /^(button|submit|reset|image|file|hidden)$/i;
+
+    function visivel(el) {
+        if (!el || el.disabled || el.hidden) return false;
+        if (el.closest && el.closest("[hidden], [inert]")) return false;
+        if (el.getAttribute("tabindex") === "-1") return false;
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    function navegaveis(form) {
+        return Array.prototype.filter.call(form.elements, function (el) {
+            var tag = el.tagName;
+            if (tag === "FIELDSET" || tag === "OBJECT" || tag === "OUTPUT" || tag === "BUTTON") return false;
+            if (tag === "INPUT" && TIPOS_IGNORADOS.test(el.type)) return false;
+            if (el.readOnly && tag !== "SELECT") return false;
+            return visivel(el);
+        });
+    }
+
+    function botaoEnviar(form) {
+        var botoes = Array.prototype.filter.call(form.elements, function (el) {
+            if (el.tagName === "BUTTON") return (el.getAttribute("type") || "submit").toLowerCase() === "submit" && visivel(el);
+            return el.tagName === "INPUT" && /^(submit|image)$/i.test(el.type) && visivel(el);
+        });
+        return botoes[0] || null;
+    }
+
+    function focar(el) {
+        el.focus();
+        if (el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+        if (el.tagName === "INPUT" && el.select && /^(text|search|email|tel|url|number)$/i.test(el.type)) {
+            try { el.select(); } catch (e) { /* number em alguns navegadores */ }
+        }
+    }
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" || event.defaultPrevented || event.isComposing) return;
+        if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+        var campo = event.target;
+        if (!campo || (campo.tagName !== "INPUT" && campo.tagName !== "SELECT")) return;
+        if (campo.tagName === "INPUT" && TIPOS_IGNORADOS.test(campo.type)) return;
+        var form = campo.form;
+        if (!form) return;
+        if (campo.closest("[data-enter-envia]") || form.hasAttribute("data-enter-envia")) return;
+        if (campo.type === "password") return;
+
+        var lista = navegaveis(form);
+        var pos = lista.indexOf(campo);
+        var proximo = pos >= 0 ? lista[pos + 1] : null;
+        if (proximo) {
+            event.preventDefault();
+            focar(proximo);
+            return;
+        }
+        if ((form.getAttribute("method") || "get").toLowerCase() === "get") return;
+        event.preventDefault();
+        var botao = botaoEnviar(form);
+        if (botao) focar(botao);
+    });
+})();
+
+/* Caixa "horário marcado": mostra e exige o campo de hora indicado em data-horario-marcado. */
+(function () {
+    function aplicar(caixa, focar) {
+        var alvo = document.getElementById(caixa.getAttribute("data-horario-marcado"));
+        if (!alvo) return;
+        alvo.hidden = !caixa.checked;
+        alvo.required = caixa.checked;
+        if (!caixa.checked) alvo.value = "";
+        else if (focar) alvo.focus();
+    }
+
+    document.addEventListener("change", function (event) {
+        var caixa = event.target;
+        if (caixa && caixa.matches && caixa.matches("[data-horario-marcado]")) aplicar(caixa, true);
+    });
+
+    function iniciar() {
+        document.querySelectorAll("[data-horario-marcado]").forEach(function (caixa) { aplicar(caixa, false); });
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", iniciar);
+    else iniciar();
+})();
+
 /* Snapshot dos valores iniciais do formulário → auditoria "antes → depois" */
 (function () {
     var IGNORAR = /^(auditoria_antes|acao|csrf_token|form_login|permanecer_logado)$/i;

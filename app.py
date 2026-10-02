@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from io import BytesIO
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -724,6 +725,106 @@ def _salvar_midia(campo, extensoes):
     finally:
         conexao.close()
     return mid
+
+
+_EXT_ANEXO_QUESTAO = {
+    "jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff", "heic", "heif", "jfif", "pdf",
+}
+_MAX_PAGINAS_PDF_QUESTAO = 10
+
+
+def _imagem_para_web(img, lado_max):
+    """Reduz e salva como JPEG (ou PNG se tiver transparência) — formatos que o navegador e o PDF aceitam."""
+    from PIL import ImageOps
+
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+    if getattr(img, "n_frames", 1) > 1:
+        img.seek(0)
+    img.thumbnail((lado_max, lado_max))
+    saida = BytesIO()
+    transparente = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    if transparente:
+        img.convert("RGBA").save(saida, format="PNG", optimize=True)
+        return "image/png", saida.getvalue()
+    img.convert("RGB").save(saida, format="JPEG", quality=85)
+    return "image/jpeg", saida.getvalue()
+
+
+def _recortar_margens_brancas(img, folga=24):
+    from PIL import Image, ImageChops
+
+    rgb = img.convert("RGB")
+    diferenca = ImageChops.difference(rgb, Image.new("RGB", rgb.size, (255, 255, 255)))
+    caixa = diferenca.convert("L").point(lambda v: 255 if v > 12 else 0).getbbox()
+    if not caixa:
+        return rgb
+    esq, topo, dir_, base = caixa
+    return rgb.crop((
+        max(esq - folga, 0),
+        max(topo - folga, 0),
+        min(dir_ + folga, rgb.width),
+        min(base + folga, rgb.height),
+    ))
+
+
+def _ler_imagem_upload(arquivo, lado_max=1600):
+    """Anexo de pergunta → lista de (mime, bytes, veio_de_pdf). PDF vira uma imagem por página."""
+    from PIL import Image
+
+    nome_original = arquivo.filename or "arquivo"
+    nome = secure_filename(nome_original)
+    ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
+    if ext not in _EXT_ANEXO_QUESTAO:
+        raise ValueError(
+            f"O anexo '{nome_original}' precisa ser imagem (JPG, PNG, WEBP, GIF, BMP, TIFF, HEIC) ou PDF."
+        )
+    dados = arquivo.read()
+    if not dados:
+        raise ValueError(f"O anexo '{nome_original}' chegou vazio.")
+    if len(dados) > 15 * 1024 * 1024:
+        raise ValueError(f"O anexo '{nome_original}' precisa ter no máximo 15 MB.")
+    if ext == "pdf" or dados[:5] == b"%PDF-":
+        try:
+            import pypdfium2 as pdfium
+        except ImportError as e:
+            raise ValueError("Anexar PDF na pergunta exige a biblioteca pypdfium2 no servidor.") from e
+        try:
+            documento = pdfium.PdfDocument(dados)
+        except Exception as e:
+            raise ValueError(f"Não foi possível abrir o PDF '{nome_original}'.") from e
+        try:
+            total = len(documento)
+            if total > _MAX_PAGINAS_PDF_QUESTAO:
+                raise ValueError(
+                    f"O PDF '{nome_original}' tem {total} páginas; use até {_MAX_PAGINAS_PDF_QUESTAO} por pergunta."
+                )
+            paginas = []
+            for indice in range(total):
+                pagina = documento[indice]
+                imagem = _recortar_margens_brancas(pagina.render(scale=2).to_pil())
+                paginas.append((*_imagem_para_web(imagem, lado_max), True))
+                pagina.close()
+            return paginas
+        finally:
+            documento.close()
+    if ext in ("heic", "heif"):
+        try:
+            from pillow_heif import register_heif_opener
+
+            register_heif_opener()
+        except ImportError as e:
+            raise ValueError("Fotos HEIC exigem a biblioteca pillow-heif no servidor; envie em JPG.") from e
+    try:
+        with Image.open(BytesIO(dados)) as imagem:
+            imagem.load()
+            return [(*_imagem_para_web(imagem, lado_max), False)]
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Não foi possível ler a imagem '{nome_original}'.") from e
 
 
 TIPOS_DOC_ALUNO = [
@@ -1477,6 +1578,59 @@ def _atualizar_permissoes_sessao(forcar=False):
         pass
 
 
+_TENTATIVAS_TABELAS = {}
+
+
+def _garantir_todas_tabelas_escola():
+    """Cria as tabelas que faltarem no espaço da escola, uma vez por processo.
+
+    Sem isso, uma tela pode consultar uma tabela que só seria criada ao abrir outra tela.
+    Se algum passo falhar, tenta de novo depois de 10 minutos.
+    """
+    from database import _nome_banco_atual, _tabelas_ok
+
+    schema = _nome_banco_atual(master=False)
+    if not schema:
+        return
+    chave = f"{schema}:todas_tabelas_v1"
+    if chave in _tabelas_ok:
+        return
+    agora = time.time()
+    if agora - _TENTATIVAS_TABELAS.get(chave, 0) < 600:
+        return
+    _TENTATIVAS_TABELAS[chave] = agora
+    falhas = []
+    for passo in (
+        garantir_tabelas_folha,
+        garantir_tabelas_pedagogicas,
+        _garantir_sala_professor,
+        _garantir_ponto,
+        _garantir_pessoas_autorizadas,
+    ):
+        try:
+            passo()
+        except Exception as erro:
+            falhas.append(f"{passo.__name__}: {erro}")
+    conexao = obter_conexao()
+    if conexao:
+        try:
+            with conexao.cursor() as cursor:
+                _garantir_documentos_pessoa(cursor)
+                _garantir_folha_ajustes(cursor)
+            conexao.commit()
+        except Exception as erro:
+            conexao.rollback()
+            falhas.append(f"documentos/folha_ajustes: {erro}")
+        finally:
+            conexao.close()
+    else:
+        falhas.append("sem conexão")
+    if falhas:
+        print(f"[tabelas] {schema}: " + " | ".join(falhas))
+    else:
+        _tabelas_ok.add(chave)
+
+
 @app.before_request
 def proteger_rotas():
     endpoint = request.endpoint
@@ -1515,6 +1669,10 @@ def proteger_rotas():
     if endpoint == "plataforma_escolas":
         flash("Apenas o administrador da plataforma pode cadastrar novas escolas.", "danger")
         return redirect(url_for("dashboard"))
+    try:
+        _garantir_todas_tabelas_escola()
+    except Exception as erro:
+        print(f"[tabelas] falha ao garantir tabelas: {erro}")
     _atualizar_permissoes_sessao()
     papel = session.get("usuario_papel")
     acao_form = request.form.get("acao") if request.method == "POST" else ""
@@ -4874,7 +5032,7 @@ def _garantir_sala_professor():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:sala_prof_v4"
+    chave = f"{schema}:sala_prof_v6"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -4928,6 +5086,34 @@ def _garantir_sala_professor():
                     resposta TEXT
                 )
                 """
+            )
+            cursor.execute("ALTER TABLE provas_criadas_questoes ADD COLUMN IF NOT EXISTS materia VARCHAR(100)")
+            cursor.execute("ALTER TABLE provas_criadas_questoes ADD COLUMN IF NOT EXISTS linhas SMALLINT")
+            cursor.execute("ALTER TABLE provas_criadas_questoes ADD COLUMN IF NOT EXISTS com_linhas BOOLEAN DEFAULT TRUE")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS midia (
+                    id SERIAL PRIMARY KEY,
+                    mime VARCHAR(40) NOT NULL,
+                    dados BYTEA NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS provas_questoes_fotos (
+                    id SERIAL PRIMARY KEY,
+                    questao_id INT NOT NULL REFERENCES provas_criadas_questoes(id) ON DELETE CASCADE,
+                    midia_id INT NOT NULL,
+                    ordem INT DEFAULT 1
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS provas_questoes_fotos_q_idx ON provas_questoes_fotos (questao_id)"
+            )
+            cursor.execute(
+                "ALTER TABLE provas_questoes_fotos ADD COLUMN IF NOT EXISTS pagina_pdf BOOLEAN DEFAULT FALSE"
             )
             cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS logo_escola VARCHAR(255)")
             cursor.execute("ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mensagem_prova TEXT")
@@ -5471,6 +5657,260 @@ def _ajustar_data_prova_aluno(
         )
 
 
+LETRAS_ALTERNATIVAS = "abcde"
+LINHAS_RESPOSTA_PADRAO = 5
+LINHAS_RESPOSTA_MAX = 80
+MATERIAS_BNCC = (
+    "Língua Portuguesa",
+    "Matemática",
+    "Ciências",
+    "História",
+    "Geografia",
+    "Arte",
+    "Educação Física",
+    "Ensino Religioso",
+    "Língua Inglesa",
+)
+
+
+def _catalogo_materias_prova(cursor, funcionario_id=None):
+    """Matérias para a prova: BNCC/MEC, extracurriculares da escola e as já usadas pelo professor."""
+    vistos = set()
+
+    def _unico(nome):
+        chave = (nome or "").strip().lower()
+        if not chave or chave in vistos:
+            return False
+        vistos.add(chave)
+        return True
+
+    bncc = [nome for nome in MATERIAS_BNCC if _unico(nome)]
+    escola = []
+    usadas = []
+    try:
+        cursor.execute("SAVEPOINT catalogo_materias")
+        cursor.execute(
+            """
+            SELECT nome, COALESCE(is_custom, FALSE) AS is_custom
+            FROM disciplinas
+            WHERE COALESCE(ativo, TRUE)
+            ORDER BY nome
+            """
+        )
+        for row in cursor.fetchall() or []:
+            nome = (row.get("nome") or "").strip()
+            if not _unico(nome):
+                continue
+            (escola if row.get("is_custom") else bncc).append(nome)
+        if funcionario_id:
+            cursor.execute(
+                """
+                SELECT DISTINCT TRIM(q.materia) AS nome
+                FROM provas_criadas_questoes q
+                JOIN provas_criadas p ON p.id = q.prova_id
+                WHERE p.funcionario_id = %s AND COALESCE(TRIM(q.materia), '') <> ''
+                ORDER BY 1
+                """,
+                (funcionario_id,),
+            )
+            usadas = [row["nome"] for row in cursor.fetchall() or [] if _unico(row.get("nome"))]
+        cursor.execute("RELEASE SAVEPOINT catalogo_materias")
+    except Exception:
+        cursor.execute("ROLLBACK TO SAVEPOINT catalogo_materias")
+    return {"bncc": bncc, "escola": escola, "usadas": usadas}
+
+
+def _materias_do_form(form):
+    """Matérias da prova (uma ou várias), sem repetição e na ordem digitada."""
+    nomes = form.getlist("materias") or [form.get("materia") or ""]
+    vistas, saida = set(), []
+    for nome in nomes:
+        nome = (nome or "").strip()[:100]
+        if nome and nome.lower() not in vistas:
+            vistas.add(nome.lower())
+            saida.append(nome)
+    return saida
+
+
+def _horario_prova_do_form(form):
+    """Horário só vale com a caixa "Prova com horário marcado"; marcada, a hora é obrigatória."""
+    if not form.get("tem_horario"):
+        return None
+    horario = (form.get("horario") or "").strip()
+    if not horario or horario == "None":
+        raise ValueError("Marque o horário da prova ou desmarque \"Prova com horário marcado\".")
+    try:
+        return datetime.strptime(horario[:5], "%H:%M").strftime("%H:%M")
+    except ValueError:
+        raise ValueError("Horário da prova inválido.")
+
+
+def _questoes_do_form(form, files):
+    """Lê as caixas de pergunta (listas alinhadas por `questao_chave`)."""
+    chaves = form.getlist("questao_chave")
+    enunciados = form.getlist("enunciado")
+    tipos = form.getlist("tipo_questao")
+    respostas = form.getlist("resposta")
+    materias = form.getlist("materia_questao")
+    linhas_lista = form.getlist("linhas_resposta")
+    pautas = form.getlist("pauta_resposta")
+    colunas = [form.getlist(f"alt_{letra}") for letra in LETRAS_ALTERNATIVAS]
+
+    def _pega(lista, i):
+        return (lista[i] if i < len(lista) else "") or ""
+
+    questoes = []
+    for i, chave in enumerate(chaves):
+        chave = "".join(ch for ch in (chave or "") if ch.isalnum())[:20]
+        texto = _pega(enunciados, i).strip()
+        fotos_novas = [
+            arq for arq in (files.getlist(f"fotos_{chave}") if chave else [])
+            if arq and (arq.filename or "").strip()
+        ]
+        fotos_existentes = []
+        for valor in form.getlist(f"fotos_existentes_{chave}") if chave else []:
+            try:
+                fotos_existentes.append(int(valor))
+            except (TypeError, ValueError):
+                continue
+        if not texto and not fotos_novas and not fotos_existentes:
+            continue
+        tipo = _pega(tipos, i) if _pega(tipos, i) in {"multipla", "descritiva"} else "descritiva"
+        alternativas = []
+        if tipo == "multipla":
+            alternativas = [_pega(coluna, i).strip() for coluna in colunas]
+            while alternativas and not alternativas[-1]:
+                alternativas.pop()
+            if len([a for a in alternativas if a]) < 2:
+                raise ValueError(f"A pergunta {len(questoes) + 1} é de múltipla escolha: preencha pelo menos 2 alternativas.")
+        try:
+            linhas = int(_pega(linhas_lista, i) or LINHAS_RESPOSTA_PADRAO)
+        except ValueError:
+            linhas = LINHAS_RESPOSTA_PADRAO
+        linhas = max(1, min(linhas, LINHAS_RESPOSTA_MAX))
+        questoes.append({
+            "enunciado": texto,
+            "tipo": tipo,
+            "alternativas": "\n".join(alternativas),
+            "resposta": _pega(respostas, i).strip(),
+            "materia": _pega(materias, i).strip()[:100] or None,
+            "linhas": linhas if tipo == "descritiva" else None,
+            "com_linhas": _pega(pautas, i) != "sem",
+            "fotos_novas": fotos_novas,
+            "fotos_existentes": fotos_existentes,
+        })
+    return questoes
+
+
+def _gravar_questoes(cursor, prova_id, questoes, fotos_permitidas=()):
+    """Insere as perguntas e as fotos. `fotos_permitidas` = {midia_id: pagina_pdf} que já eram desta prova."""
+    if isinstance(fotos_permitidas, dict):
+        permitidas = dict(fotos_permitidas)
+    else:
+        permitidas = {midia_id: False for midia_id in (fotos_permitidas or ())}
+    usadas = set()
+    for ordem, item in enumerate(questoes, start=1):
+        cursor.execute(
+            """
+            INSERT INTO provas_criadas_questoes
+                (prova_id, ordem, enunciado, tipo, alternativas, resposta, materia, linhas, com_linhas)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                prova_id, ordem, item["enunciado"], item["tipo"],
+                item["alternativas"], item["resposta"], item.get("materia"),
+                item.get("linhas"), item.get("com_linhas", True),
+            ),
+        )
+        questao_id = (cursor.fetchone() or {}).get("id")
+        posicao = 0
+        for midia_id in item.get("fotos_existentes") or []:
+            if midia_id not in permitidas or midia_id in usadas:
+                continue
+            posicao += 1
+            usadas.add(midia_id)
+            cursor.execute(
+                """
+                INSERT INTO provas_questoes_fotos (questao_id, midia_id, ordem, pagina_pdf)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (questao_id, midia_id, posicao, bool(permitidas[midia_id])),
+            )
+        for arquivo in item.get("fotos_novas") or []:
+            for mime, dados, pagina_pdf in _ler_imagem_upload(arquivo):
+                cursor.execute(
+                    "INSERT INTO midia (mime, dados) VALUES (%s, %s) RETURNING id",
+                    (mime, dados),
+                )
+                midia_id = (cursor.fetchone() or {}).get("id")
+                posicao += 1
+                cursor.execute(
+                    """
+                    INSERT INTO provas_questoes_fotos (questao_id, midia_id, ordem, pagina_pdf)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (questao_id, midia_id, posicao, pagina_pdf),
+                )
+    removidas = set(permitidas) - usadas
+    if removidas:
+        cursor.execute("DELETE FROM midia WHERE id = ANY(%s)", (list(removidas),))
+
+
+def _questoes_da_prova(cursor, prova_id, com_imagens=False):
+    """Perguntas da prova com as fotos (ids, ou bytes para o PDF)."""
+    cursor.execute(
+        """
+        SELECT id, ordem, enunciado, tipo, alternativas, resposta, materia, linhas, com_linhas
+        FROM provas_criadas_questoes
+        WHERE prova_id = %s
+        ORDER BY ordem, id
+        """,
+        (prova_id,),
+    )
+    questoes = []
+    por_id = {}
+    for row in cursor.fetchall() or []:
+        item = dict(row)
+        item["alternativas"] = [parte for parte in (item.get("alternativas") or "").split("\n")]
+        item["linhas"] = int(item.get("linhas") or LINHAS_RESPOSTA_PADRAO)
+        item["com_linhas"] = item.get("com_linhas") is not False
+        item["fotos"] = []
+        questoes.append(item)
+        por_id[item["id"]] = item
+    if not por_id:
+        return questoes
+    if com_imagens:
+        cursor.execute(
+            """
+            SELECT f.questao_id, f.midia_id, COALESCE(f.pagina_pdf, FALSE) AS pagina_pdf, m.mime, m.dados
+            FROM provas_questoes_fotos f
+            JOIN midia m ON m.id = f.midia_id
+            WHERE f.questao_id = ANY(%s)
+            ORDER BY f.questao_id, f.ordem, f.id
+            """,
+            (list(por_id),),
+        )
+        for row in cursor.fetchall() or []:
+            if row.get("dados"):
+                por_id[row["questao_id"]]["fotos"].append(
+                    (bytes(row["dados"]), row.get("mime"), bool(row.get("pagina_pdf")))
+                )
+    else:
+        cursor.execute(
+            """
+            SELECT questao_id, midia_id
+            FROM provas_questoes_fotos
+            WHERE questao_id = ANY(%s)
+            ORDER BY questao_id, ordem, id
+            """,
+            (list(por_id),),
+        )
+        for row in cursor.fetchall() or []:
+            por_id[row["questao_id"]]["fotos"].append(row["midia_id"])
+    return questoes
+
+
 def _professor_da_sessao(cursor, funcionario_id):
     pessoa = None
     if funcionario_id:
@@ -5565,9 +6005,7 @@ def sala_professor():
                         datetime.strptime(data_aplicacao[:10], "%Y-%m-%d")
                     except ValueError:
                         raise ValueError("Data de aplicação inválida.")
-                    horario = (request.form.get("horario") or "").strip() or None
-                    if horario in ("", "None"):
-                        horario = None
+                    horario = _horario_prova_do_form(request.form)
                     materia = (request.form.get("materia") or "").strip()[:100]
                     titulo = (request.form.get("titulo") or "Prova").strip()[:180]
                     midia_id = _salvar_midia("arquivo", {"pdf"})
@@ -5660,39 +6098,17 @@ def sala_professor():
                         datetime.strptime(data_aplicacao[:10], "%Y-%m-%d")
                     except ValueError:
                         raise ValueError("Data de aplicação inválida.")
-                    horario = (request.form.get("horario") or "").strip() or None
-                    if horario in ("", "None"):
-                        horario = None
-                    materia = (request.form.get("materia") or "").strip()[:100]
-                    enunciados = request.form.getlist("enunciado")
-                    tipos = request.form.getlist("tipo_questao")
-                    respostas = request.form.getlist("resposta")
-                    letras = [
-                        request.form.getlist("alt_a"),
-                        request.form.getlist("alt_b"),
-                        request.form.getlist("alt_c"),
-                        request.form.getlist("alt_d"),
-                    ]
-                    questoes = []
-                    for indice, texto in enumerate(enunciados):
-                        texto = (texto or "").strip()
-                        if not texto:
-                            continue
-                        tipo = tipos[indice] if indice < len(tipos) else "descritiva"
-                        if tipo not in {"multipla", "descritiva"}:
-                            tipo = "descritiva"
-                        alternativas = []
-                        if tipo == "multipla":
-                            for coluna in letras:
-                                alternativas.append((coluna[indice] if indice < len(coluna) else "").strip())
-                        questoes.append((
-                            texto,
-                            tipo,
-                            "\n".join(alternativas),
-                            (respostas[indice] if indice < len(respostas) else "").strip(),
-                        ))
+                    horario = _horario_prova_do_form(request.form)
+                    lista_materias = _materias_do_form(request.form)
+                    if not lista_materias:
+                        raise ValueError("Escolha pelo menos uma matéria para a prova.")
+                    materia = " / ".join(lista_materias)[:100]
+                    questoes = _questoes_do_form(request.form, request.files)
                     if not questoes:
                         raise ValueError("Escreva pelo menos uma pergunta.")
+                    if len(lista_materias) == 1:
+                        for item in questoes:
+                            item["materia"] = item.get("materia") or lista_materias[0]
                     titulo_evento = titulo if not materia else f"{titulo} — {materia}"
                     descricao_evento = f"Prova criada por {pessoa.get('nome_completo') or 'professor'}."
                     cursor.execute(
@@ -5743,15 +6159,7 @@ def sala_professor():
                         ),
                     )
                     prova_id = (cursor.fetchone() or {}).get("id")
-                    for ordem, item in enumerate(questoes, start=1):
-                        cursor.execute(
-                            """
-                            INSERT INTO provas_criadas_questoes
-                                (prova_id, ordem, enunciado, tipo, alternativas, resposta)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                            """,
-                            (prova_id, ordem, *item),
-                        )
+                    _gravar_questoes(cursor, prova_id, questoes)
                     qtd = _espelhar_prova_nos_alunos(
                         cursor,
                         turma_id=turma_id,
@@ -5809,6 +6217,74 @@ def sala_professor():
                         (prova_id, pessoa["id"]),
                     )
                     flash("Prova excluída e retirada do calendário e dos cadastros dos alunos.", "success")
+                elif acao == "editar_questoes":
+                    prova_id = request.form.get("prova_id", type=int)
+                    cursor.execute(
+                        """
+                        SELECT id, turma_id, titulo, materia, data_aplicacao
+                        FROM provas_criadas
+                        WHERE id = %s AND funcionario_id = %s
+                        """,
+                        (prova_id, pessoa["id"]),
+                    )
+                    prova = cursor.fetchone()
+                    if not prova:
+                        raise ValueError("Prova não encontrada.")
+                    questoes = _questoes_do_form(request.form, request.files)
+                    if not questoes:
+                        raise ValueError("A prova precisa ter pelo menos uma pergunta.")
+                    lista_materias = _materias_do_form(request.form)
+                    if not lista_materias:
+                        raise ValueError("Escolha pelo menos uma matéria para a prova.")
+                    materia_nova = " / ".join(lista_materias)[:100]
+                    if len(lista_materias) == 1:
+                        for item in questoes:
+                            item["materia"] = item.get("materia") or lista_materias[0]
+                    cursor.execute(
+                        """
+                        SELECT f.midia_id, COALESCE(f.pagina_pdf, FALSE) AS pagina_pdf
+                        FROM provas_questoes_fotos f
+                        JOIN provas_criadas_questoes q ON q.id = f.questao_id
+                        WHERE q.prova_id = %s
+                        """,
+                        (prova_id,),
+                    )
+                    fotos_atuais = {row["midia_id"]: row["pagina_pdf"] for row in cursor.fetchall() or []}
+                    cursor.execute("DELETE FROM provas_criadas_questoes WHERE prova_id = %s", (prova_id,))
+                    _gravar_questoes(cursor, prova_id, questoes, fotos_permitidas=fotos_atuais)
+                    materia_antiga = prova.get("materia") or ""
+                    if materia_nova != materia_antiga:
+                        titulo = prova.get("titulo") or "Prova"
+                        evento_antigo = (f"{titulo} — {materia_antiga}" if materia_antiga else titulo)[:180]
+                        evento_novo = (f"{titulo} — {materia_nova}" if materia_nova else titulo)[:180]
+                        cursor.execute(
+                            "UPDATE provas_criadas SET materia = %s WHERE id = %s",
+                            (materia_nova or None, prova_id),
+                        )
+                        cursor.execute(
+                            "UPDATE prova_aluno_agenda SET materia = %s WHERE prova_criada_id = %s",
+                            (materia_nova or None, prova_id),
+                        )
+                        cursor.execute(
+                            "UPDATE provas_notas SET materia = %s WHERE prova_criada_id = %s",
+                            (materia_nova or None, prova_id),
+                        )
+                        cursor.execute(
+                            """
+                            UPDATE provas_turma SET materia = %s
+                            WHERE turma_id = %s AND data_prova = %s AND titulo = %s
+                            """,
+                            (materia_nova, prova.get("turma_id"), prova.get("data_aplicacao"), titulo),
+                        )
+                        cursor.execute(
+                            """
+                            UPDATE calendario_eventos SET titulo = %s
+                            WHERE tipo = 'prova' AND titulo = %s
+                              AND COALESCE(turma_id, 0) = COALESCE(%s, 0)
+                            """,
+                            (evento_novo, evento_antigo, prova.get("turma_id")),
+                        )
+                    flash(f"Prova atualizada: {len(questoes)} pergunta(s).", "success")
                 elif acao == "lancar_nota":
                     prova_id = request.form.get("prova_id", type=int)
                     cursor.execute(
@@ -6003,7 +6479,7 @@ def sala_professor():
                 prova_voltar = request.form.get("prova_id", type=int)
                 if acao_fim == "excluir_prova":
                     return redirect(url_for("sala_professor"))
-                if acao_fim in {"lancar_nota", "excluir_nota", "ajustar_data_prova_aluno"} and prova_voltar:
+                if acao_fim in {"lancar_nota", "excluir_nota", "ajustar_data_prova_aluno", "editar_questoes"} and prova_voltar:
                     return redirect(url_for("sala_professor_detalhe", prova_id=prova_voltar))
                 if acao_fim == "enviar_arquivo":
                     return redirect(url_for("sala_professor"))
@@ -6060,6 +6536,8 @@ def sala_professor():
             prova_erro = request.form.get("prova_id", type=int)
             if acao_erro in {"lancar_nota", "excluir_nota", "ajustar_data_prova_aluno"} and prova_erro:
                 return redirect(url_for("sala_professor_detalhe", prova_id=prova_erro))
+            if acao_erro == "editar_questoes" and prova_erro:
+                return redirect(url_for("sala_professor_editar", prova_id=prova_erro))
             if acao_erro == "criar_prova":
                 return redirect(url_for("sala_professor_nova"))
             if acao_erro == "enviar_arquivo":
@@ -6092,15 +6570,103 @@ def sala_professor_nova():
     if not conexao:
         flash("Sem conexão com o banco.", "danger")
         return redirect(url_for("dashboard"))
+    materias_por_turma = {}
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
             pessoa, turmas = _professor_da_sessao(cursor, funcionario_id)
             if not pessoa:
                 flash("Seu usuário não está ligado a um professor da equipe.", "danger")
                 return redirect(url_for("dashboard"))
+            for turma in turmas:
+                try:
+                    materias_por_turma[str(turma["id"])] = _materias_da_turma(cursor, turma["id"])
+                except Exception:
+                    conexao.rollback()
+                    materias_por_turma[str(turma["id"])] = []
+            catalogo = _catalogo_materias_prova(cursor, pessoa["id"])
     finally:
         conexao.close()
-    return render_template("sala_professor_nova.html", pessoa=pessoa, turmas=turmas)
+    return render_template(
+        "sala_professor_nova.html",
+        pessoa=pessoa,
+        turmas=turmas,
+        materias_por_turma=materias_por_turma,
+        catalogo_materias=catalogo,
+    )
+
+
+@app.route("/minhas-provas/<int:prova_id>/editar")
+def sala_professor_editar(prova_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    try:
+        _garantir_sala_professor()
+    except Exception as e:
+        flash(f"Não foi possível preparar a sala do professor: {e}", "danger")
+        return redirect(url_for("sala_professor"))
+    funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("sala_professor"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            pessoa, _turmas = _professor_da_sessao(cursor, funcionario_id)
+            if not pessoa:
+                flash("Seu usuário não está ligado a um professor da equipe.", "danger")
+                return redirect(url_for("dashboard"))
+            cursor.execute(
+                """
+                SELECT p.*, t.nome AS turma_nome
+                FROM provas_criadas p
+                LEFT JOIN turmas t ON t.id = p.turma_id
+                WHERE p.id = %s AND p.funcionario_id = %s
+                """,
+                (prova_id, pessoa["id"]),
+            )
+            prova = cursor.fetchone()
+            if not prova:
+                flash("Prova não encontrada.", "danger")
+                return redirect(url_for("sala_professor"))
+            prova = dict(prova)
+            questoes = _questoes_da_prova(cursor, prova_id)
+            materias = [m.strip() for m in (prova.get("materia") or "").split(" / ") if m.strip()]
+            for q in questoes:
+                if q.get("materia") and q["materia"] not in materias:
+                    materias.append(q["materia"])
+            try:
+                sugestoes = _materias_da_turma(cursor, prova.get("turma_id"))
+            except Exception:
+                conexao.rollback()
+                sugestoes = []
+            catalogo = _catalogo_materias_prova(cursor, pessoa["id"])
+    except Exception as e:
+        flash(str(e), "danger")
+        return redirect(url_for("sala_professor"))
+    finally:
+        conexao.close()
+    questoes_json = [
+        {
+            "enunciado": q.get("enunciado") or "",
+            "tipo": q.get("tipo") or "descritiva",
+            "alternativas": q.get("alternativas") or [],
+            "resposta": q.get("resposta") or "",
+            "materia": q.get("materia") or "",
+            "fotos": q.get("fotos") or [],
+            "linhas": q.get("linhas") or LINHAS_RESPOSTA_PADRAO,
+            "com_linhas": q.get("com_linhas") is not False,
+        }
+        for q in questoes
+    ]
+    return render_template(
+        "sala_professor_editar.html",
+        pessoa=pessoa,
+        prova=prova,
+        questoes_iniciais=questoes_json,
+        materias_iniciais=materias,
+        materias_por_turma={"fixa": sugestoes},
+        catalogo_materias=catalogo,
+    )
 
 
 @app.route("/minhas-provas/enviar-pdf")
@@ -6176,16 +6742,7 @@ def sala_professor_detalhe(prova_id):
                 conexao.commit()
             except Exception:
                 pass
-            cursor.execute(
-                """
-                SELECT enunciado, tipo, ordem
-                FROM provas_criadas_questoes
-                WHERE prova_id = %s
-                ORDER BY ordem, id
-                """,
-                (prova_id,),
-            )
-            prova["questoes"] = [dict(row) for row in (cursor.fetchall() or [])]
+            prova["questoes"] = _questoes_da_prova(cursor, prova_id)
             cursor.execute(
                 """
                 SELECT n.id, n.prova_criada_id AS prova_id,
@@ -6301,23 +6858,7 @@ def prova_pdf(prova_id):
                 prova = cursor.fetchone()
             if not prova:
                 raise ValueError("Prova não encontrada.")
-            cursor.execute(
-                """
-                SELECT enunciado, tipo, alternativas, resposta
-                FROM provas_criadas_questoes
-                WHERE prova_id = %s
-                ORDER BY ordem, id
-                """,
-                (prova_id,),
-            )
-            questoes = []
-            for item in cursor.fetchall() or []:
-                questoes.append({
-                    "enunciado": item.get("enunciado"),
-                    "tipo": item.get("tipo"),
-                    "alternativas": [parte for parte in (item.get("alternativas") or "").split("\n")],
-                    "resposta": item.get("resposta"),
-                })
+            questoes = _questoes_da_prova(cursor, prova_id, com_imagens=True)
             cursor.execute(
                 "SELECT nome_escola, logo_escola, mensagem_prova FROM configuracoes WHERE id = 1"
             )
@@ -6344,6 +6885,8 @@ def prova_pdf(prova_id):
         logo=logo,
         com_gabarito=request.args.get("gabarito") == "1",
         tarja=tarja,
+        data_aplicacao=prova.get("data_aplicacao"),
+        horario=prova.get("horario"),
     )
     nome = "gabarito" if request.args.get("gabarito") == "1" else "prova"
     return send_file(

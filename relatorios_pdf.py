@@ -39,7 +39,112 @@ class _ProvaPDF(FPDF):
         return
 
 
-def pdf_prova(escola, turma, titulo, materia, questoes, logo=None, com_gabarito=False, tarja=""):
+def _tamanho_imagem_questao(pdf, foto):
+    """(largura, altura) em mm. Página vinda de PDF usa a largura da folha; foto fica menor."""
+    dados = (foto or (None,))[0]
+    if not dados:
+        return None
+    pagina_pdf = len(foto) > 2 and bool(foto[2])
+    try:
+        from PIL import Image
+
+        with Image.open(BytesIO(dados)) as img:
+            larg_px, alt_px = img.size
+    except Exception:
+        return None
+    proporcao = alt_px / float(larg_px or 1)
+    if pagina_pdf:
+        largura_max = pdf.epw - 4
+        altura_max = pdf.page_break_trigger - pdf.t_margin - 4
+    else:
+        largura_max, altura_max = 120, 95
+    largura = min(largura_max, pdf.epw - 4)
+    altura = largura * proporcao
+    if altura > altura_max:
+        altura = altura_max
+        largura = altura / proporcao
+    return largura, altura
+
+
+def _imagem_questao(pdf, foto):
+    """Imagem da pergunta, proporcional e sem passar do fim da página."""
+    tamanho = _tamanho_imagem_questao(pdf, foto)
+    if not tamanho:
+        return
+    largura, altura = tamanho
+    dados, mime = foto[0], (foto[1] if len(foto) > 1 else "")
+    try:
+        if pdf.get_y() + altura + 1 > pdf.page_break_trigger:
+            pdf.add_page()
+        arquivo = BytesIO(dados)
+        arquivo.name = "foto.png" if "png" in (mime or "").lower() else "foto.jpg"
+        topo = pdf.get_y() + 1
+        pdf.image(arquivo, x=14, y=topo, w=largura, h=altura)
+        pdf.set_y(topo + altura + 2)
+    except Exception:
+        return
+
+
+def _altura_questao(pdf, questao, texto):
+    """Altura aproximada da pergunta inteira (imagens + enunciado + resposta)."""
+    altura = 0.0
+    for foto in questao.get("fotos") or []:
+        tamanho = _tamanho_imagem_questao(pdf, foto)
+        if tamanho:
+            altura += tamanho[1] + 3
+    pdf.set_font(pdf.fonte, "B", 11)
+    try:
+        altura += pdf.multi_cell(0, 6, texto, dry_run=True, output="HEIGHT")
+    except Exception:
+        altura += 6 * (1 + len(texto) // 90)
+    if (questao.get("tipo") or "") == "multipla":
+        altura += 6 * len([a for a in (questao.get("alternativas") or []) if str(a or "").strip()])
+    else:
+        altura += ALTURA_LINHA_RESPOSTA * max(1, int(questao.get("linhas") or 5)) + 3
+    return altura
+
+
+ALTURA_LINHA_RESPOSTA = 9
+
+
+def _espaco_resposta(pdf, linhas, com_linhas=True):
+    """Área da resposta discursiva: pauta (linhas para escrever reto) ou espaço em branco."""
+    linhas = max(1, int(linhas or 1))
+    inicio_x, fim_x = 16, pdf.w - pdf.r_margin
+    y = pdf.get_y() + 1
+    pdf.set_draw_color(150, 150, 150)
+    pdf.set_line_width(0.3)
+    for _ in range(linhas):
+        if y + ALTURA_LINHA_RESPOSTA > pdf.page_break_trigger:
+            pdf.add_page()
+            y = pdf.get_y()
+        y += ALTURA_LINHA_RESPOSTA
+        if com_linhas:
+            pdf.line(inicio_x, y, fim_x, y)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(0.2)
+    pdf.set_y(y + 2)
+
+
+def _data_hora_prova(data_aplicacao, horario):
+    """Texto "dd/mm/aaaa" e "HH:MM" para o cabeçalho da prova (vazio quando não informado)."""
+    data_txt = ""
+    if data_aplicacao:
+        if hasattr(data_aplicacao, "strftime"):
+            data_txt = data_aplicacao.strftime("%d/%m/%Y")
+        else:
+            partes = str(data_aplicacao)[:10].split("-")
+            data_txt = "/".join(reversed(partes)) if len(partes) == 3 else str(data_aplicacao)
+    hora_txt = ""
+    if horario:
+        hora_txt = horario.strftime("%H:%M") if hasattr(horario, "strftime") else str(horario)[:5]
+    return data_txt, hora_txt
+
+
+def pdf_prova(
+    escola, turma, titulo, materia, questoes, logo=None, com_gabarito=False, tarja="",
+    data_aplicacao=None, horario=None,
+):
     """Prova para o aluno preencher. O cabeçalho não tem borda."""
     pdf = _ProvaPDF()
     pdf.add_page()
@@ -65,7 +170,11 @@ def pdf_prova(escola, turma, titulo, materia, questoes, logo=None, com_gabarito=
     pdf.set_x(texto_x)
     pdf.cell(0, 6, "Matrícula: ________________________", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(texto_x)
-    pdf.cell(0, 6, "Data: ________________________________", new_x="LMARGIN", new_y="NEXT")
+    data_txt, hora_txt = _data_hora_prova(data_aplicacao, horario)
+    linha_data = f"Data: {data_txt}" if data_txt else "Data: ________________________________"
+    if hora_txt:
+        linha_data += f"    Horário: {hora_txt}"
+    pdf.cell(0, 6, linha_data, new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(texto_x)
     pdf.cell(0, 6, f"Turma: {turma or '—'}", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(texto_x)
@@ -88,27 +197,51 @@ def pdf_prova(escola, turma, titulo, materia, questoes, logo=None, com_gabarito=
         pdf.set_x(12)
         pdf.multi_cell(0, 6, " · ".join(parte for parte in [escola, materia] if parte), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
+    materias = {(q.get("materia") or "").strip() for q in (questoes or [])} - {""}
+    separar_materias = len(materias) > 1
+    materia_atual = None
     for indice, questao in enumerate(questoes or [], start=1):
+        materia_q = (questao.get("materia") or "").strip()
+        novo_bloco = separar_materias and materia_q and materia_q != materia_atual
+        texto_q = f"{indice}. {questao.get('enunciado') or ''}"
+        necessario = _altura_questao(pdf, questao, texto_q) + (12 if novo_bloco else 0)
+        cabe_numa_pagina = necessario <= pdf.page_break_trigger - pdf.t_margin
+        if cabe_numa_pagina and pdf.get_y() + necessario > pdf.page_break_trigger:
+            pdf.add_page()
+        elif novo_bloco and pdf.get_y() > pdf.page_break_trigger - 40:
+            pdf.add_page()
+        if novo_bloco:
+            materia_atual = materia_q
+            pdf.ln(2)
+            pdf.set_x(12)
+            pdf.set_font(pdf.fonte, "B", 12)
+            pdf.set_fill_color(235, 241, 250)
+            pdf.cell(0, 8, materia_q, fill=True, new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(2)
+        for foto in questao.get("fotos") or []:
+            _imagem_questao(pdf, foto)
         pdf.set_x(12)
         pdf.set_font(pdf.fonte, "B", 11)
-        pdf.multi_cell(0, 6, f"{indice}. {questao.get('enunciado') or ''}", new_x="LMARGIN", new_y="NEXT")
+        pdf.multi_cell(0, 6, texto_q, new_x="LMARGIN", new_y="NEXT")
         pdf.set_font(pdf.fonte, "", 11)
         if (questao.get("tipo") or "") == "multipla":
-            for letra, texto in zip("ABCD", questao.get("alternativas") or []):
+            for letra, texto in zip("ABCDE", questao.get("alternativas") or []):
                 if not str(texto or "").strip():
                     continue
                 pdf.set_x(16)
                 pdf.multi_cell(0, 6, f"{letra}) {texto}", new_x="LMARGIN", new_y="NEXT")
         else:
-            for _ in range(4):
-                pdf.set_x(16)
-                pdf.cell(0, 7, "______________________________________________", new_x="LMARGIN", new_y="NEXT")
+            _espaco_resposta(
+                pdf,
+                int(questao.get("linhas") or 5),
+                questao.get("com_linhas") is not False,
+            )
         if com_gabarito and (questao.get("resposta") or "").strip():
             pdf.set_x(16)
             pdf.set_font(pdf.fonte, "B", 10)
             pdf.multi_cell(0, 6, f"Resposta: {questao.get('resposta')}", new_x="LMARGIN", new_y="NEXT")
             pdf.set_font(pdf.fonte, "", 11)
-        pdf.ln(2)
+        pdf.ln(5)
     return _saida(pdf)
 
 

@@ -53,6 +53,7 @@
         <div class="topo-acoes">
             <a class="btn btn-primary" href="{{ url_for('prova_pdf', prova_id=prova.id) }}" target="_blank" rel="noopener">PDF do sistema</a>
             <a class="btn btn-primary" href="{{ url_for('prova_pdf', prova_id=prova.id, gabarito=1) }}" target="_blank" rel="noopener">Gabarito</a>
+            <a class="btn btn-secondary" href="{{ url_for('sala_professor_editar', prova_id=prova.id) }}">Editar / adicionar perguntas</a>
             <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir esta prova?');">
                 <input type="hidden" name="acao" value="excluir_prova">
                 <input type="hidden" name="prova_id" value="{{ prova.id }}">
@@ -65,11 +66,22 @@
             <h3 style="margin-top:0;">Questões ({{ prova.questoes|length }})</h3>
             <ol style="margin:0;padding-left:18px;">
                 {% for q in prova.questoes %}
-                <li style="margin-bottom:10px;">
-                    <strong>{{ q.enunciado }}</strong>
+                <li style="margin-bottom:12px;">
+                    <strong style="white-space:pre-line;">{{ q.enunciado }}</strong>
                     <div style="color:#64748b;font-size:.85rem;">
-                        {% if q.tipo == 'multipla' %}Múltipla escolha{% else %}Descritiva{% endif %}
+                        {% if q.tipo == 'multipla' %}Múltipla escolha{% else %}Discursiva · {{ q.linhas }} linha(s) {{ 'com pauta' if q.com_linhas else 'sem linhas' }}{% endif %}
+                        {% if q.materia %} · {{ q.materia }}{% endif %}
+                        {% if q.fotos %} · {{ q.fotos|length }} imagem(ns){% endif %}
                     </div>
+                    {% if q.fotos %}
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
+                        {% for midia_id in q.fotos %}
+                        <a href="{{ url_for('servir_midia', midia_id=midia_id) }}" target="_blank" rel="noopener">
+                            <img src="{{ url_for('servir_midia', midia_id=midia_id) }}" alt="Foto da pergunta" style="width:96px;height:76px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1;">
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
                 </li>
                 {% endfor %}
             </ol>

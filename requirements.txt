@@ -3,6 +3,9 @@ gunicorn
 psycopg2-binary
 python-dotenv
 fpdf2>=2.7.0
+Pillow
+pypdfium2
+pillow-heif
 Authlib
 requests
 Werkzeug
