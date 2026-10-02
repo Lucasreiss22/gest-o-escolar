@@ -6745,8 +6745,9 @@ def sala_professor_detalhe(prova_id):
             prova["questoes"] = _questoes_da_prova(cursor, prova_id)
             cursor.execute(
                 """
-                SELECT n.id, n.prova_criada_id AS prova_id,
+                SELECT n.id, n.prova_criada_id AS prova_id, n.aluno_id,
                        TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM n.nota::text)) AS nota,
+                       n.nota AS nota_valor,
                        n.arquivo_midia_id,
                        a.nome_completo, a.matricula, a.cpf
                 FROM provas_notas n
@@ -6795,6 +6796,29 @@ def sala_professor_detalhe(prova_id):
                     (prova["turma_id"],),
                 )
                 alunos_turma = [dict(row) for row in (cursor.fetchall() or [])]
+            notas_por_aluno = {item["aluno_id"]: item for item in prova["notas"]}
+            quadro = []
+            for aluno in alunos_turma:
+                nota = notas_por_aluno.get(aluno["id"])
+                aluno["nota"] = nota["nota"] if nota else None
+                quadro.append({**aluno, "aluno_id": aluno["id"], "nota_item": nota, "fora_da_turma": False})
+            ids_turma = {aluno["id"] for aluno in alunos_turma}
+            for item in prova["notas"]:
+                if item["aluno_id"] not in ids_turma:
+                    quadro.append({
+                        "aluno_id": item["aluno_id"],
+                        "nome_completo": item["nome_completo"],
+                        "matricula": item["matricula"],
+                        "cpf": item["cpf"],
+                        "nota_item": item,
+                        "fora_da_turma": True,
+                    })
+            valores = [float(item["nota_valor"]) for item in prova["notas"] if item.get("nota_valor") is not None]
+            prova["quadro_notas"] = quadro
+            prova["qtd_sem_nota"] = sum(1 for linha in quadro if not linha["nota_item"])
+            prova["media_turma"] = (
+                f"{sum(valores) / len(valores):.2f}".rstrip("0").rstrip(".").replace(".", ",") if valores else None
+            )
     except Exception as e:
         try:
             conexao.rollback()

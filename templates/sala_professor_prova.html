@@ -24,6 +24,18 @@
         .meta { color: #64748b; margin: 0 0 16px; }
         .topo-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
         .chip { display: inline-block; background: #f1f5f9; border-radius: 999px; padding: 4px 10px; font-size: .8rem; font-weight: 700; color: #334155; margin-right: 6px; }
+        .chip-pendente { background: #fee2e2; color: #991b1b; text-decoration: none; }
+        .resumo-notas { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .resumo-item { background: #f1f5f9; border-radius: 10px; padding: 8px 12px; font-size: .85rem; color: #334155; }
+        .resumo-item strong { font-size: 1.05rem; margin-right: 2px; }
+        .resumo-item.ok { background: #dcfce7; color: #166534; }
+        .resumo-item.pendente { background: #fee2e2; color: #991b1b; }
+        .abas-notas { display: flex; gap: 4px; border-bottom: 2px solid #e2e8f0; margin-bottom: 4px; }
+        .aba-nota { border: none; background: none; padding: 8px 14px; font-weight: 700; color: #64748b; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; font-size: .88rem; }
+        .aba-nota.ativa { color: #1d4ed8; border-bottom-color: #3498db; }
+        .linha-sem-nota td { background: #fff7f7; }
+        .tag-sem-nota { display: inline-block; background: #fee2e2; color: #b91c1c; border-radius: 999px; padding: 2px 10px; font-size: .78rem; font-weight: 700; }
+        tr[hidden] { display: none; }
     </style>
 </head>
 <body>
@@ -44,6 +56,7 @@
         <p style="margin:0 0 16px;">
             <span class="chip">{{ prova.qtd_questoes or 0 }} questão(ões)</span>
             <span class="chip">{{ (prova.notas or [])|length }} nota(s)</span>
+            {% if prova.qtd_sem_nota %}<a class="chip chip-pendente" href="#notas-turma">{{ prova.qtd_sem_nota }} aluno(s) sem nota</a>{% endif %}
         </p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -131,7 +144,7 @@
                     <select name="aluno_id" id="sel-aluno-turma">
                         <option value="">— Selecione o aluno —</option>
                         {% for a in alunos_turma %}
-                        <option value="{{ a.id }}">{{ a.nome_completo }}{% if a.matricula %} · Mat. {{ a.matricula }}{% endif %}</option>
+                        <option value="{{ a.id }}">{{ a.nome_completo }}{% if a.matricula %} · Mat. {{ a.matricula }}{% endif %} — {% if a.nota is not none %}nota {{ a.nota }}{% else %}sem nota{% endif %}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -188,37 +201,105 @@
             })();
             </script>
 
-            {% if prova.notas %}
-            <table style="margin-top:16px;">
+        </div>
+
+        {% set quadro = prova.quadro_notas or [] %}
+        {% if quadro %}
+        {% set com_nota = quadro|selectattr('nota_item')|list|length %}
+        <div class="card-box" id="notas-turma">
+            <h3 style="margin-top:0;">Notas da turma {{ prova.turma_nome or '' }}</h3>
+            <div class="resumo-notas">
+                <span class="resumo-item"><strong>{{ quadro|length }}</strong> aluno(s)</span>
+                <span class="resumo-item ok"><strong>{{ com_nota }}</strong> com nota</span>
+                <span class="resumo-item pendente"><strong>{{ prova.qtd_sem_nota or 0 }}</strong> sem nota</span>
+                {% if prova.media_turma %}<span class="resumo-item"><strong>{{ prova.media_turma }}</strong> média da turma</span>{% endif %}
+            </div>
+            <div class="abas-notas" role="tablist">
+                <button type="button" class="aba-nota" data-filtro="todos" role="tab">Todos ({{ quadro|length }})</button>
+                <button type="button" class="aba-nota" data-filtro="com" role="tab">Com nota ({{ com_nota }})</button>
+                <button type="button" class="aba-nota" data-filtro="sem" role="tab">Sem nota ({{ prova.qtd_sem_nota or 0 }})</button>
+            </div>
+            <table class="tabela-notas">
                 <thead><tr><th>Aluno</th><th>Matrícula</th><th>CPF</th><th>Nota</th><th>PDF</th><th></th></tr></thead>
                 <tbody>
-                {% for item in prova.notas %}
-                <tr>
-                    <td>{{ item.nome_completo }}</td>
-                    <td>{{ item.matricula or '—' }}</td>
-                    <td>{{ item.cpf or '—' }}</td>
-                    <td><strong>{{ item.nota }}</strong></td>
+                {% for linha in quadro %}
+                {% set item = linha.nota_item %}
+                <tr data-situacao="{{ 'com' if item else 'sem' }}" class="{{ '' if item else 'linha-sem-nota' }}">
                     <td>
-                        {% if item.arquivo_midia_id %}
+                        {{ linha.nome_completo }}
+                        {% if linha.fora_da_turma %}<div style="color:#64748b;font-size:.78rem;">Não está mais na turma</div>{% endif %}
+                    </td>
+                    <td>{{ linha.matricula or '—' }}</td>
+                    <td>{{ linha.cpf or '—' }}</td>
+                    <td>
+                        {% if item %}<strong>{{ item.nota }}</strong>{% else %}<span class="tag-sem-nota">Não lançada</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if item and item.arquivo_midia_id %}
                         <a class="btn btn-primary" href="{{ url_for('servir_midia', midia_id=item.arquivo_midia_id) }}" target="_blank" rel="noopener">Abrir</a>
                         {% else %}
                         <span style="color:#94a3b8;">Sem anexo</span>
                         {% endif %}
                     </td>
-                    <td>
-                        <form method="POST" style="display:inline;">
+                    <td style="white-space:nowrap;">
+                        {% if item %}
+                        <form method="POST" style="display:inline;" onsubmit='return confirm({{ ("Remover a nota de " ~ linha.nome_completo ~ "?")|tojson }});'>
                             <input type="hidden" name="acao" value="excluir_nota">
                             <input type="hidden" name="prova_id" value="{{ prova.id }}">
                             <input type="hidden" name="nota_id" value="{{ item.id }}">
                             <button class="btn btn-danger" type="submit">Remover</button>
                         </form>
+                        {% elif not linha.fora_da_turma %}
+                        <button type="button" class="btn btn-primary btn-lancar" data-aluno="{{ linha.aluno_id }}">Lançar nota</button>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
+                <tr class="linha-vazia" hidden><td colspan="6" style="color:#64748b;text-align:center;padding:16px;"></td></tr>
                 </tbody>
             </table>
-            {% endif %}
         </div>
+        <script>
+        (function () {
+            var box = document.getElementById('notas-turma');
+            if (!box) return;
+            var abas = box.querySelectorAll('.aba-nota');
+            var linhas = box.querySelectorAll('tr[data-situacao]');
+            var vazia = box.querySelector('.linha-vazia');
+            var MENSAGENS = { com: 'Nenhuma nota lançada ainda.', sem: 'Todos os alunos já têm nota nesta prova.', todos: 'Nenhum aluno na turma.' };
+            function filtrar(filtro) {
+                var visiveis = 0;
+                linhas.forEach(function (tr) {
+                    var mostra = filtro === 'todos' || tr.getAttribute('data-situacao') === filtro;
+                    tr.hidden = !mostra;
+                    if (mostra) visiveis += 1;
+                });
+                abas.forEach(function (aba) {
+                    var ativa = aba.getAttribute('data-filtro') === filtro;
+                    aba.classList.toggle('ativa', ativa);
+                    aba.setAttribute('aria-selected', ativa ? 'true' : 'false');
+                });
+                vazia.hidden = visiveis > 0;
+                vazia.firstElementChild.textContent = MENSAGENS[filtro];
+            }
+            abas.forEach(function (aba) {
+                aba.addEventListener('click', function () { filtrar(aba.getAttribute('data-filtro')); });
+            });
+            filtrar('todos');
+            box.addEventListener('click', function (ev) {
+                var botao = ev.target.closest('.btn-lancar');
+                if (!botao) return;
+                var sel = document.getElementById('sel-aluno-turma');
+                var nota = document.querySelector('form input[name="nota"]');
+                if (sel) sel.value = botao.getAttribute('data-aluno');
+                if (nota) {
+                    nota.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    nota.focus();
+                }
+            });
+        })();
+        </script>
+        {% endif %}
 
         {% if prova.agendas %}
         <div class="card-box">
