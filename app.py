@@ -114,6 +114,7 @@ from relatorios_pdf import (
     pdf_regime_apuracao,
     pdf_regime_detalhado,
     pdf_prova,
+    pdf_notas_prova,
     pdf_lista_alunos,
     pdf_lista_equipe,
     pdf_turmas,
@@ -5260,11 +5261,18 @@ def _espelhar_prova_nos_alunos(
     midia_id=None,
     origem="sistema",
     professor_id=None,
+    aluno_ids=None,
 ):
-    """Agenda a prova no calendário de cada aluno da turma e cria stub no cadastro (provas_notas)."""
+    """Agenda a prova no calendário de cada aluno da turma e cria stub no cadastro (provas_notas).
+
+    `aluno_ids` restringe a quem ainda não foi agendado (aluno que entrou na turma depois).
+    """
     if not turma_id or not data_aplicacao:
         return 0
     alunos = _ids_alunos_da_turma(cursor, turma_id)
+    if aluno_ids is not None:
+        permitidos = set(aluno_ids)
+        alunos = [aluno_id for aluno_id in alunos if aluno_id in permitidos]
     if not alunos:
         return 0
     data_txt = data_aplicacao if isinstance(data_aplicacao, str) else data_aplicacao.isoformat()[:10]
@@ -6694,6 +6702,92 @@ def sala_professor_enviar_pdf():
     return render_template("sala_professor_enviar.html", pessoa=pessoa, turmas=turmas)
 
 
+def _nota_br(valor):
+    if valor is None:
+        return None
+    return f"{float(valor):.2f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def _quadro_notas_prova(cursor, prova):
+    """Todos os alunos da turma com nota e data desta prova, inclusive quem ainda está sem nota."""
+    prova_id = prova["id"]
+    cursor.execute(
+        """
+        SELECT n.id, n.prova_criada_id AS prova_id, n.aluno_id, n.nota AS nota_valor,
+               n.arquivo_midia_id, a.nome_completo, a.matricula, a.cpf
+        FROM provas_notas n
+        JOIN alunos a ON a.id = n.aluno_id
+        WHERE n.prova_criada_id = %s AND n.nota IS NOT NULL
+        ORDER BY a.nome_completo
+        """,
+        (prova_id,),
+    )
+    notas = [dict(row) for row in (cursor.fetchall() or [])]
+    for item in notas:
+        item["nota"] = _nota_br(item["nota_valor"])
+    cursor.execute(
+        """
+        SELECT ag.id, ag.prova_criada_id, ag.aluno_id, ag.data_aplicacao, ag.horario,
+               ag.data_original, ag.justificativa, a.nome_completo, a.matricula
+        FROM prova_aluno_agenda ag
+        JOIN alunos a ON a.id = ag.aluno_id
+        WHERE ag.prova_criada_id = %s
+        ORDER BY a.nome_completo
+        """,
+        (prova_id,),
+    )
+    agendas = [dict(row) for row in (cursor.fetchall() or [])]
+    alunos_turma = []
+    if prova.get("turma_id"):
+        cursor.execute(
+            """
+            SELECT a.id, a.nome_completo, a.matricula, a.cpf
+            FROM turma_alunos ta
+            JOIN alunos a ON a.id = ta.aluno_id
+            WHERE ta.turma_id = %s
+            ORDER BY a.nome_completo
+            """,
+            (prova["turma_id"],),
+        )
+        alunos_turma = [dict(row) for row in (cursor.fetchall() or [])]
+    notas_por_aluno = {item["aluno_id"]: item for item in notas}
+    agenda_por_aluno = {item["aluno_id"]: item for item in agendas}
+    quadro = []
+    for aluno in alunos_turma:
+        nota = notas_por_aluno.get(aluno["id"])
+        aluno["nota"] = nota["nota"] if nota else None
+        quadro.append({
+            **aluno,
+            "aluno_id": aluno["id"],
+            "nota_item": nota,
+            "agenda": agenda_por_aluno.get(aluno["id"]),
+            "fora_da_turma": False,
+        })
+    ids_turma = {aluno["id"] for aluno in alunos_turma}
+    for item in notas:
+        if item["aluno_id"] not in ids_turma:
+            quadro.append({
+                "aluno_id": item["aluno_id"],
+                "nome_completo": item["nome_completo"],
+                "matricula": item["matricula"],
+                "cpf": item["cpf"],
+                "nota_item": item,
+                "agenda": agenda_por_aluno.get(item["aluno_id"]),
+                "fora_da_turma": True,
+            })
+    valores = [float(item["nota_valor"]) for item in notas]
+    return {
+        "notas": notas,
+        "agendas": agendas,
+        "alunos_turma": alunos_turma,
+        "quadro": quadro,
+        "qtd_sem_nota": sum(1 for linha in quadro if not linha["nota_item"]),
+        "media": _nota_br(sum(valores) / len(valores)) if valores else None,
+        "maior": _nota_br(max(valores)) if valores else None,
+        "menor": _nota_br(min(valores)) if valores else None,
+    }
+
+
 @app.route("/minhas-provas/<int:prova_id>", methods=["GET", "POST"])
 def sala_professor_detalhe(prova_id):
     if "usuario_id" not in session:
@@ -6742,34 +6836,46 @@ def sala_professor_detalhe(prova_id):
                 conexao.commit()
             except Exception:
                 pass
+            if prova.get("turma_id") and prova.get("data_aplicacao"):
+                cursor.execute("SAVEPOINT agenda_alunos_novos")
+                try:
+                    cursor.execute(
+                        """
+                        SELECT ta.aluno_id
+                        FROM turma_alunos ta
+                        WHERE ta.turma_id = %s
+                          AND NOT EXISTS (
+                              SELECT 1 FROM prova_aluno_agenda ag
+                              WHERE ag.prova_criada_id = %s AND ag.aluno_id = ta.aluno_id
+                          )
+                        """,
+                        (prova["turma_id"], prova_id),
+                    )
+                    sem_agenda = [row["aluno_id"] for row in (cursor.fetchall() or [])]
+                    if sem_agenda:
+                        _espelhar_prova_nos_alunos(
+                            cursor,
+                            turma_id=prova["turma_id"],
+                            titulo=prova.get("titulo"),
+                            materia=prova.get("materia"),
+                            data_aplicacao=prova["data_aplicacao"],
+                            horario=prova.get("horario"),
+                            prova_criada_id=prova_id,
+                            professor_id=pessoa["id"],
+                            aluno_ids=sem_agenda,
+                        )
+                    cursor.execute("RELEASE SAVEPOINT agenda_alunos_novos")
+                    conexao.commit()
+                except Exception:
+                    cursor.execute("ROLLBACK TO SAVEPOINT agenda_alunos_novos")
             prova["questoes"] = _questoes_da_prova(cursor, prova_id)
-            cursor.execute(
-                """
-                SELECT n.id, n.prova_criada_id AS prova_id, n.aluno_id,
-                       TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM n.nota::text)) AS nota,
-                       n.nota AS nota_valor,
-                       n.arquivo_midia_id,
-                       a.nome_completo, a.matricula, a.cpf
-                FROM provas_notas n
-                JOIN alunos a ON a.id = n.aluno_id
-                WHERE n.prova_criada_id = %s AND n.nota IS NOT NULL
-                ORDER BY a.nome_completo
-                """,
-                (prova_id,),
-            )
-            prova["notas"] = [dict(row) for row in (cursor.fetchall() or [])]
-            cursor.execute(
-                """
-                SELECT ag.id, ag.prova_criada_id, ag.aluno_id, ag.data_aplicacao, ag.horario,
-                       ag.data_original, ag.justificativa, a.nome_completo, a.matricula
-                FROM prova_aluno_agenda ag
-                JOIN alunos a ON a.id = ag.aluno_id
-                WHERE ag.prova_criada_id = %s
-                ORDER BY a.nome_completo
-                """,
-                (prova_id,),
-            )
-            prova["agendas"] = [dict(row) for row in (cursor.fetchall() or [])]
+            quadro = _quadro_notas_prova(cursor, prova)
+            prova["notas"] = quadro["notas"]
+            prova["agendas"] = quadro["agendas"]
+            prova["quadro_notas"] = quadro["quadro"]
+            prova["qtd_sem_nota"] = quadro["qtd_sem_nota"]
+            prova["media_turma"] = quadro["media"]
+            alunos_turma = quadro["alunos_turma"]
             cursor.execute(
                 """
                 SELECT p.id, p.titulo, p.materia, p.data_aplicacao, p.horario, p.turma_id,
@@ -6783,42 +6889,6 @@ def sala_professor_detalhe(prova_id):
                 (pessoa["id"],),
             )
             outras_provas = [dict(row) for row in (cursor.fetchall() or [])]
-            alunos_turma = []
-            if prova.get("turma_id"):
-                cursor.execute(
-                    """
-                    SELECT a.id, a.nome_completo, a.matricula, a.cpf
-                    FROM turma_alunos ta
-                    JOIN alunos a ON a.id = ta.aluno_id
-                    WHERE ta.turma_id = %s
-                    ORDER BY a.nome_completo
-                    """,
-                    (prova["turma_id"],),
-                )
-                alunos_turma = [dict(row) for row in (cursor.fetchall() or [])]
-            notas_por_aluno = {item["aluno_id"]: item for item in prova["notas"]}
-            quadro = []
-            for aluno in alunos_turma:
-                nota = notas_por_aluno.get(aluno["id"])
-                aluno["nota"] = nota["nota"] if nota else None
-                quadro.append({**aluno, "aluno_id": aluno["id"], "nota_item": nota, "fora_da_turma": False})
-            ids_turma = {aluno["id"] for aluno in alunos_turma}
-            for item in prova["notas"]:
-                if item["aluno_id"] not in ids_turma:
-                    quadro.append({
-                        "aluno_id": item["aluno_id"],
-                        "nome_completo": item["nome_completo"],
-                        "matricula": item["matricula"],
-                        "cpf": item["cpf"],
-                        "nota_item": item,
-                        "fora_da_turma": True,
-                    })
-            valores = [float(item["nota_valor"]) for item in prova["notas"] if item.get("nota_valor") is not None]
-            prova["quadro_notas"] = quadro
-            prova["qtd_sem_nota"] = sum(1 for linha in quadro if not linha["nota_item"])
-            prova["media_turma"] = (
-                f"{sum(valores) / len(valores):.2f}".rstrip("0").rstrip(".").replace(".", ",") if valores else None
-            )
     except Exception as e:
         try:
             conexao.rollback()
@@ -6918,6 +6988,60 @@ def prova_pdf(prova_id):
         mimetype="application/pdf",
         as_attachment=False,
         download_name=f"{nome}_{prova_id}.pdf",
+    )
+
+
+@app.route("/minhas-provas/<int:prova_id>/notas.pdf")
+def prova_notas_pdf(prova_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    filtro = request.args.get("filtro") if request.args.get("filtro") in {"com", "sem"} else "todos"
+    funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("sala_professor"))
+    sql_prova = """
+        SELECT p.*, t.nome AS turma_nome, f.nome_completo AS professor_nome
+        FROM provas_criadas p
+        LEFT JOIN turmas t ON t.id = p.turma_id
+        LEFT JOIN funcionarios f ON f.id = p.funcionario_id
+        WHERE p.id = %s
+    """
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            pessoa, _turmas = _professor_da_sessao(cursor, funcionario_id)
+            prova = None
+            if pessoa:
+                cursor.execute(sql_prova + " AND p.funcionario_id = %s", (prova_id, pessoa["id"]))
+                prova = cursor.fetchone()
+            if not prova and pode_modulo(session.get("usuario_papel"), "pedagogico"):
+                cursor.execute(sql_prova, (prova_id,))
+                prova = cursor.fetchone()
+            if not prova:
+                raise ValueError("Prova não encontrada.")
+            prova = dict(prova)
+            quadro = _quadro_notas_prova(cursor, prova)
+            cursor.execute("SELECT nome_escola, logo_escola FROM configuracoes WHERE id = 1")
+            cfg = cursor.fetchone() or {}
+            logo = None
+            caminho = cfg.get("logo_escola") or ""
+            if caminho.startswith("midia/"):
+                cursor.execute("SELECT mime, dados FROM midia WHERE id = %s", (int(caminho.split("/")[-1]),))
+                mid = cursor.fetchone()
+                if mid and mid.get("dados"):
+                    logo = (bytes(mid["dados"]), mid.get("mime"))
+    except Exception as e:
+        flash(str(e), "danger")
+        return redirect(url_for("sala_professor"))
+    finally:
+        conexao.close()
+    buffer = pdf_notas_prova(cfg.get("nome_escola") or "Gestão Escolar", prova, quadro, filtro=filtro, logo=logo)
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name=f"notas_prova_{prova_id}.pdf",
     )
 
 

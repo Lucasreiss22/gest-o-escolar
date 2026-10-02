@@ -1477,6 +1477,104 @@ def pdf_pasta_professor(escola, professor, arquivos, provas):
     return _saida(pdf)
 
 
+def pdf_notas_prova(escola, prova, quadro, filtro="todos", logo=None):
+    """Notas de todos os alunos da turma numa prova, com turma, professor e quem está sem nota."""
+    from datetime import datetime
+
+    pdf = RelatorioPDF("Notas da prova")
+    pdf.add_page()
+    if logo and logo[0]:
+        arquivo = BytesIO(logo[0])
+        arquivo.name = "logo.png" if "png" in (logo[1] or "").lower() else "logo.jpg"
+        try:
+            pdf.image(arquivo, x=pdf.w - pdf.r_margin - 18, y=pdf.t_margin, w=18)
+        except Exception:
+            pass
+    pdf.paragrafo(escola or "Gestão Escolar")
+
+    data_txt, hora_txt = _data_hora_prova(prova.get("data_aplicacao"), prova.get("horario"))
+    pdf.secao("Prova")
+    pdf.linha("Prova", prova.get("titulo") or "—")
+    pdf.linha("Matéria(s)", prova.get("materia") or "—")
+    pdf.linha("Turma", prova.get("turma_nome") or "—")
+    pdf.linha("Professor(a) que aplicou", prova.get("professor_nome") or "—")
+    pdf.linha("Data de aplicação", f"{data_txt or '—'}{f' às {hora_txt}' if hora_txt else ''}")
+
+    linhas_quadro = quadro.get("quadro") or []
+    com_nota = sum(1 for linha in linhas_quadro if linha.get("nota_item"))
+    pdf.secao("Resumo")
+    pdf.linha("Alunos", len(linhas_quadro))
+    pdf.linha("Com nota lançada", com_nota)
+    pdf.linha("Sem nota lançada", quadro.get("qtd_sem_nota") or 0, negrito=bool(quadro.get("qtd_sem_nota")))
+    if quadro.get("media"):
+        pdf.linha("Média da turma", quadro["media"])
+        pdf.linha("Maior nota", quadro.get("maior") or "—")
+        pdf.linha("Menor nota", quadro.get("menor") or "—")
+
+    if filtro == "com":
+        selecionadas = [linha for linha in linhas_quadro if linha.get("nota_item")]
+        pdf.secao("Alunos com nota")
+    elif filtro == "sem":
+        selecionadas = [linha for linha in linhas_quadro if not linha.get("nota_item")]
+        pdf.secao("Alunos sem nota")
+    else:
+        selecionadas = linhas_quadro
+        pdf.secao("Notas de todos os alunos")
+
+    tabela, alteradas = [], []
+    for numero, linha in enumerate(selecionadas, start=1):
+        item = linha.get("nota_item")
+        agenda = linha.get("agenda") or {}
+        data_aluno = _data_br(agenda.get("data_aplicacao")) if agenda.get("data_aplicacao") else (data_txt or "—")
+        if agenda.get("data_original") and agenda.get("data_aplicacao") and str(agenda["data_original"]) != str(agenda["data_aplicacao"]):
+            data_aluno += " *"
+            alteradas.append(
+                f"{linha.get('nome_completo')}: {_data_br(agenda['data_original'])} para {_data_br(agenda['data_aplicacao'])}"
+                + (f" — {agenda['justificativa']}" if agenda.get("justificativa") else "")
+            )
+        if linha.get("fora_da_turma"):
+            situacao = "Saiu da turma"
+        else:
+            situacao = "Lançada" if item else "NÃO LANÇADA"
+        tabela.append([
+            numero,
+            linha.get("nome_completo") or "—",
+            linha.get("matricula") or "—",
+            data_aluno,
+            item.get("nota") if item else "—",
+            situacao,
+        ])
+    if tabela:
+        pdf.tabela(["Nº", "Aluno", "Matrícula", "Data da prova", "Nota", "Situação"], tabela, [10, 72, 28, 26, 18, 36])
+    else:
+        pdf.paragrafo({
+            "com": "Nenhuma nota lançada ainda.",
+            "sem": "Todos os alunos já têm nota nesta prova.",
+        }.get(filtro, "Nenhum aluno nesta turma."))
+    if alteradas:
+        pdf.paragrafo("* Data alterada só para o aluno:", tamanho=8)
+        for texto in alteradas:
+            pdf.paragrafo(texto, tamanho=8)
+
+    if pdf.get_y() > 245:
+        pdf.add_page()
+    pdf.ln(14)
+    pdf.set_font(pdf.fonte, "", 10)
+    pdf.set_text_color(40, 40, 40)
+    pdf.cell(0, 5, "_____________________________________________", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 5, f"Professor(a) {prova.get('professor_nome') or ''}".strip(), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    pdf.set_font(pdf.fonte, "", 8)
+    pdf.set_text_color(120, 120, 120)
+    try:
+        from zoneinfo import ZoneInfo
+        agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    except Exception:
+        agora = datetime.now()
+    pdf.cell(0, 5, f"Gerado em {agora.strftime('%d/%m/%Y %H:%M')}", align="C", new_x="LMARGIN", new_y="NEXT")
+    return _saida(pdf)
+
+
 def pdf_folha_pagamento(escola, mes_label, regime, itens, totais):
     pdf = RelatorioPDF("Folha de pagamento")
     pdf.add_page()

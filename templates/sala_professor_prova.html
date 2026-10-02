@@ -36,6 +36,16 @@
         .linha-sem-nota td { background: #fff7f7; }
         .tag-sem-nota { display: inline-block; background: #fee2e2; color: #b91c1c; border-radius: 999px; padding: 2px 10px; font-size: .78rem; font-weight: 700; }
         tr[hidden] { display: none; }
+        .quadro-topo { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+        .barra-notas { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap; border-bottom: 2px solid #e2e8f0; margin-bottom: 4px; }
+        .barra-notas .abas-notas { border-bottom: none; margin-bottom: -2px; }
+        .busca-notas { min-width: 260px; flex: 0 1 320px; margin-bottom: 6px; }
+        .dica-notas { color: #64748b; font-size: .8rem; margin: 6px 0 4px; }
+        .acoes-linha { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
+        .acoes-linha .btn { white-space: nowrap; }
+        .data-alterada { color: #b45309; font-size: .76rem; white-space: normal; max-width: 220px; }
+        .linha-form-data td { background: #f8fafc; }
+        .form-data-aluno { padding: 6px 0; }
     </style>
 </head>
 <body>
@@ -66,6 +76,7 @@
         <div class="topo-acoes">
             <a class="btn btn-primary" href="{{ url_for('prova_pdf', prova_id=prova.id) }}" target="_blank" rel="noopener">PDF do sistema</a>
             <a class="btn btn-primary" href="{{ url_for('prova_pdf', prova_id=prova.id, gabarito=1) }}" target="_blank" rel="noopener">Gabarito</a>
+            <a class="btn btn-primary" href="{{ url_for('prova_notas_pdf', prova_id=prova.id) }}" target="_blank" rel="noopener">PDF das notas</a>
             <a class="btn btn-secondary" href="{{ url_for('sala_professor_editar', prova_id=prova.id) }}">Editar / adicionar perguntas</a>
             <form method="POST" style="display:inline;" onsubmit="return confirm('Excluir esta prova?');">
                 <input type="hidden" name="acao" value="excluir_prova">
@@ -207,30 +218,49 @@
         {% if quadro %}
         {% set com_nota = quadro|selectattr('nota_item')|list|length %}
         <div class="card-box" id="notas-turma">
-            <h3 style="margin-top:0;">Notas da turma {{ prova.turma_nome or '' }}</h3>
+            <div class="quadro-topo">
+                <h3 style="margin:0;">Notas da turma {{ prova.turma_nome or '' }}</h3>
+                <a class="btn btn-primary" id="btnPdfNotas" href="{{ url_for('prova_notas_pdf', prova_id=prova.id) }}" data-base="{{ url_for('prova_notas_pdf', prova_id=prova.id) }}" target="_blank" rel="noopener">Gerar PDF das notas</a>
+            </div>
             <div class="resumo-notas">
                 <span class="resumo-item"><strong>{{ quadro|length }}</strong> aluno(s)</span>
                 <span class="resumo-item ok"><strong>{{ com_nota }}</strong> com nota</span>
                 <span class="resumo-item pendente"><strong>{{ prova.qtd_sem_nota or 0 }}</strong> sem nota</span>
                 {% if prova.media_turma %}<span class="resumo-item"><strong>{{ prova.media_turma }}</strong> média da turma</span>{% endif %}
             </div>
-            <div class="abas-notas" role="tablist">
-                <button type="button" class="aba-nota" data-filtro="todos" role="tab">Todos ({{ quadro|length }})</button>
-                <button type="button" class="aba-nota" data-filtro="com" role="tab">Com nota ({{ com_nota }})</button>
-                <button type="button" class="aba-nota" data-filtro="sem" role="tab">Sem nota ({{ prova.qtd_sem_nota or 0 }})</button>
+            <div class="barra-notas">
+                <div class="abas-notas" role="tablist">
+                    <button type="button" class="aba-nota" data-filtro="todos" role="tab">Todos ({{ quadro|length }})</button>
+                    <button type="button" class="aba-nota" data-filtro="com" role="tab">Com nota ({{ com_nota }})</button>
+                    <button type="button" class="aba-nota" data-filtro="sem" role="tab">Sem nota ({{ prova.qtd_sem_nota or 0 }})</button>
+                </div>
+                <input type="search" id="buscaNotas" class="busca-notas" placeholder="Pesquisar aluno, matrícula ou CPF" aria-label="Pesquisar aluno">
             </div>
+            <p class="dica-notas">O PDF sai com os alunos da aba aberta (Todos, Com nota ou Sem nota), com a turma e o professor que aplicou.</p>
             <table class="tabela-notas">
-                <thead><tr><th>Aluno</th><th>Matrícula</th><th>CPF</th><th>Nota</th><th>PDF</th><th></th></tr></thead>
+                <thead><tr><th>Aluno</th><th>Matrícula</th><th>CPF</th><th>Data da prova</th><th>Nota</th><th>PDF</th><th>Ações</th></tr></thead>
                 <tbody>
                 {% for linha in quadro %}
                 {% set item = linha.nota_item %}
-                <tr data-situacao="{{ 'com' if item else 'sem' }}" class="{{ '' if item else 'linha-sem-nota' }}">
+                {% set ag = linha.agenda %}
+                <tr data-situacao="{{ 'com' if item else 'sem' }}" data-aluno="{{ linha.aluno_id }}"
+                    data-busca="{{ linha.nome_completo }} {{ linha.matricula or '' }} {{ linha.cpf or '' }}"
+                    class="{{ '' if item else 'linha-sem-nota' }}">
                     <td>
                         {{ linha.nome_completo }}
                         {% if linha.fora_da_turma %}<div style="color:#64748b;font-size:.78rem;">Não está mais na turma</div>{% endif %}
                     </td>
                     <td>{{ linha.matricula or '—' }}</td>
-                    <td>{{ linha.cpf or '—' }}</td>
+                    <td style="white-space:nowrap;">{{ linha.cpf or '—' }}</td>
+                    <td style="white-space:nowrap;">
+                        {% if ag and ag.data_aplicacao %}
+                            {{ ag.data_aplicacao.strftime('%d/%m/%Y') if ag.data_aplicacao.strftime is defined else ag.data_aplicacao }}
+                            {% if ag.horario %} · {{ ag.horario.strftime('%H:%M') if ag.horario.strftime is defined else ag.horario }}{% endif %}
+                            {% if ag.data_original and ag.data_original != ag.data_aplicacao %}
+                            <div class="data-alterada" title="{{ ag.justificativa or '' }}">Alterada (era {{ ag.data_original.strftime('%d/%m/%Y') if ag.data_original.strftime is defined else ag.data_original }}){% if ag.justificativa %} · {{ ag.justificativa }}{% endif %}</div>
+                            {% endif %}
+                        {% else %}—{% endif %}
+                    </td>
                     <td>
                         {% if item %}<strong>{{ item.nota }}</strong>{% else %}<span class="tag-sem-nota">Não lançada</span>{% endif %}
                     </td>
@@ -241,21 +271,60 @@
                         <span style="color:#94a3b8;">Sem anexo</span>
                         {% endif %}
                     </td>
-                    <td style="white-space:nowrap;">
+                    <td>
+                        <div class="acoes-linha">
                         {% if item %}
                         <form method="POST" style="display:inline;" onsubmit='return confirm({{ ("Remover a nota de " ~ linha.nome_completo ~ "?")|tojson }});'>
                             <input type="hidden" name="acao" value="excluir_nota">
                             <input type="hidden" name="prova_id" value="{{ prova.id }}">
                             <input type="hidden" name="nota_id" value="{{ item.id }}">
-                            <button class="btn btn-danger" type="submit">Remover</button>
+                            <button class="btn btn-danger" type="submit">Remover nota</button>
                         </form>
                         {% elif not linha.fora_da_turma %}
                         <button type="button" class="btn btn-primary btn-lancar" data-aluno="{{ linha.aluno_id }}">Lançar nota</button>
                         {% endif %}
+                        {% if ag %}
+                        <button type="button" class="btn btn-secondary btn-alterar-data" data-aluno="{{ linha.aluno_id }}" aria-expanded="false">Alterar data</button>
+                        {% endif %}
+                        </div>
                     </td>
                 </tr>
+                {% if ag %}
+                <tr class="linha-form-data" data-de="{{ linha.aluno_id }}" hidden>
+                    <td colspan="7">
+                        <form method="POST" enctype="multipart/form-data" class="form-grid form-data-aluno">
+                            <input type="hidden" name="acao" value="ajustar_data_prova_aluno">
+                            <input type="hidden" name="prova_id" value="{{ prova.id }}">
+                            <input type="hidden" name="agenda_id" value="{{ ag.id }}">
+                            <div class="form-group" style="grid-column:1/-1;">
+                                <strong>Alterar a data só para {{ linha.nome_completo }}</strong>
+                            </div>
+                            <div class="form-group">
+                                <label>Nova data</label>
+                                <input type="date" name="nova_data" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Horário</label>
+                                <input type="time" name="horario" value="{{ ag.horario.strftime('%H:%M') if ag.horario and ag.horario.strftime is defined else (ag.horario or '') }}">
+                            </div>
+                            <div class="form-group">
+                                <label>Justificativa (obrigatória)</label>
+                                <input type="text" name="justificativa" required placeholder="Ex.: Atestado médico">
+                            </div>
+                            <div class="form-group">
+                                <label>Atestado PDF (opcional)</label>
+                                <input type="file" name="atestado_pdf" accept="application/pdf">
+                            </div>
+                            <div class="form-group" style="justify-content:end;flex-direction:row;gap:6px;align-items:end;">
+                                <button class="btn btn-primary" type="submit">Salvar data</button>
+                                <button class="btn btn-secondary btn-fechar-data" type="button" data-aluno="{{ linha.aluno_id }}">Cancelar</button>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+                {% endif %}
                 {% endfor %}
-                <tr class="linha-vazia" hidden><td colspan="6" style="color:#64748b;text-align:center;padding:16px;"></td></tr>
+                <tr class="linha-vazia" hidden><td colspan="7" style="color:#64748b;text-align:center;padding:16px;"></td></tr>
                 </tbody>
             </table>
         </div>
@@ -266,27 +335,82 @@
             var abas = box.querySelectorAll('.aba-nota');
             var linhas = box.querySelectorAll('tr[data-situacao]');
             var vazia = box.querySelector('.linha-vazia');
+            var busca = document.getElementById('buscaNotas');
+            var linkPdf = document.getElementById('btnPdfNotas');
+            var filtroAtual = 'todos';
             var MENSAGENS = { com: 'Nenhuma nota lançada ainda.', sem: 'Todos os alunos já têm nota nesta prova.', todos: 'Nenhum aluno na turma.' };
-            function filtrar(filtro) {
+
+            function normalizar(texto) {
+                return String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+                    .replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+            }
+            linhas.forEach(function (tr) { tr._busca = normalizar(tr.getAttribute('data-busca')); });
+
+            function formDe(alunoId) {
+                return box.querySelector('tr.linha-form-data[data-de="' + alunoId + '"]');
+            }
+
+            function filtrar() {
+                var termo = normalizar(busca ? busca.value : '');
                 var visiveis = 0;
                 linhas.forEach(function (tr) {
-                    var mostra = filtro === 'todos' || tr.getAttribute('data-situacao') === filtro;
+                    var mostra = (filtroAtual === 'todos' || tr.getAttribute('data-situacao') === filtroAtual)
+                        && (!termo || tr._busca.indexOf(termo) !== -1);
                     tr.hidden = !mostra;
+                    var form = formDe(tr.getAttribute('data-aluno'));
+                    if (form) form.hidden = !mostra || tr.getAttribute('data-aberto') !== '1';
                     if (mostra) visiveis += 1;
                 });
                 abas.forEach(function (aba) {
-                    var ativa = aba.getAttribute('data-filtro') === filtro;
+                    var ativa = aba.getAttribute('data-filtro') === filtroAtual;
                     aba.classList.toggle('ativa', ativa);
                     aba.setAttribute('aria-selected', ativa ? 'true' : 'false');
                 });
                 vazia.hidden = visiveis > 0;
-                vazia.firstElementChild.textContent = MENSAGENS[filtro];
+                vazia.firstElementChild.textContent = termo
+                    ? 'Nenhum aluno encontrado para “' + busca.value.trim() + '” nesta aba.'
+                    : MENSAGENS[filtroAtual];
+                if (linkPdf) {
+                    var base = linkPdf.getAttribute('data-base');
+                    linkPdf.href = filtroAtual === 'todos' ? base : base + '?filtro=' + filtroAtual;
+                }
             }
             abas.forEach(function (aba) {
-                aba.addEventListener('click', function () { filtrar(aba.getAttribute('data-filtro')); });
+                aba.addEventListener('click', function () {
+                    filtroAtual = aba.getAttribute('data-filtro');
+                    filtrar();
+                });
             });
-            filtrar('todos');
+            if (busca) busca.addEventListener('input', filtrar);
+            filtrar();
+
+            function abrirData(alunoId, abrir) {
+                var tr = box.querySelector('tr[data-situacao][data-aluno="' + alunoId + '"]');
+                var form = formDe(alunoId);
+                if (!tr || !form) return;
+                tr.setAttribute('data-aberto', abrir ? '1' : '0');
+                form.hidden = !abrir;
+                var botao = tr.querySelector('.btn-alterar-data');
+                if (botao) botao.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+                if (abrir) {
+                    var campo = form.querySelector('input[name="nova_data"]');
+                    if (campo) campo.focus();
+                }
+            }
+
             box.addEventListener('click', function (ev) {
+                var alterar = ev.target.closest('.btn-alterar-data');
+                if (alterar) {
+                    var id = alterar.getAttribute('data-aluno');
+                    var tr = alterar.closest('tr');
+                    abrirData(id, tr.getAttribute('data-aberto') !== '1');
+                    return;
+                }
+                var fechar = ev.target.closest('.btn-fechar-data');
+                if (fechar) {
+                    abrirData(fechar.getAttribute('data-aluno'), false);
+                    return;
+                }
                 var botao = ev.target.closest('.btn-lancar');
                 if (!botao) return;
                 var sel = document.getElementById('sel-aluno-turma');
@@ -301,54 +425,6 @@
         </script>
         {% endif %}
 
-        {% if prova.agendas %}
-        <div class="card-box">
-            <h3 style="margin-top:0;">Datas por aluno</h3>
-            <p style="color:#64748b;font-size:.88rem;">Altere a data só deste aluno com justificativa (atestado etc.).</p>
-            <table>
-                <thead><tr><th>Aluno</th><th>Data</th><th>Original</th><th>Justificativa</th><th></th></tr></thead>
-                <tbody>
-                {% for ag in prova.agendas %}
-                <tr>
-                    <td>{{ ag.nome_completo }}{% if ag.matricula %}<div style="color:#64748b;font-size:.8rem;">Mat. {{ ag.matricula }}</div>{% endif %}</td>
-                    <td>{{ ag.data_aplicacao.strftime('%d/%m/%Y') if ag.data_aplicacao and ag.data_aplicacao.strftime is defined else ag.data_aplicacao }}</td>
-                    <td>{{ ag.data_original.strftime('%d/%m/%Y') if ag.data_original and ag.data_original.strftime is defined else (ag.data_original or '—') }}</td>
-                    <td>{{ ag.justificativa or '—' }}</td>
-                    <td>
-                        <details>
-                            <summary style="cursor:pointer;color:#2563eb;font-weight:700;">Alterar data</summary>
-                            <form method="POST" enctype="multipart/form-data" class="form-grid" style="margin-top:8px;min-width:260px;">
-                                <input type="hidden" name="acao" value="ajustar_data_prova_aluno">
-                                <input type="hidden" name="prova_id" value="{{ prova.id }}">
-                                <input type="hidden" name="agenda_id" value="{{ ag.id }}">
-                                <div class="form-group">
-                                    <label>Nova data</label>
-                                    <input type="date" name="nova_data" required>
-                                </div>
-                                <div class="form-group">
-                                    <label>Horário</label>
-                                    <input type="time" name="horario" value="{{ ag.horario.strftime('%H:%M') if ag.horario and ag.horario.strftime is defined else (ag.horario or '') }}">
-                                </div>
-                                <div class="form-group" style="grid-column:1/-1;">
-                                    <label>Justificativa (obrigatória)</label>
-                                    <input type="text" name="justificativa" required placeholder="Ex.: Atestado médico">
-                                </div>
-                                <div class="form-group">
-                                    <label>Atestado PDF (opcional)</label>
-                                    <input type="file" name="atestado_pdf" accept="application/pdf">
-                                </div>
-                                <div class="form-group" style="justify-content:end;">
-                                    <button class="btn btn-primary" type="submit">Salvar</button>
-                                </div>
-                            </form>
-                        </details>
-                    </td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

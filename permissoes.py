@@ -39,6 +39,7 @@ ENDPOINTS = {
     "sala_professor_detalhe": "pedagogico",
     "sala_professor_editar": "pedagogico",
     "prova_pdf": "pedagogico",
+    "prova_notas_pdf": "pedagogico",
     "arquivo_professor": "pedagogico",
     "pasta_professor_pdf": "pedagogico",
     "relatorio_turmas_pdf": "pedagogico",
@@ -534,6 +535,7 @@ _SALA_PROFESSOR = {
     "sala_professor_detalhe",
     "sala_professor_editar",
     "prova_pdf",
+    "prova_notas_pdf",
     "arquivo_professor",
     "pasta_professor_pdf",
 }
