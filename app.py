@@ -6929,9 +6929,10 @@ def prova_pdf(prova_id):
             if pessoa:
                 cursor.execute(
                     """
-                    SELECT p.*, t.nome AS turma_nome
+                    SELECT p.*, t.nome AS turma_nome, f.nome_completo AS professor_nome
                     FROM provas_criadas p
                     LEFT JOIN turmas t ON t.id = p.turma_id
+                    LEFT JOIN funcionarios f ON f.id = p.funcionario_id
                     WHERE p.id = %s AND p.funcionario_id = %s
                     """,
                     (prova_id, pessoa["id"]),
@@ -6942,9 +6943,10 @@ def prova_pdf(prova_id):
             if not prova and gestor:
                 cursor.execute(
                     """
-                    SELECT p.*, t.nome AS turma_nome
+                    SELECT p.*, t.nome AS turma_nome, f.nome_completo AS professor_nome
                     FROM provas_criadas p
                     LEFT JOIN turmas t ON t.id = p.turma_id
+                    LEFT JOIN funcionarios f ON f.id = p.funcionario_id
                     WHERE p.id = %s
                     """,
                     (prova_id,),
@@ -6981,6 +6983,7 @@ def prova_pdf(prova_id):
         tarja=tarja,
         data_aplicacao=prova.get("data_aplicacao"),
         horario=prova.get("horario"),
+        professor=prova.get("professor_nome"),
     )
     nome = "gabarito" if request.args.get("gabarito") == "1" else "prova"
     return send_file(

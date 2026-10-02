@@ -143,7 +143,7 @@ def _data_hora_prova(data_aplicacao, horario):
 
 def pdf_prova(
     escola, turma, titulo, materia, questoes, logo=None, com_gabarito=False, tarja="",
-    data_aplicacao=None, horario=None,
+    data_aplicacao=None, horario=None, professor=None,
 ):
     """Prova para o aluno preencher. O cabeçalho não tem borda."""
     pdf = _ProvaPDF()
@@ -242,7 +242,57 @@ def pdf_prova(
             pdf.multi_cell(0, 6, f"Resposta: {questao.get('resposta')}", new_x="LMARGIN", new_y="NEXT")
             pdf.set_font(pdf.fonte, "", 11)
         pdf.ln(5)
+    if not com_gabarito:
+        _assinaturas_prova(pdf, professor)
     return _saida(pdf)
+
+
+def _assinaturas_prova(pdf, professor=None):
+    """Assinatura do aluno ao entregar e do professor após corrigir e lançar a nota."""
+    altura_bloco = 46
+    pagina_nova = pdf.get_y() + altura_bloco > pdf.page_break_trigger
+    if pagina_nova:
+        pdf.add_page()
+    esquerda = pdf.l_margin
+    meio = 10
+    largura = (pdf.epw - meio) / 2
+    direita = esquerda + largura + meio
+
+    if not pagina_nova:
+        pdf.ln(4)
+        pdf.set_draw_color(150, 150, 150)
+        pdf.set_line_width(0.2)
+        pdf.line(esquerda, pdf.get_y(), esquerda + pdf.epw, pdf.get_y())
+    pdf.ln(18)
+    y_linha = pdf.get_y()
+    pdf.set_draw_color(40, 40, 40)
+    pdf.set_line_width(0.3)
+    pdf.line(esquerda, y_linha, esquerda + largura, y_linha)
+    pdf.line(direita, y_linha, direita + largura, y_linha)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(0.2)
+
+    pdf.set_text_color(40, 40, 40)
+    pdf.set_font(pdf.fonte, "", 10)
+    pdf.set_xy(esquerda, y_linha + 1)
+    pdf.cell(largura, 5, "Assinatura do(a) aluno(a)", align="C")
+    pdf.set_xy(direita, y_linha + 1)
+    pdf.cell(largura, 5, "Assinatura do(a) professor(a)", align="C")
+
+    pdf.set_font(pdf.fonte, "", 9)
+    pdf.set_text_color(90, 90, 90)
+    pdf.set_xy(esquerda, y_linha + 6)
+    pdf.cell(largura, 5, "Ao entregar a prova", align="C")
+    pdf.set_xy(direita, y_linha + 6)
+    nome = (professor or "").strip()
+    pdf.cell(largura, 5, f"Prof.(a) {nome}" if nome else "Após corrigir e lançar a nota", align="C")
+
+    pdf.set_font(pdf.fonte, "", 10)
+    pdf.set_text_color(40, 40, 40)
+    pdf.set_xy(direita, y_linha + 13)
+    pdf.cell(largura, 6, "Nota: ________     Data da correção: ____/____/______", align="C")
+    pdf.set_text_color(20, 20, 20)
+    pdf.set_y(y_linha + 20)
 
 
 class RelatorioPDF(FPDF):
