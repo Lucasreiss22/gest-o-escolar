@@ -1372,7 +1372,7 @@ def inject_acl():
     )
     login_publico = (request.endpoint or "") in {
         "login", "logout", "ping", "tarefas_folha", "login_google", "login_google_callback",
-        "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
+        "login_codigo", "login_senha", "login_adm", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
         "plataforma_escolas", "plataforma_autorizar_gmail", "plataforma_voltar",
     }
     if not smtp_ok and not login_publico and not session.get("super_admin"):
@@ -1424,7 +1424,7 @@ def encerrar_tenant(_erro):
 
 _AUDITORIA_IGNORAR = {
     None, "login", "logout", "static", "ping", "login_google", "login_google_callback",
-    "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
+    "login_codigo", "login_senha", "login_adm", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
     "pagina_auditoria", "relatorio_tributario", "relatorio_pdf_folha", "relatorio_pdf_custos",
     "relatorio_cartao_financeiro",
     "cobranca_pdf", "cobranca_email", "memoria_simples_pdf", "extrato_pgdas_pdf", "boletim_pdf", "pdf_contracheque_rota",
@@ -1654,7 +1654,7 @@ def proteger_rotas():
     endpoint = request.endpoint
     publicos = {
         None, "login", "logout", "static", "ping", "tarefas_folha", "login_google", "login_google_callback",
-        "login_codigo", "login_senha", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
+        "login_codigo", "login_senha", "login_adm", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
         "autorizacao_busca_publico", "autorizacao_busca_responder", "autorizacao_busca_anexo",
     }
     if endpoint in publicos:
@@ -3247,6 +3247,15 @@ def login_esqueci_senha():
     return _enviar_codigo_acesso(email, "login_escola")
 
 
+def _tela_login(modo="escola", email=None):
+    return render_template(
+        "login.html",
+        modo=modo,
+        email=email if email is not None else session.get("login_email") or "",
+        permanecer_logado=session.get("permanecer_logado"),
+    )
+
+
 @app.route("/", methods=["GET", "POST"])
 @app.route("/login", methods=["GET", "POST"])
 @app.route("/entrar", methods=["GET", "POST"])
@@ -3256,47 +3265,88 @@ def login():
         garantir_plataforma()
     except Exception as e:
         print(f"login garantir_plataforma: {e}")
-    if request.method == "POST":
-        try:
-            email = exigencia_email(request.form.get("email"), "E-mail")
-        except ValueError as e:
-            flash(str(e), "danger")
-            return render_template(
-                "login.html",
-                permanecer_logado=request.form.get("permanecer_logado") == "1",
-            )
-        session["login_email"] = email
-        session["permanecer_logado"] = request.form.get("permanecer_logado") == "1"
-        acoes = request.form.getlist("acao")
-        quer_codigo = "codigo" in acoes
-        if eh_super_admin(email):
-            admin = buscar_admin_plataforma(email)
-            if admin and admin.get("senha") and admin.get("email_confirmado"):
-                return redirect(url_for("login_senha"))
-            return redirect(url_for("login_conectar_gmail"))
-        escola = buscar_escola_por_email(email) or localizar_escola_do_email(email)
-        if escola:
-            if not escola.get("ativo", True):
-                flash("Esta escola está pausada. O acesso de todos os usuários dessa escola está bloqueado.", "danger")
-                return render_template("login.html", permanecer_logado=session.get("permanecer_logado"))
-            email_admin = (escola.get("email_admin") or "").strip().lower()
-            if not escola.get("senha_definida") and email_admin == email.strip().lower():
-                flash("Esta escola ainda precisa ativar o acesso. O código foi enviado ao e-mail cadastrado.", "danger")
-                return redirect(url_for("ativar_escola", token=escola.get("convite_token")))
-            if not escola.get("senha_definida"):
-                flash("A escola ainda não ativou o acesso. Peça ao administrador da plataforma para concluir o cadastro.", "danger")
-                return render_template("login.html", permanecer_logado=session.get("permanecer_logado"))
-            login_novo = garantir_login_colaborador(email, escola)
-            if quer_codigo or login_novo:
-                return _enviar_codigo_acesso(email, "login_escola")
-            return redirect(url_for("login_senha"))
+    if request.method != "POST":
+        return _tela_login("escola")
+    session["permanecer_logado"] = request.form.get("permanecer_logado") == "1"
+    try:
+        email = exigencia_email(request.form.get("email"), "E-mail")
+    except ValueError as e:
+        flash(str(e), "danger")
+        return _tela_login("escola", request.form.get("email") or "")
+    session["login_email"] = email
+    acao = request.form.get("acao") or "entrar"
+    if eh_super_admin(email):
+        flash("Este e-mail é do administrador do sistema. Entre pela opção Entrar como ADM.", "danger")
+        return redirect(url_for("login_adm"))
+    escola = buscar_escola_por_email(email) or localizar_escola_do_email(email)
+    if not escola:
         flash(
             "Este e-mail não está na equipe da escola. Cadastre a pessoa em Usuários, com o perfil Professor, "
-            "e use o mesmo e-mail iCloud. Não crie uma escola nova para o professor.",
+            "e use o mesmo e-mail. Não crie uma escola nova para o professor.",
             "danger",
         )
-        return render_template("login.html", permanecer_logado=session.get("permanecer_logado"))
-    return render_template("login.html", permanecer_logado=session.get("permanecer_logado"))
+        return _tela_login("escola", email)
+    if not escola.get("ativo", True):
+        flash("Esta escola está pausada. O acesso de todos os usuários dessa escola está bloqueado.", "danger")
+        return _tela_login("escola", email)
+    email_admin = (escola.get("email_admin") or "").strip().lower()
+    if not escola.get("senha_definida") and email_admin == email.strip().lower():
+        flash("Esta escola ainda precisa ativar o acesso. O código foi enviado ao e-mail cadastrado.", "danger")
+        return redirect(url_for("ativar_escola", token=escola.get("convite_token")))
+    if not escola.get("senha_definida"):
+        flash("A escola ainda não ativou o acesso. Peça ao administrador da plataforma para concluir o cadastro.", "danger")
+        return _tela_login("escola", email)
+    login_novo = garantir_login_colaborador(email, escola)
+    if acao == "codigo" or login_novo:
+        if login_novo and acao != "codigo":
+            flash("Primeiro acesso: enviamos um código ao seu e-mail para você criar a senha.", "success")
+        return _enviar_codigo_acesso(email, "login_escola")
+    senha = (request.form.get("senha") or "").strip()
+    if not senha:
+        flash("Digite a senha.", "danger")
+        return _tela_login("escola", email)
+    usuario, escola = usuario_da_escola(email, senha, escola)
+    if usuario:
+        _entrar_escola(usuario, email, escola)
+        return redirect(url_for("dashboard"))
+    flash("E-mail ou senha incorretos.", "danger")
+    return _tela_login("escola", email)
+
+
+@app.route("/login/adm", methods=["GET", "POST"])
+def login_adm():
+    try:
+        garantir_plataforma()
+    except Exception as e:
+        print(f"login_adm garantir_plataforma: {e}")
+    if request.method != "POST":
+        return _tela_login("adm")
+    session["permanecer_logado"] = request.form.get("permanecer_logado") == "1"
+    try:
+        email = exigencia_email(request.form.get("email"), "E-mail")
+    except ValueError as e:
+        flash(str(e), "danger")
+        return _tela_login("adm", request.form.get("email") or "")
+    session["login_email"] = email
+    if not eh_super_admin(email):
+        flash("Este e-mail não é de administrador do sistema. Para entrar na escola, use Entrar como escola.", "danger")
+        return _tela_login("adm", email)
+    admin = buscar_admin_plataforma(email)
+    sem_senha = not (admin and admin.get("senha") and admin.get("email_confirmado"))
+    if request.form.get("acao") == "codigo" or sem_senha:
+        if sem_senha and request.form.get("acao") != "codigo":
+            flash("Primeiro acesso: enviamos um código ao seu e-mail para você criar a senha.", "success")
+        session["redefinir_senha"] = True
+        return _enviar_codigo_acesso(email, "login_plataforma")
+    senha = (request.form.get("senha") or "").strip()
+    if not senha:
+        flash("Digite a senha.", "danger")
+        return _tela_login("adm", email)
+    if (admin.get("senha") or "").strip() == senha:
+        _entrar_plataforma(admin)
+        return redirect(url_for("plataforma_escolas"))
+    flash("Senha incorreta. Use a senha que você criou neste sistema, não a do Gmail.", "danger")
+    return _tela_login("adm", email)
 
 
 @app.route("/login/conectar-gmail", methods=["GET", "POST"])
@@ -3401,6 +3451,7 @@ def login_codigo():
         "login_codigo.html",
         email=email,
         email_enviado=bool(session.get("otp_email_ok")),
+        voltar=url_for("login_adm" if session.get("otp_finalidade") == "login_plataforma" else "login"),
     )
 
 
@@ -3435,6 +3486,8 @@ def _login_senha(email):
             flash("Confirme o código enviado ao e-mail antes de redefinir a senha.", "danger")
             return redirect(url_for("login_conectar_gmail"))
     if request.method != "POST":
+        if not criar:
+            return redirect(url_for("login_adm" if eh_super_admin(email) else "login"))
         return render_template(
             "login_senha.html",
             email=email,
@@ -3489,7 +3542,7 @@ def _login_senha(email):
             _entrar_escola(usuario, email, escola)
             return redirect(url_for("dashboard"))
         flash("Senha atualizada. Entre com o e-mail e a nova senha.", "success")
-        return redirect(url_for("login_senha"))
+        return redirect(url_for("login"))
     if eh_super_admin(email):
         admin = buscar_admin_plataforma(email)
         armazenada = (admin.get("senha") if admin else "") or ""
@@ -4319,7 +4372,7 @@ def ativar_escola(token):
                 concluir_ativacao_escola(escola, senha)
                 flash("Senha criada. Entre com o e-mail da escola.", "success")
                 session["login_email"] = escola["email_admin"]
-                return redirect(url_for("login_senha"))
+                return redirect(url_for("login"))
             except Exception as e:
                 flash(str(e), "danger")
     return render_template("ativar_escola.html", escola=escola)

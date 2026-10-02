@@ -3,25 +3,78 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Login - Gestão Escolar</title>
+    <title>{{ 'Administrador do sistema' if modo == 'adm' else 'Login' }} - Gestão Escolar</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
     <style>
-        .alert { padding: 10px; margin-bottom: 15px; border-radius: 5px; font-size: 0.85rem; text-align: center; }
+        .troca-acesso {
+            position: fixed;
+            top: calc(16px + env(safe-area-inset-top, 0px));
+            right: 16px;
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 9px 16px;
+            border-radius: 999px;
+            font-size: 0.88rem; font-weight: 700;
+            text-decoration: none;
+            color: #1e3a5f; background: #fff;
+            border: 1px solid #cbd5e1;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+        }
+        .troca-acesso:hover { background: #f1f5f9; }
+        .login-page { padding-top: calc(72px + env(safe-area-inset-top, 0px)); }
+        .troca-acesso svg { width: 16px; height: 16px; }
+        .login-card.adm { border-top: 4px solid #1e3a5f; }
+        .login-topo { text-align: center; margin-bottom: 22px; }
+        .login-topo h2 { margin-bottom: 6px; }
+        .login-topo p { margin: 0; color: #64748b; font-size: 0.9rem; }
+        .selo-adm {
+            display: inline-block; margin-bottom: 10px; padding: 4px 12px;
+            border-radius: 999px; background: #1e3a5f; color: #fff;
+            font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+        }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 8px; font-size: 0.85rem; text-align: center; }
         .alert-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .alert-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .hint { font-size: 0.8rem; color: #64748b; text-align: center; margin-top: 12px; line-height: 1.4; }
-        .sep { text-align: center; margin: 16px 0 8px; color: #64748b; font-size: .85rem; }
+        .alert-warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        .campo-senha { position: relative; display: flex; }
+        .campo-senha input { flex: 1; padding-right: 76px !important; }
+        .ver-senha {
+            position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            border: none; background: transparent; color: #1e3a5f;
+            font-size: 0.8rem; font-weight: 700; cursor: pointer; padding: 6px 8px;
+        }
         .lembrar-check {
-            display: flex; align-items: center; gap: 8px; margin: 4px 0 16px;
+            display: flex; align-items: center; gap: 8px; margin: 2px 0 18px;
             font-size: 0.9rem; color: #334155; cursor: pointer; user-select: none;
         }
         .lembrar-check input { width: 18px; height: 18px; accent-color: #1e3a5f; }
+        .link-codigo {
+            display: block; width: 100%; margin-top: 14px;
+            border: none; background: transparent; cursor: pointer;
+            color: #1e3a5f; font-size: 0.88rem; font-weight: 600; text-decoration: underline;
+        }
+        .hint { font-size: 0.8rem; color: #64748b; text-align: center; margin-top: 14px; line-height: 1.45; }
     </style>
 </head>
 <body class="login-page">
-    <div class="login-card">
-        <h2>Gestão Escolar</h2>
-        <p class="hint">Entre com um e-mail válido. O código de confirmação chega só no e-mail, nunca nesta tela.</p>
+    {% if modo == 'adm' %}
+    <a class="troca-acesso" href="{{ url_for('login') }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5"/><path d="M5 9.5V20h14V9.5"/><path d="M10 20v-5h4v5"/></svg>
+        Entrar como escola
+    </a>
+    {% else %}
+    <a class="troca-acesso" href="{{ url_for('login_adm') }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3z"/></svg>
+        Entrar como ADM
+    </a>
+    {% endif %}
+
+    <div class="login-card{% if modo == 'adm' %} adm{% endif %}">
+        <div class="login-topo">
+            {% if modo == 'adm' %}<span class="selo-adm">Administrador do sistema</span>{% endif %}
+            <h2>Gestão Escolar</h2>
+            <p>{{ 'Acesso da plataforma: escolas, planos e configurações gerais.' if modo == 'adm' else 'Entre com o e-mail e a senha da sua escola.' }}</p>
+        </div>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
@@ -29,21 +82,51 @@
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <form action="{{ url_for('login') }}" method="POST">
+
+        <form action="{{ url_for('login_adm') if modo == 'adm' else url_for('login') }}" method="POST">
             <input type="hidden" name="form_login" value="email">
             <div class="form-group">
-                <label>E-mail</label>
-                <input type="email" name="email" placeholder="seu@email.com" value="{{ email or '' }}" required>
+                <label for="loginEmail">E-mail</label>
+                <input type="email" id="loginEmail" name="email" placeholder="seu@email.com" value="{{ email or '' }}"
+                       autocomplete="username" required {% if not email %}autofocus{% endif %}>
+            </div>
+            <div class="form-group">
+                <label for="loginSenha">Senha</label>
+                <div class="campo-senha" data-enter-envia>
+                    <input type="password" id="loginSenha" name="senha" placeholder="Sua senha" autocomplete="current-password"
+                           required {% if email %}autofocus{% endif %}>
+                    <button type="button" class="ver-senha" data-ver-senha="loginSenha" aria-label="Mostrar senha">Mostrar</button>
+                </div>
             </div>
             <label class="lembrar-check">
                 <input type="checkbox" name="permanecer_logado" value="1" {% if permanecer_logado %}checked{% endif %}>
                 <span>Permanecer logado</span>
             </label>
-            <button type="submit" name="acao" value="continuar" class="btn">Continuar</button>
-            <button type="submit" name="acao" value="codigo" class="btn" style="margin-top:8px;background:#fff;color:#1f2937;border:1px solid #d1d5db;">Receber código no e-mail</button>
+            <button type="submit" name="acao" value="entrar" class="btn">Entrar</button>
+            <button type="submit" name="acao" value="codigo" class="link-codigo" formnovalidate>
+                Esqueci a senha / primeiro acesso
+            </button>
         </form>
-        <p class="hint">Professor e funcionário entram com o e-mail cadastrado na equipe, inclusive @icloud.com. Clique em Receber código no e-mail. No iCloud, abra Lixo eletrônico e a aba Ocultos. Não cadastre o professor como uma escola nova.</p>
+
+        {% if modo == 'adm' %}
+        <p class="hint">Use o e-mail de administrador da plataforma. A senha é a que você criou neste sistema, não a do Gmail.</p>
+        {% else %}
+        <p class="hint">Professor e funcionário entram com o e-mail cadastrado na equipe da escola. No primeiro acesso, clique em "Esqueci a senha / primeiro acesso": o código chega no e-mail (confira também o Spam ou, no iCloud, o Lixo eletrônico).</p>
+        {% endif %}
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    document.querySelectorAll("[data-ver-senha]").forEach(function (botao) {
+        botao.addEventListener("click", function () {
+            var campo = document.getElementById(botao.getAttribute("data-ver-senha"));
+            if (!campo) return;
+            var mostrar = campo.type === "password";
+            campo.type = mostrar ? "text" : "password";
+            botao.textContent = mostrar ? "Ocultar" : "Mostrar";
+            botao.setAttribute("aria-label", mostrar ? "Ocultar senha" : "Mostrar senha");
+            campo.focus();
+        });
+    });
+    </script>
 </body>
 </html>
