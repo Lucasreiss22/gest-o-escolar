@@ -169,7 +169,7 @@ ACOES_HINT = {
     "excluir": "Apaga registros ou desfaz vínculos nessa tela.",
 }
 
-# Sub-ações finas (só Alunos e Pedagógico nesta entrega)
+# Sub-ações finas (Alunos, Pedagógico e aprovação de ponto)
 SUBACOES = {
     "alunos": (
         ("pdf", "Gerar PDF cadastral / lista"),
@@ -179,6 +179,9 @@ SUBACOES = {
         ("chamada", "Marcar presença e faltas"),
         ("boletim", "Gerar boletim PDF"),
         ("ficha", "Gerar ficha pedagógica PDF"),
+    ),
+    "ponto": (
+        ("aprovar_retroativo", "Aprovar ponto retroativo e correções"),
     ),
 }
 
@@ -193,6 +196,10 @@ SUBACOES_HINT = {
     "chamada": "Registrar presença, falta ou justificativa.",
     "boletim": "Baixar ou enviar o boletim em PDF.",
     "ficha": "Ficha pedagógica simplificada ou completa (sem cadastro sensível).",
+    "aprovar_retroativo": (
+        "Aprova ou rejeita batidas de dias anteriores e correções de ponto. "
+        "Sem essa permissão o pedido não entra no ponto nem no contra-cheque."
+    ),
 }
 
 TELAS_PLANO = [
@@ -347,6 +354,9 @@ _SUBACAO_REQ = {
     ("pagina_pedagogico", "ajustar_nota"): ("notas", "pedagogico"),
     ("calendario_escolar", "marcar_presenca"): ("chamada", "pedagogico"),
     ("calendario_escolar", "lancar_frequencia"): ("chamada", "pedagogico"),
+    ("ponto", "aprovar_ponto_retroativo"): ("aprovar_retroativo", "ponto"),
+    ("ponto", "rejeitar_ponto_retroativo"): ("aprovar_retroativo", "ponto"),
+    ("ponto", "solicitar_correcao_ponto"): ("aprovar_retroativo", "ponto"),
 }
 
 
@@ -373,6 +383,10 @@ def _subs_padrao(area, papel_n, entra):
         # PDF cadastral: secretaria e gestão
         ligar = papel_n in {"admin", "supervisor", "financeiro", "direcao", "secretaria"}
         return {codigo: ligar for codigo, _r in itens}
+    if area == "ponto":
+        # Admin e secretaria aprovam por padrão. Os demais recebem o flag na matriz.
+        aprova = papel_n in {"admin", "secretaria"}
+        return {codigo: aprova for codigo, _r in itens}
     return {codigo: False for codigo, _r in itens}
 
 
