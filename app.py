@@ -1610,7 +1610,7 @@ def _garantir_todas_tabelas_escola():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:todas_tabelas_v1"
+    chave = f"{schema}:todas_tabelas_v2"
     if chave in _tabelas_ok:
         return
     agora = time.time()
@@ -2452,6 +2452,8 @@ def _horas_extras_ponto(cursor, funcionario_id, competencia):
       o saldo positivo é hora extra 50% (art. 7º XVI da CF).
     - Domingo e feriado trabalhados: hora extra 100% (Lei 605/1949, Súmula 146 TST).
     - Faltas ficam de fora: já são descontadas na folha com o DSR.
+    - Pedido de ponto retroativo não entra aqui: só o que já foi aprovado
+      e gravado em ponto_registros.
     """
     resultado = {
         "horas_extras_ponto": 0.0,
@@ -12763,7 +12765,7 @@ def _garantir_ponto():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:ponto_v6"
+    chave = f"{schema}:ponto_v7"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -12848,6 +12850,62 @@ def _garantir_ponto():
                 ON ponto_faltas (funcionario_id, data_ref)
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ponto_solicitacoes (
+                    id SERIAL PRIMARY KEY,
+                    funcionario_id INT NOT NULL,
+                    data_ref DATE NOT NULL,
+                    tipo VARCHAR(20) NOT NULL DEFAULT 'retroativo',
+                    justificativa TEXT NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                    motivo_decisao TEXT,
+                    entrada TIME,
+                    cafe_ida TIME,
+                    cafe_volta TIME,
+                    almoco TIME,
+                    almoco_volta TIME,
+                    saida TIME,
+                    altera_entrada BOOLEAN NOT NULL DEFAULT FALSE,
+                    altera_cafe_ida BOOLEAN NOT NULL DEFAULT FALSE,
+                    altera_cafe_volta BOOLEAN NOT NULL DEFAULT FALSE,
+                    altera_almoco BOOLEAN NOT NULL DEFAULT FALSE,
+                    altera_almoco_volta BOOLEAN NOT NULL DEFAULT FALSE,
+                    altera_saida BOOLEAN NOT NULL DEFAULT FALSE,
+                    orig_entrada TIME,
+                    orig_cafe_ida TIME,
+                    orig_cafe_volta TIME,
+                    orig_almoco TIME,
+                    orig_almoco_volta TIME,
+                    orig_saida TIME,
+                    antes_entrada TIME,
+                    antes_cafe_ida TIME,
+                    antes_cafe_volta TIME,
+                    antes_almoco TIME,
+                    antes_almoco_volta TIME,
+                    antes_saida TIME,
+                    solicitado_por INT,
+                    solicitado_nome VARCHAR(150),
+                    solicitado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    decidido_por INT,
+                    decidido_nome VARCHAR(150),
+                    decidido_em TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS ponto_solicitacoes_status_idx
+                ON ponto_solicitacoes (status, data_ref DESC)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ponto_solicitacoes_pendente_uidx
+                ON ponto_solicitacoes (funcionario_id, data_ref)
+                WHERE status = 'pendente'
+                """
+            )
             for sql in (
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_cafe INT DEFAULT 15",
                 "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS ponto_minutos_almoco INT DEFAULT 60",
@@ -12866,6 +12924,7 @@ def _garantir_ponto():
         _tabelas_ok.discard(f"{schema}:ponto_v3")
         _tabelas_ok.discard(f"{schema}:ponto_v4")
         _tabelas_ok.discard(f"{schema}:ponto_v5")
+        _tabelas_ok.discard(f"{schema}:ponto_v6")
         _tabelas_ok.add(chave)
     except Exception:
         try:
@@ -13160,6 +13219,366 @@ def _intervalo_relatorio_ponto(periodo, data_base=None):
     return inicio, fim, f"Mês {inicio.strftime('%m/%Y')}"
 
 
+def _pode_aprovar_ponto():
+    """Secretaria e admin por padrão; qualquer papel se a matriz marcar a sub-ação."""
+    papel = normalizar_papel(session.get("usuario_papel"))
+    return pode_subacao(papel, "ponto", "aprovar_retroativo", session.get("permissoes"))
+
+
+def _registro_dia_ponto(cursor, funcionario_id, data_ref):
+    cursor.execute(
+        """
+        SELECT entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida
+        FROM ponto_registros
+        WHERE funcionario_id = %s AND data_ref = %s
+        """,
+        (funcionario_id, data_ref),
+    )
+    return _mapa_registro_ponto(cursor.fetchone())
+
+
+def _enriquecer_solicitacao_ponto(row):
+    from ponto_retroativo import (
+        MARCAS,
+        STATUS_ROTULO,
+        TIPO_ROTULO,
+        fmt_hora,
+        linhas_comparacao,
+        pedidas_da_linha,
+    )
+
+    item = dict(row)
+    for marca in MARCAS:
+        item[marca] = fmt_hora(item.get(marca))
+        item[f"orig_{marca}"] = fmt_hora(item.get(f"orig_{marca}"))
+        item[f"antes_{marca}"] = fmt_hora(item.get(f"antes_{marca}"))
+    try:
+        pedidas = pedidas_da_linha(item)
+    except ValueError:
+        pedidas = {}
+    origens = {marca: item.get(f"orig_{marca}") or "" for marca in MARCAS}
+    item["linhas"] = linhas_comparacao(pedidas, origens)
+    item["status_rotulo"] = STATUS_ROTULO.get(item.get("status"), item.get("status") or "")
+    item["tipo_rotulo"] = TIPO_ROTULO.get(item.get("tipo"), item.get("tipo") or "")
+    return item
+
+
+def _listar_solicitacoes_ponto(cursor, funcionario_id=None, status=None, limite=40):
+    filtros = []
+    params = []
+    if funcionario_id:
+        filtros.append("s.funcionario_id = %s")
+        params.append(funcionario_id)
+    if status:
+        filtros.append("s.status = %s")
+        params.append(status)
+    where = f"WHERE {' AND '.join(filtros)}" if filtros else ""
+    cursor.execute(
+        f"""
+        SELECT s.*, f.nome_completo
+        FROM ponto_solicitacoes s
+        JOIN funcionarios f ON f.id = s.funcionario_id
+        {where}
+        ORDER BY s.solicitado_em DESC, s.id DESC
+        LIMIT %s
+        """,
+        params + [int(limite)],
+    )
+    return [_enriquecer_solicitacao_ponto(row) for row in (cursor.fetchall() or [])]
+
+
+_ACOES_PONTO_RETRO = {
+    "solicitar_ponto_retroativo",
+    "solicitar_correcao_ponto",
+    "aprovar_ponto_retroativo",
+    "rejeitar_ponto_retroativo",
+    "cancelar_ponto_retroativo",
+}
+
+_PAINEIS_PONTO_RETRO = {
+    "painel-retroativo",
+    "painel-retroativo-equipe",
+    "painel-aprovar-ponto",
+}
+
+
+def _usuario_ponto_atual():
+    return (
+        session.get("usuario_id"),
+        (session.get("usuario_nome") or session.get("usuario_email") or "Usuário")[:150],
+    )
+
+
+def _aplicar_solicitacao_no_ponto(cursor, funcionario_id, data_ref, pedidas, resultado):
+    from ponto_retroativo import MARCAS
+
+    cafe_lim, almoco_lim = _ler_tempos_ponto(cursor, funcionario_id)
+    agora = _agora_ponto_br()
+    excesso_cafe = 0
+    excesso_almoco = 0
+    if resultado.get("cafe_ida") and resultado.get("cafe_volta"):
+        excesso_cafe = _minutos_excesso_intervalo(
+            resultado["cafe_ida"], resultado["cafe_volta"], cafe_lim, data_ref, agora
+        )
+    if resultado.get("almoco") and resultado.get("almoco_volta"):
+        excesso_almoco = _minutos_excesso_intervalo(
+            resultado["almoco"], resultado["almoco_volta"], almoco_lim, data_ref, agora
+        )
+    valores = [pedidas.get(marca) if marca in pedidas else None for marca in MARCAS]
+    altera = [marca in pedidas for marca in MARCAS]
+    cursor.execute(
+        """
+        INSERT INTO ponto_registros
+            (funcionario_id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, saida,
+             excesso_cafe_min, excesso_almoco_min, atualizado_em)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (funcionario_id, data_ref)
+        DO UPDATE SET
+            entrada = CASE WHEN %s THEN EXCLUDED.entrada ELSE ponto_registros.entrada END,
+            cafe_ida = CASE WHEN %s THEN EXCLUDED.cafe_ida ELSE ponto_registros.cafe_ida END,
+            cafe_volta = CASE WHEN %s THEN EXCLUDED.cafe_volta ELSE ponto_registros.cafe_volta END,
+            almoco = CASE WHEN %s THEN EXCLUDED.almoco ELSE ponto_registros.almoco END,
+            almoco_volta = CASE WHEN %s THEN EXCLUDED.almoco_volta ELSE ponto_registros.almoco_volta END,
+            saida = CASE WHEN %s THEN EXCLUDED.saida ELSE ponto_registros.saida END,
+            excesso_cafe_min = EXCLUDED.excesso_cafe_min,
+            excesso_almoco_min = EXCLUDED.excesso_almoco_min,
+            atualizado_em = CURRENT_TIMESTAMP
+        """,
+        [funcionario_id, data_ref, *valores, excesso_cafe, excesso_almoco, *altera],
+    )
+
+
+def _tratar_ponto_retroativo(cursor, acao, meu_funcionario_id):
+    """Pedido, correção, aprovação, rejeição ou cancelamento. None se a ação for outra."""
+    if acao not in _ACOES_PONTO_RETRO:
+        return None
+    from ponto_retroativo import (
+        MARCAS,
+        houve_mudanca,
+        parse_data,
+        pedidas_da_linha,
+        validar_justificativa,
+        validar_pedido,
+    )
+
+    usuario_id, usuario_nome = _usuario_ponto_atual()
+    hoje = _agora_ponto_br().date()
+    # Não há competência de folha fechada no sistema. O conjunto fica vazio
+    # de propósito: a validação existe e passa a bloquear se um dia for preenchido.
+    competencias_fechadas = ()
+
+    if acao in {"aprovar_ponto_retroativo", "rejeitar_ponto_retroativo"}:
+        if not _pode_aprovar_ponto():
+            raise ValueError("Sem permissão para aprovar ou rejeitar ponto retroativo.")
+        solicitacao_id = request.form.get("solicitacao_id", type=int)
+        if not solicitacao_id:
+            raise ValueError("Solicitação não informada.")
+        motivo = (request.form.get("motivo_decisao") or "").strip() or None
+        cursor.execute(
+            "SELECT * FROM ponto_solicitacoes WHERE id = %s FOR UPDATE",
+            (solicitacao_id,),
+        )
+        sol = cursor.fetchone()
+        if not sol:
+            raise ValueError("Solicitação não encontrada.")
+        if (sol.get("status") or "") != "pendente":
+            raise ValueError("Esta solicitação não está mais pendente.")
+        if acao == "rejeitar_ponto_retroativo":
+            cursor.execute(
+                """
+                UPDATE ponto_solicitacoes
+                SET status = 'rejeitado',
+                    motivo_decisao = %s,
+                    decidido_por = %s,
+                    decidido_nome = %s,
+                    decidido_em = CURRENT_TIMESTAMP
+                WHERE id = %s AND status = 'pendente'
+                """,
+                (motivo, usuario_id, usuario_nome, solicitacao_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("Esta solicitação não está mais pendente.")
+            flash("Pedido de ponto rejeitado.", "warning")
+            return "painel-aprovar-ponto"
+        data_ref = parse_data(sol.get("data_ref"))
+        fid = sol.get("funcionario_id")
+        pedidas = pedidas_da_linha(sol)
+        atuais = _registro_dia_ponto(cursor, fid, data_ref)
+        modo = "correcao" if data_ref == hoje or (sol.get("tipo") or "") == "correcao" else "retroativo"
+        pedido = validar_pedido(
+            atuais,
+            pedidas,
+            data_ref,
+            hoje,
+            modo=modo,
+            competencias_fechadas=competencias_fechadas,
+            exigir_mudanca=False,
+        )
+        mudou = houve_mudanca(pedido["atuais"], pedido["pedidas"])
+        if mudou:
+            _aplicar_solicitacao_no_ponto(
+                cursor, fid, data_ref, pedido["pedidas"], pedido["resultado"]
+            )
+        antes = [pedido["atuais"].get(marca) or None for marca in MARCAS]
+        cursor.execute(
+            """
+            UPDATE ponto_solicitacoes
+            SET status = 'aprovado',
+                motivo_decisao = %s,
+                decidido_por = %s,
+                decidido_nome = %s,
+                decidido_em = CURRENT_TIMESTAMP,
+                antes_entrada = %s,
+                antes_cafe_ida = %s,
+                antes_cafe_volta = %s,
+                antes_almoco = %s,
+                antes_almoco_volta = %s,
+                antes_saida = %s
+            WHERE id = %s AND status = 'pendente'
+            """,
+            (motivo, usuario_id, usuario_nome, *antes, solicitacao_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError("Esta solicitação não está mais pendente.")
+        if mudou:
+            flash(
+                "Ponto aprovado e lançado no dia. As horas extras desta competência passam a considerar esse registro.",
+                "success",
+            )
+        else:
+            flash("Pedido aprovado. O dia já estava com esses horários.", "success")
+        return "painel-aprovar-ponto"
+
+    if acao == "cancelar_ponto_retroativo":
+        solicitacao_id = request.form.get("solicitacao_id", type=int)
+        if not solicitacao_id:
+            raise ValueError("Solicitação não informada.")
+        cursor.execute(
+            "SELECT * FROM ponto_solicitacoes WHERE id = %s FOR UPDATE",
+            (solicitacao_id,),
+        )
+        sol = cursor.fetchone()
+        if not sol:
+            raise ValueError("Solicitação não encontrada.")
+        if (sol.get("status") or "") != "pendente":
+            raise ValueError("Só é possível cancelar um pedido pendente.")
+        sou_autor = (
+            sol.get("solicitado_por") and usuario_id and int(sol["solicitado_por"]) == int(usuario_id)
+        )
+        sou_alvo = meu_funcionario_id and int(sol["funcionario_id"]) == int(meu_funcionario_id)
+        if not (sou_autor or sou_alvo or _pode_gestao_ponto() or _pode_aprovar_ponto()):
+            raise ValueError("Sem permissão para cancelar este pedido.")
+        cursor.execute(
+            """
+            UPDATE ponto_solicitacoes
+            SET status = 'cancelado',
+                decidido_por = %s,
+                decidido_nome = %s,
+                decidido_em = CURRENT_TIMESTAMP
+            WHERE id = %s AND status = 'pendente'
+            """,
+            (usuario_id, usuario_nome, solicitacao_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError("Só é possível cancelar um pedido pendente.")
+        flash("Pedido de ponto cancelado.", "success")
+        voltar = (request.form.get("voltar") or "painel-retroativo").strip()
+        if voltar not in _PAINEIS_PONTO_RETRO:
+            voltar = "painel-retroativo"
+        return voltar
+
+    modo = "correcao" if acao == "solicitar_correcao_ponto" else "retroativo"
+    if modo == "correcao" and not _pode_aprovar_ponto():
+        raise ValueError("Sem permissão para corrigir o ponto.")
+    fid = request.form.get("funcionario_id", type=int)
+    if fid and (not meu_funcionario_id or int(fid) != int(meu_funcionario_id)):
+        if not (_pode_gestao_ponto() or _pode_aprovar_ponto()):
+            raise ValueError("Sem permissão para lançar ponto de outro colaborador.")
+    else:
+        fid = meu_funcionario_id
+    if not fid:
+        raise ValueError("Selecione o colaborador.")
+    cursor.execute("SELECT id FROM funcionarios WHERE id = %s", (fid,))
+    if not cursor.fetchone():
+        raise ValueError("Colaborador não encontrado.")
+    justificativa = validar_justificativa(request.form.get("justificativa"))
+    data_ref = parse_data(request.form.get("data_ref"))
+    atuais = _registro_dia_ponto(cursor, fid, data_ref)
+    pedido = validar_pedido(
+        atuais,
+        request.form,
+        data_ref,
+        hoje,
+        modo=modo,
+        competencias_fechadas=competencias_fechadas,
+        exigir_mudanca=True,
+    )
+    cursor.execute(
+        """
+        SELECT id FROM ponto_solicitacoes
+        WHERE funcionario_id = %s AND data_ref = %s AND status = 'pendente'
+        """,
+        (fid, pedido["data_ref"]),
+    )
+    if cursor.fetchone():
+        raise ValueError("Já existe um pedido pendente para este colaborador neste dia.")
+    horas = []
+    altera = []
+    origens = []
+    for marca in MARCAS:
+        if marca in pedido["pedidas"]:
+            horas.append(pedido["pedidas"][marca])
+            altera.append(True)
+        else:
+            horas.append(None)
+            altera.append(False)
+        origens.append(pedido["atuais"].get(marca) or None)
+    try:
+        cursor.execute(
+            """
+            INSERT INTO ponto_solicitacoes (
+                funcionario_id, data_ref, tipo, justificativa, status,
+                entrada, cafe_ida, cafe_volta, almoco, almoco_volta, saida,
+                altera_entrada, altera_cafe_ida, altera_cafe_volta,
+                altera_almoco, altera_almoco_volta, altera_saida,
+                orig_entrada, orig_cafe_ida, orig_cafe_volta,
+                orig_almoco, orig_almoco_volta, orig_saida,
+                solicitado_por, solicitado_nome
+            ) VALUES (
+                %s, %s, %s, %s, 'pendente',
+                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
+                %s, %s
+            )
+            """,
+            (
+                fid,
+                pedido["data_ref"],
+                pedido["tipo"],
+                justificativa,
+                *horas,
+                *altera,
+                *origens,
+                usuario_id,
+                usuario_nome,
+            ),
+        )
+    except Exception as erro:
+        if getattr(erro, "pgcode", None) == "23505":
+            raise ValueError(
+                "Já existe um pedido pendente para este colaborador neste dia."
+            ) from erro
+        raise
+    flash(
+        "Pedido de ponto enviado. Ele só entra no ponto e no contra-cheque depois da aprovação.",
+        "success",
+    )
+    if request.form.get("funcionario_id"):
+        return "painel-retroativo-equipe"
+    return "painel-retroativo"
+
+
 @app.route("/ponto", methods=["GET", "POST"])
 def ponto():
     if "usuario_id" not in session:
@@ -13171,6 +13590,7 @@ def ponto():
         return redirect(url_for("dashboard"))
 
     gestao = _pode_gestao_ponto()
+    pode_aprovar_ponto = _pode_aprovar_ponto()
     funcionario_id = session.get("funcionario_id") or _id_funcionario_da_sessao()
     if funcionario_id:
         session["funcionario_id"] = funcionario_id
@@ -13217,6 +13637,8 @@ def ponto():
     faltas_pendentes = []
     faltas_mes = []
     equipe = []
+    minhas_solicitacoes = []
+    solicitacoes_pendentes = []
     admin_id = funcionario_id
 
     try:
@@ -13391,6 +13813,11 @@ def ponto():
                         "salvar_tempos_funcionario": "painel-tempos",
                     }.get(acao, "painel-pdfs-gestao")
                     return redirect(url_for("ponto", mes=mes_filtro, abrir=painel_retorno))
+
+                painel_retro = _tratar_ponto_retroativo(cursor, acao, funcionario_id)
+                if painel_retro:
+                    conexao.commit()
+                    return redirect(url_for("ponto", mes=mes_filtro, abrir=painel_retro))
 
                 if not funcionario_id:
                     raise ValueError(
@@ -13648,6 +14075,7 @@ def ponto():
                     (funcionario_id,),
                 )
                 faltas = [dict(item) for item in (cursor.fetchall() or [])]
+                minhas_solicitacoes = _listar_solicitacoes_ponto(cursor, funcionario_id, limite=40)
 
                 # Banco de horas do mês filtrado
                 cursor.execute(
@@ -13759,6 +14187,20 @@ def ponto():
                     """
                 )
                 equipe = [dict(r) for r in (cursor.fetchall() or [])]
+            if pode_aprovar_ponto:
+                solicitacoes_pendentes = _listar_solicitacoes_ponto(
+                    cursor, status="pendente", limite=80
+                )
+            if (gestao or pode_aprovar_ponto) and not equipe:
+                cursor.execute(
+                    """
+                    SELECT id, nome_completo, ponto_minutos_cafe, ponto_minutos_almoco, ponto_jornada_minutos
+                    FROM funcionarios
+                    WHERE COALESCE(ativo, TRUE) = TRUE
+                    ORDER BY nome_completo
+                    """
+                )
+                equipe = [dict(r) for r in (cursor.fetchall() or [])]
     except Exception as e:
         try:
             conexao.rollback()
@@ -13805,6 +14247,12 @@ def ponto():
         faltas_pendentes=faltas_pendentes,
         faltas_mes=faltas_mes,
         equipe=equipe,
+        pode_aprovar_ponto=pode_aprovar_ponto,
+        minhas_solicitacoes=minhas_solicitacoes,
+        solicitacoes_pendentes=solicitacoes_pendentes,
+        data_ontem=(agora.date() - timedelta(days=1)).isoformat(),
+        qtd_pendentes_ponto=len(solicitacoes_pendentes),
+        qtd_meus_pendentes=sum(1 for item in minhas_solicitacoes if item.get("status") == "pendente"),
     )
 
 
