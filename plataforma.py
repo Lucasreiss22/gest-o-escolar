@@ -11,6 +11,7 @@ from config import carregar_config
 from database import (
     _schema_seguro,
     definir_banco_escola,
+    esquecer_schema,
     limpar_banco_escola,
     obter_conexao,
     obter_conexao_nova,
@@ -1433,6 +1434,7 @@ def excluir_escola(escola_id):
         except Exception as e:
             print(f"DROP SCHEMA {db_nome}: {e}")
         finally:
+            esquecer_schema(db_nome)
             if admin:
                 try:
                     admin.close()

@@ -60,15 +60,94 @@ _params_pg = None
 _raw_pg = None
 _tabelas_ok = set()
 
+_DDL_JA_EXISTE = set()
+_consultas_pg = ContextVar("consultas_pg", default=None)
+_RE_DDL_IDEMPOTENTE = re.compile(
+    r"^\s*(ALTER\s+TABLE|CREATE\s+(UNIQUE\s+)?(TABLE|INDEX))\b.*\bIF\s+NOT\s+EXISTS\b", re.I | re.S
+)
+_RE_ALTER_COM_EFEITO = re.compile(
+    r"\b(ALTER\s+COLUMN|DROP|RENAME|SET\s+(NOT\s+NULL|DATA|SCHEMA)|TYPE|CONSTRAINT|VALIDATE|OWNER)\b", re.I
+)
+
+
+def iniciar_contagem_consultas():
+    return _consultas_pg.set([0])
+
+
+def contagem_consultas():
+    contador = _consultas_pg.get()
+    return contador[0] if contador else 0
+
+
+def esquecer_schema(schema):
+    """Depois de apagar/recriar um schema, as tabelas e colunas dele precisam ser conferidas de novo."""
+    for chave in [c for c in _DDL_JA_EXISTE if c[0] == schema]:
+        _DDL_JA_EXISTE.discard(chave)
+    for chave in [c for c in _tabelas_ok if str(c).startswith(f"{schema}:")]:
+        _tabelas_ok.discard(chave)
+
+
+def _ddl_memorizavel(query):
+    if not isinstance(query, str) or not _RE_DDL_IDEMPOTENTE.match(query):
+        return False
+    if ";" in query.strip().rstrip(";"):
+        return False
+    if query.lstrip()[:5].upper() == "ALTER" and _RE_ALTER_COM_EFEITO.search(query):
+        return False
+    return True
+
+
+class _CursorMemo:
+    """Conta as consultas e deixa de reenviar ALTER/CREATE ... IF NOT EXISTS que o Postgres já respondeu
+    com "already exists, skipping" neste processo (cada um pega lock exclusivo e custa uma ida ao banco)."""
+
+    _schema_memo = None
+
+    def execute(self, query, vars=None):
+        contador = _consultas_pg.get()
+        chave = None
+        if vars is None and _ddl_memorizavel(query):
+            chave = (self._schema_memo, " ".join(query.split()))
+            if chave in _DDL_JA_EXISTE:
+                return None
+            try:
+                del self.connection.notices[:]
+            except Exception:
+                pass
+        if contador is not None:
+            contador[0] += 1
+        resultado = super().execute(query, vars)
+        if chave:
+            esperado = len(re.findall(r"\bIF\s+NOT\s+EXISTS\b", query, re.I))
+            pulados = sum(1 for aviso in self.connection.notices if "already exists, skipping" in aviso)
+            if esperado and pulados >= esperado:
+                _DDL_JA_EXISTE.add(chave)
+        return resultado
+
+
+_CLASSES_CURSOR_MEMO = {}
+
+
+def _classe_cursor_memo(factory):
+    classe = _CLASSES_CURSOR_MEMO.get(factory)
+    if classe is None:
+        classe = type(f"Memo{factory.__name__}", (_CursorMemo, factory), {})
+        _CLASSES_CURSOR_MEMO[factory] = classe
+    return classe
+
 
 class _ConexaoReuso:
     """close() devolve a conexão ao worker em vez de derrubar o SSL com o Supabase."""
 
-    def __init__(self, raw):
+    def __init__(self, raw, schema=None):
         self._raw = raw
+        self._schema = schema
 
     def cursor(self, *args, **kwargs):
-        return self._raw.cursor(*args, **kwargs)
+        factory = kwargs.pop("cursor_factory", None) or self._raw.cursor_factory or psycopg2.extensions.cursor
+        cur = self._raw.cursor(*args, cursor_factory=_classe_cursor_memo(factory), **kwargs)
+        cur._schema_memo = self._schema
+        return cur
 
     def commit(self):
         return self._raw.commit()
@@ -219,7 +298,7 @@ def obter_conexao(master=False):
             except Exception:
                 pass
             _aplicar_schema(_raw_pg, schema)
-            return _ConexaoReuso(_raw_pg)
+            return _ConexaoReuso(_raw_pg, schema)
         except Exception as erro:
             ultimo_erro_pg = str(erro)
             try:

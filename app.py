@@ -261,6 +261,32 @@ if ambiente_producao():
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 
+_LIMITE_LOG_LENTO_MS = int(os.environ.get("LOG_LENTO_MS") or 1500)
+
+
+@app.before_request
+def _iniciar_medicao():
+    from database import iniciar_contagem_consultas
+
+    g._inicio_req = time.perf_counter()
+    iniciar_contagem_consultas()
+
+
+@app.after_request
+def _registrar_medicao(resposta):
+    inicio = getattr(g, "_inicio_req", None)
+    if inicio is None:
+        return resposta
+    from database import contagem_consultas
+
+    ms = (time.perf_counter() - inicio) * 1000
+    consultas = contagem_consultas()
+    resposta.headers["Server-Timing"] = f'app;dur={ms:.0f}, db;desc="{consultas} consultas"'
+    if ms >= _LIMITE_LOG_LENTO_MS:
+        print(f"[lento] {request.method} {request.path} ({request.endpoint}) {ms:.0f} ms, {consultas} consultas")
+    return resposta
+
+
 _IDENTIDADE_PDF = {}
 _IDENTIDADE_PDF_TTL = 600
 _IDENTIDADE_PDF_TTL_ERRO = 60
