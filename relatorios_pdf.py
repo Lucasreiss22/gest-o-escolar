@@ -218,11 +218,11 @@ def pdf_prova(
             pdf.set_fill_color(235, 241, 250)
             pdf.cell(0, 8, materia_q, fill=True, new_x="LMARGIN", new_y="NEXT")
             pdf.ln(2)
-        for foto in questao.get("fotos") or []:
-            _imagem_questao(pdf, foto)
         pdf.set_x(12)
         pdf.set_font(pdf.fonte, "B", 11)
         pdf.multi_cell(0, 6, texto_q, new_x="LMARGIN", new_y="NEXT")
+        for foto in questao.get("fotos") or []:
+            _imagem_questao(pdf, foto)
         pdf.set_font(pdf.fonte, "", 11)
         if (questao.get("tipo") or "") == "multipla":
             for letra, texto in zip("ABCDE", questao.get("alternativas") or []):
@@ -303,10 +303,29 @@ def _assinaturas_prova(pdf, professor=None):
     pdf.set_y(y_linha + 20)
 
 
+_provedor_identidade = None
+
+
+def registrar_identidade_escola(funcao):
+    """funcao() devolve {"nome", "cnpj", "logo": (bytes, mime)} da escola atual para o cabeçalho dos PDFs."""
+    global _provedor_identidade
+    _provedor_identidade = funcao
+
+
+def _identidade_escola():
+    if not _provedor_identidade:
+        return {}
+    try:
+        return _provedor_identidade() or {}
+    except Exception:
+        return {}
+
+
 class RelatorioPDF(FPDF):
     def __init__(self, titulo):
         super().__init__(format="A4")
         self.titulo_cabecalho = titulo
+        self.identidade = _identidade_escola()
         self.set_auto_page_break(auto=True, margin=18)
         fonte_ok = False
         for estilo, caminhos in FONTES.items():
@@ -317,18 +336,90 @@ class RelatorioPDF(FPDF):
                     break
         self.fonte = "Relatorio" if fonte_ok else "Helvetica"
 
+    def _logo_cabecalho(self, topo):
+        logo = self.identidade.get("logo") or (None, None)
+        if not logo[0]:
+            return False
+        arquivo = BytesIO(logo[0])
+        arquivo.name = "logo.png" if "png" in (logo[1] or "").lower() else "logo.jpg"
+        try:
+            self.image(arquivo, x=self.l_margin, y=topo, w=22, h=15, keep_aspect_ratio=True)
+            return True
+        except Exception:
+            return False
+
     def header(self):
         try:
             self.set_font(self.fonte, "B", 13)
         except Exception:
             self.set_font("Helvetica", "B", 13)
             self.fonte = "Helvetica"
+        nome = (self.identidade.get("nome") or "").strip()
+        cnpj = (self.identidade.get("cnpj") or "").strip()
+        topo = self.get_y()
+        texto_x = self.l_margin
+        if self._logo_cabecalho(topo):
+            texto_x = self.l_margin + 26
+        if nome or cnpj:
+            self.set_xy(texto_x, topo)
+            self.set_font(self.fonte, "B", 10)
+            self.set_text_color(40, 40, 40)
+            if nome:
+                self.cell(0, 5, nome[:90], new_x="LMARGIN", new_y="NEXT")
+            if cnpj:
+                self.set_x(texto_x)
+                self.set_font(self.fonte, "", 8)
+                self.set_text_color(100, 100, 100)
+                self.cell(0, 4, f"CNPJ {cnpj}", new_x="LMARGIN", new_y="NEXT")
+            self.set_x(texto_x)
+        self.set_font(self.fonte, "B", 13)
         self.set_text_color(30, 58, 95)
         self.cell(0, 8, self.titulo_cabecalho, new_x="LMARGIN", new_y="NEXT")
+        if texto_x > self.l_margin and self.get_y() < topo + 16:
+            self.set_y(topo + 16)
         self.set_draw_color(59, 130, 246)
         self.set_line_width(0.6)
         self.line(10, self.get_y(), 200, self.get_y())
         self.ln(6)
+
+    def assinaturas(self, declaracao, esquerda, direita):
+        """Declaração + duas linhas de assinatura. esquerda/direita: (título, nome, complemento)."""
+        if self.get_y() + 50 > self.page_break_trigger:
+            self.add_page()
+        margem = self.l_margin
+        meio = 10
+        largura = (self.epw - meio) / 2
+        x_dir = margem + largura + meio
+        self.ln(4)
+        if declaracao:
+            self.set_font(self.fonte, "", 9)
+            self.set_text_color(70, 70, 70)
+            self.multi_cell(self.epw, 4.5, declaracao, new_x="LMARGIN", new_y="NEXT")
+        self.ln(16)
+        y_linha = self.get_y()
+        self.set_draw_color(40, 40, 40)
+        self.set_line_width(0.3)
+        self.line(margem, y_linha, margem + largura, y_linha)
+        self.line(x_dir, y_linha, x_dir + largura, y_linha)
+        self.set_draw_color(0, 0, 0)
+        self.set_line_width(0.2)
+        for x, (titulo, nome, complemento) in ((margem, esquerda), (x_dir, direita)):
+            self.set_text_color(40, 40, 40)
+            self.set_font(self.fonte, "", 10)
+            self.set_xy(x, y_linha + 1)
+            self.cell(largura, 5, titulo, align="C")
+            self.set_font(self.fonte, "", 9)
+            self.set_text_color(90, 90, 90)
+            extras = [str(t).strip()[:60] for t in (nome, complemento) if str(t or "").strip()]
+            for i, texto in enumerate(extras):
+                self.set_xy(x, y_linha + 6 + 5 * i)
+                self.cell(largura, 5, texto, align="C")
+            self.set_font(self.fonte, "", 10)
+            self.set_text_color(40, 40, 40)
+            self.set_xy(x, y_linha + 18)
+            self.cell(largura, 6, "Data: ____/____/______", align="C")
+        self.set_text_color(20, 20, 20)
+        self.set_y(y_linha + 26)
 
     def footer(self):
         self.set_y(-15)
@@ -1110,16 +1201,29 @@ def pdf_boletim(escola, aluno, notas, faltas_resumo, turmas=None):
     pdf.linha("Faltas", (faltas_resumo or {}).get("falta") or 0)
     linhas = []
     for n in notas or []:
+        nota = n.get("nota")
         linhas.append([
             n.get("materia") or n.get("titulo_avaliacao") or "-",
             n.get("trimestre") or "-",
-            n.get("nota") or "-",
+            "Sem nota" if nota in (None, "") else _nota_br(nota),
         ])
     if linhas:
         pdf.tabela(["Matéria / prova", "Bim.", "Nota"], linhas, [90, 30, 40])
     else:
         pdf.paragrafo("Sem notas lançadas.")
+    pdf.assinaturas(
+        "Declaro que tomei ciência das notas e da frequência informadas neste boletim.",
+        ("Assinatura do(a) responsável", "", "Responsável legal"),
+        ("Direção / secretaria", escola, ""),
+    )
     return _saida(pdf)
+
+
+def _nota_br(valor):
+    try:
+        return f"{float(valor):.1f}".replace(".", ",")
+    except (TypeError, ValueError):
+        return str(valor)
 
 
 def pdf_ficha_pedagogica(
@@ -2093,16 +2197,44 @@ def pdf_contracheque(escola, mes_label, item):
             "Horas extras",
             f"{item.get('horas_extras') or 0:g} h × {_brl(item.get('valor_hora_extra'))} = {_brl(item.get('adicional_he'))}",
         )
-    pdf.linha("Bruto", _brl((item or {}).get("bruto")), negrito=True)
-    pdf.linha("INSS", _brl((item or {}).get("inss_funcionario")))
-    pdf.linha("IRRF", _brl((item or {}).get("irrf")))
-    if (item or {}).get("desconto_faltas"):
+    item = item or {}
+    pj = item.get("tipo_contrato") in ("pj", "pessoa_juridica")
+    pdf.linha("Bruto" if not pj else "Valor da nota (bruto)", _brl(item.get("bruto")), negrito=True)
+    if not pj:
+        pdf.linha("INSS", _brl(item.get("inss_funcionario")))
+        pdf.linha("IRRF", _brl(item.get("irrf")))
+    else:
+        for chave, rotulo in (
+            ("irrf", "IRRF retido (1,5%)"),
+            ("pis", "PIS retido (0,65%)"),
+            ("cofins", "COFINS retida (3%)"),
+            ("csll", "CSLL retida (1%)"),
+            ("iss", "ISS retido"),
+        ):
+            pdf.linha(rotulo, _brl(item.get(chave)))
+    if item.get("desconto_faltas"):
         pdf.linha("Faltas não justificadas", _brl(item.get("desconto_faltas")))
-    if (item or {}).get("desconto_dsr_faltas"):
+    if item.get("desconto_dsr_faltas"):
         pdf.linha("DSR por faltas", _brl(item.get("desconto_dsr_faltas")))
-    pdf.linha("Líquido", _brl((item or {}).get("liquido")), negrito=True)
-    if (item or {}).get("observacao"):
+    pdf.linha("Total de descontos", _brl(item.get("descontos")))
+    pdf.linha("Líquido", _brl(item.get("liquido")), negrito=True)
+    if item.get("base_inss") is not None:
+        pdf.secao("Bases de cálculo")
+        pdf.linha("Base do INSS", _brl(item.get("base_inss")))
+        pdf.linha("Base do IRRF", _brl(item.get("base_irrf")))
+        pdf.linha("Base do FGTS", _brl(item.get("base_fgts")))
+        pdf.linha(
+            f"FGTS do mês ({float(item.get('aliquota_fgts') or 0) * 100:.0f}%, depositado pela escola)",
+            _brl(item.get("fgts")),
+        )
+    if item.get("observacao"):
         pdf.paragrafo(item.get("observacao"))
+    pdf.assinaturas(
+        f"Declaro ter recebido a importância líquida de {_brl(item.get('liquido'))} "
+        f"discriminada neste recibo, referente a {mes_label}.",
+        ("Assinatura do(a) colaborador(a)", item.get("nome_completo"), item.get("cargo")),
+        ("Responsável pela escola", escola, "Direção / RH"),
+    )
     return _saida(pdf)
 
 
@@ -2445,6 +2577,15 @@ def pdf_rescisao(escola, pessoa, calculo, rescisao_id=None):
         pdf.linha("Cargo", pessoa.get("cargo"))
     pdf.ln(2)
     _linha_rescisao_calc(pdf, calculo)
+    liquido = (calculo or {}).get("total_liquido")
+    pdf.assinaturas(
+        "Recebi as verbas rescisórias discriminadas neste documento"
+        + (f", no valor líquido de {_brl(liquido)}" if liquido is not None else "")
+        + ". Documento de apoio à homologação; não substitui o TRCT oficial.",
+        ("Assinatura do(a) colaborador(a)", (pessoa or {}).get("nome_completo"),
+         f"CPF {(pessoa or {}).get('cpf')}" if (pessoa or {}).get("cpf") else ""),
+        ("Responsável pela escola", escola, "Empregador"),
+    )
     return _saida(pdf)
 
 

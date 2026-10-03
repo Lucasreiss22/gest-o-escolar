@@ -128,6 +128,7 @@ from relatorios_pdf import (
     pdf_ponto,
     pdf_rescisao,
     pdf_rescisoes_mes,
+    registrar_identidade_escola,
 )
 from folha import (
     calcular_folha_pessoa,
@@ -254,6 +255,72 @@ if ambiente_producao():
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config["SESSION_COOKIE_SECURE"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+
+_IDENTIDADE_PDF = {}
+_IDENTIDADE_PDF_TTL = 600
+_IDENTIDADE_PDF_TTL_ERRO = 60
+
+
+def _formatar_cnpj(valor):
+    digitos = "".join(c for c in str(valor or "") if c.isdigit())
+    if len(digitos) != 14:
+        return (valor or "").strip()
+    return f"{digitos[:2]}.{digitos[2:5]}.{digitos[5:8]}/{digitos[8:12]}-{digitos[12:]}"
+
+
+def _invalidar_identidade_pdf():
+    from database import _nome_banco_atual
+
+    _IDENTIDADE_PDF.pop(_nome_banco_atual(master=False), None)
+
+
+def _identidade_escola_pdf():
+    """Nome, CNPJ e logo da escola da sessão para o cabeçalho dos PDFs (conexão própria, com cache)."""
+    from database import _nome_banco_atual, _schema_seguro, obter_conexao_nova
+
+    schema = _schema_seguro(_nome_banco_atual(master=False) or "")
+    if not schema or schema == "public":
+        return {}
+    agora = time.time()
+    cache = _IDENTIDADE_PDF.get(schema)
+    if cache and cache[0] > agora:
+        return cache[1]
+    dados = {}
+    validade = _IDENTIDADE_PDF_TTL
+    con = None
+    try:
+        con = obter_conexao_nova()
+        with con.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f'SELECT * FROM "{schema}".configuracoes WHERE id = 1'
+            )
+            cfg = cur.fetchone() or {}
+            dados["nome"] = (cfg.get("nome_escola") or "").strip()
+            dados["cnpj"] = _formatar_cnpj(cfg.get("nfse_cnpj"))
+            caminho = cfg.get("logo_escola") or ""
+            if caminho.startswith("midia/") and caminho.split("/")[-1].isdigit():
+                cur.execute(
+                    f'SELECT mime, dados FROM "{schema}".midia WHERE id = %s',
+                    (int(caminho.split("/")[-1]),),
+                )
+                mid = cur.fetchone()
+                if mid and mid.get("dados"):
+                    dados["logo"] = (bytes(mid["dados"]), mid.get("mime"))
+    except Exception as erro:
+        print(f"identidade PDF ({schema}): {erro}")
+        validade = _IDENTIDADE_PDF_TTL_ERRO
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+    _IDENTIDADE_PDF[schema] = (agora + validade, dados)
+    return dados
+
+
+registrar_identidade_escola(_identidade_escola_pdf)
 
 
 def _pagina_erro(e):
@@ -14974,6 +15041,7 @@ def pagina_configuracoes():
                     with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                         aceito, aviso = salvar_config_escola(cursor, request.form, request.files.get("nfse_certificado"))
                         conexao.commit()
+                        _invalidar_identidade_pdf()
                         flash("Dados da nota fiscal salvos. " + aviso, "success" if aceito else "danger")
                 except Exception as e:
                     conexao.rollback()
@@ -15105,6 +15173,7 @@ def pagina_configuracoes():
                                     (mensagem or None,),
                                 )
                         conexao.commit()
+                        _invalidar_identidade_pdf()
                         flash("Identidade das provas salva (logo e tarja).", "success")
                 except Exception as e:
                     conexao.rollback()
@@ -15147,6 +15216,7 @@ def pagina_configuracoes():
                             (nome_escola, ano_letivo, email_contato, regime_tributario, regime_apuracao, simples_atividade),
                         )
                         conexao.commit()
+                        _invalidar_identidade_pdf()
                         session["escola_email_contato"] = (email_contato or "").strip()
                         session["escola_nome"] = nome_escola or session.get("escola_nome")
                         flash("✅ Parâmetros salvos com sucesso!", "success")
