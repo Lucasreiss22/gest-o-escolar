@@ -144,6 +144,10 @@
                         <label>Senha de entrada no painel (opcional)</label>
                         <input type="password" name="senha" autocomplete="new-password" placeholder="Só se ela for entrar no sistema">
                     </div>
+                    <label class="hint" style="display:flex;gap:8px;align-items:flex-start;grid-column:1/-1;">
+                        <input type="checkbox" name="enviar_codigo" value="1">
+                        <span>Enviar agora um código de acesso para o e-mail informado. Sem isso, nenhum e-mail sai: no primeiro acesso a pessoa pede o código na própria tela de login.</span>
+                    </label>
                     <div class="form-group">
                         <label>Perfil de permissão</label>
                         <select name="papel">

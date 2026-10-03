@@ -4020,8 +4020,14 @@ def plataforma_escolas():
                     antiga = buscar_escola_por_email(email_novo)
                     excluir_escola(antiga["id"])
                 escola = cadastrar_escola(request.form.get("nome"), email_novo)
-                ok, erro, _link = _enviar_convite_escola(escola)
-                _avisar_envio(escola, ok, erro, acao="cadastro")
+                if request.form.get("enviar_convite") == "1":
+                    ok, erro, _link = _enviar_convite_escola(escola)
+                    _avisar_envio(escola, ok, erro, acao="cadastro")
+                else:
+                    flash(
+                        f"Escola cadastrada sem enviar e-mail. Quando quiser, use Reenviar convite para {escola.get('email_admin')}.",
+                        "success",
+                    )
             except Exception as e:
                 flash(f"Não foi possível cadastrar a escola: {e}", "danger")
         elif acao == "reenviar_convite":
@@ -4739,7 +4745,7 @@ def gerenciar_usuarios():
                     flash("Cadastro da equipe salvo. Contra-cheque e avisos vão para o e-mail informado.", "success")
                     if criar_login and papel_mudou and uid and uid != session.get("usuario_id"):
                         flash("O acesso voltou ao padrão da função. Ajuste em Configurações, se precisar. Vale no próximo acesso dela.", "success")
-                    if criar_login and (novo_login or senha_informada):
+                    if criar_login and request.form.get("enviar_codigo") == "1":
                         try:
                             ok, erro = _enviar_codigo_colaborador(email, nome)
                             if ok:

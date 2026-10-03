@@ -606,6 +606,23 @@ def _enviar_via_https(remetente, destinos, assunto, corpo, html=None, anexos=Non
     raise RuntimeError("Nenhuma chave HTTPS de e-mail (BREVO_API_KEY, RESEND_API_KEY ou SENDGRID_API_KEY).")
 
 
+_DOMINIOS_RESERVADOS = ("example.com", "example.org", "example.net")
+_SUFIXOS_RESERVADOS = (".test", ".example", ".invalid", ".localhost")
+
+
+def modo_teste_email():
+    return (os.environ.get("EMAIL_MODO_TESTE") or "").strip().lower() in ("1", "true", "sim", "yes", "on")
+
+
+def email_de_teste(email):
+    """Domínios reservados para teste (RFC 2606) e os listados em EMAIL_DOMINIOS_TESTE nunca recebem e-mail."""
+    dominio = (email or "").rsplit("@", 1)[-1].strip().lower()
+    extras = [d.strip().lower() for d in (os.environ.get("EMAIL_DOMINIOS_TESTE") or "").split(",") if d.strip()]
+    if dominio in _DOMINIOS_RESERVADOS or dominio.endswith(_SUFIXOS_RESERVADOS):
+        return True
+    return any(dominio == d or dominio.endswith("." + d) for d in extras)
+
+
 def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=None):
     lista = []
     for item in destinos or []:
@@ -613,6 +630,15 @@ def enviar_email(destinos, assunto, corpo, anexos=None, html=None, access_token=
             lista.append(normalizar_email(item))
     if not lista:
         raise RuntimeError("Nenhum e-mail válido para envio. Cadastre o e-mail do responsável, professor ou destinatário.")
+    if modo_teste_email():
+        print(f"[EMAIL_MODO_TESTE] não enviado para {lista}: {assunto}")
+        return lista
+    bloqueados = [e for e in lista if email_de_teste(e)]
+    if bloqueados:
+        print(f"e-mail de teste ignorado: {bloqueados}: {assunto}")
+        lista = [e for e in lista if e not in bloqueados]
+        if not lista:
+            return bloqueados
 
     html = html or _html_do_texto(corpo)
     cfg = carregar_config()
