@@ -26,6 +26,7 @@ from folha import (
     _num,
     hora_normal_clt,
     inss_empregado,
+    irrf_mensal as calcular_irrf_mensal,
     irrf_progressivo,
 )
 
@@ -365,10 +366,11 @@ def calcular_rescisao(func, params):
     # - férias indenizadas + 1/3 (vencidas, em dobro e proporcionais): sem INSS, IRRF e FGTS
     #   (Lei 8.212/91, art. 28, § 9º, d; Súm. 125 e 386 STJ)
     base_mensal = _money(saldo_salario + outros_prov)
-    inss_mensal = inss_empregado(base_mensal)
-    irrf_mensal = irrf_progressivo(max(base_mensal - inss_mensal, 0))
-    inss_13 = inss_empregado(decimo_trabalhado)
-    irrf_13 = irrf_progressivo(max(decimo - inss_13, 0))
+    ano_ref, mes_ref = deslig.year, deslig.month
+    inss_mensal = inss_empregado(base_mensal, ano_ref, mes_ref)
+    irrf_mensal = calcular_irrf_mensal(base_mensal, inss_mensal, ano_ref, mes_ref)["irrf"]
+    inss_13 = inss_empregado(decimo_trabalhado, ano_ref, mes_ref)
+    irrf_13 = irrf_progressivo(max(decimo - inss_13, 0), ano_ref, mes_ref)
     inss = _money(inss_mensal + inss_13)
     irrf = _money(irrf_mensal + irrf_13)
 
@@ -758,11 +760,28 @@ def encerrar_vinculo_e_salvar_rescisao(cursor, funcionario_id, calculo, params, 
     return rescisao_id, removido_login
 
 
+DIAS_READMISSAO_SUSPEITA = 90
+
+
+def alerta_readmissao(historico):
+    """Portaria MTb 384/1992: readmitir em até 90 dias após dispensa sem justa causa presume fraude ao FGTS."""
+    ultimo = next((v for v in historico or [] if v.get("rescisao_data")), None)
+    if not ultimo or (ultimo.get("rescisao_tipo") or "") != "sem_justa_causa":
+        return None
+    desligamento = _as_date(ultimo.get("rescisao_data"))
+    if not desligamento:
+        return None
+    return {
+        "data_desligamento": desligamento,
+        "data_limite": desligamento + timedelta(days=DIAS_READMISSAO_SUSPEITA),
+    }
+
+
 def recontratar_funcionario(cursor, funcionario_id, novo_contrato):
     """Abre novo vínculo reaproveitando dados cadastrais da pessoa.
 
     novo_contrato: data_inicio, cargo, tipo_contrato, salario, valor_hora, horas_mes,
-                   matricula_esocial, dia_pagamento
+                   matricula_esocial, dia_pagamento, ciente_readmissao_90
     """
     cursor.execute("SELECT * FROM funcionarios WHERE id = %s", (funcionario_id,))
     pessoa = cursor.fetchone()
@@ -773,6 +792,13 @@ def recontratar_funcionario(cursor, funcionario_id, novo_contrato):
         raise ValueError("Já existe um vínculo ativo. Encerre a rescisão antes de recontratar.")
 
     inicio = _as_date(novo_contrato.get("data_inicio")) or date.today()
+    alerta = alerta_readmissao(listar_historico_vinculos(cursor, funcionario_id))
+    if alerta and inicio < alerta["data_limite"] and not novo_contrato.get("ciente_readmissao_90"):
+        raise ValueError(
+            f"A dispensa sem justa causa foi em {alerta['data_desligamento'].strftime('%d/%m/%Y')}. "
+            f"Readmitir antes de {alerta['data_limite'].strftime('%d/%m/%Y')} (90 dias) presume fraude "
+            "(Portaria MTb 384/1992). Marque que está ciente para continuar."
+        )
     tipo = novo_contrato.get("tipo_contrato") or "clt_mensalista"
     cargo = (novo_contrato.get("cargo") or pessoa.get("cargo") or "Funcionário").strip()
     salario = _num(novo_contrato.get("salario"))

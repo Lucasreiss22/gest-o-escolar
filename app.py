@@ -139,6 +139,7 @@ from folha import (
 from rescisao import (
     TIPOS_RESCISAO,
     AVISO_MODALIDADES,
+    alerta_readmissao,
     calcular_rescisao,
     dias_aviso_proporcional,
     encerrar_vinculo_e_salvar_rescisao,
@@ -2563,6 +2564,14 @@ def _aplicar_he_ponto(cursor, dados, competencia):
     return dados
 
 
+def _feriados_competencia(cursor, competencia):
+    try:
+        ano, mes = parse_mes(str(competencia)[:7])
+    except Exception:
+        return []
+    return sorted(_feriados_do_mes(cursor, ano, mes))
+
+
 def _func_com_ajuste(cursor, func, competencia):
     dados = dict(func or {})
     dados = aplicar_ajuste_competencia(dados, _ajuste_folha(cursor, dados.get("id"), competencia))
@@ -2572,6 +2581,8 @@ def _func_com_ajuste(cursor, func, competencia):
             dados.update(info)
     except Exception:
         pass
+    if competencia and (dados.get("tipo_contrato") or "").strip().lower() in ("clt_horista", "horista"):
+        dados["feriados_competencia"] = _feriados_competencia(cursor, competencia)
     return _aplicar_he_ponto(cursor, dados, competencia)
 
 
@@ -2593,6 +2604,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
     )
     funcionarios = list(cursor.fetchall() or [])
     ajustes = _mapa_ajustes_folha(cursor, mes_filtro)
+    feriados = _feriados_competencia(cursor, mes_filtro) if mes_filtro else []
     itens = []
     totais = {
         "bruto": 0.0,
@@ -2613,6 +2625,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
                 dados.update(info)
         except Exception:
             pass
+        dados["feriados_competencia"] = feriados
         dados = _aplicar_he_ponto(cursor, dados, mes_filtro)
         calc = calcular_folha_pessoa(dados, regime, ano, mes)
         calc["rotulo_contrato"] = rotulo_contrato(calc["tipo_contrato"])
@@ -2781,6 +2794,7 @@ def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
                         dados.update(info)
                 except Exception:
                     pass
+                dados["feriados_competencia"] = _feriados_competencia(cursor, competencia)
                 dados = _aplicar_he_ponto(cursor, dados, competencia)
                 item = calcular_folha_pessoa(dados, regime, hoje.year, hoje.month)
                 item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
@@ -5015,6 +5029,7 @@ def pagina_rescisao():
         lista=lista,
         selecionado=selecionado,
         historico=historico,
+        alerta_readmissao=alerta_readmissao(historico),
         calculo=calculo,
         params=params,
         tipos_rescisao=TIPOS_RESCISAO,
@@ -5057,6 +5072,7 @@ def rescisao_recontratar():
                     "valor_hora": _float_form("valor_hora"),
                     "horas_mes": _float_form("horas_mes", 220.0),
                     "dia_pagamento": dia_pagamento_valido(request.form.get("dia_pagamento")),
+                    "ciente_readmissao_90": request.form.get("ciente_readmissao_90") == "1",
                 },
             )
             conexao.commit()

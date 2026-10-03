@@ -151,6 +151,17 @@
                 <h3 class="card-title">Novo contrato</h3>
                 <form method="POST" action="{{ url_for('rescisao_recontratar') }}">
                     <input type="hidden" name="funcionario_id" value="{{ selecionado.id }}">
+                    {% if alerta_readmissao %}
+                    <div data-alerta-90="{{ alerta_readmissao.data_limite.isoformat() }}" hidden style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:12px 14px;margin-bottom:12px;color:#9a3412;">
+                        <strong>Atenção à regra dos 90 dias.</strong>
+                        A dispensa sem justa causa foi em {{ alerta_readmissao.data_desligamento.strftime('%d/%m/%Y') }}.
+                        Readmitir antes de <strong>{{ alerta_readmissao.data_limite.strftime('%d/%m/%Y') }}</strong> presume fraude ao FGTS e ao seguro-desemprego (Portaria MTb 384/1992).
+                        <label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-weight:600;">
+                            <input type="checkbox" name="ciente_readmissao_90" value="1">
+                            Estou ciente e quero readmitir antes do prazo
+                        </label>
+                    </div>
+                    {% endif %}
                     <div class="form-grid">
                         <div class="form-group">
                             <label>Data de admissão *</label>
@@ -194,6 +205,24 @@
                         <a class="btn btn-secondary" href="{{ url_for('gerenciar_usuarios', fid=selecionado.id) }}">Abrir cadastro</a>
                     </div>
                 </form>
+                {% if alerta_readmissao %}
+                <script>
+                (function () {
+                    var aviso = document.querySelector('[data-alerta-90]');
+                    var campo = aviso && aviso.closest('form').querySelector('input[name="data_inicio"]');
+                    if (!aviso || !campo) return;
+                    var limite = aviso.getAttribute('data-alerta-90');
+                    function conferir() {
+                        var dentro = campo.value && campo.value < limite;
+                        aviso.hidden = !dentro;
+                        if (!dentro) aviso.querySelector('input[type="checkbox"]').checked = false;
+                    }
+                    campo.addEventListener('change', conferir);
+                    campo.addEventListener('input', conferir);
+                    conferir();
+                })();
+                </script>
+                {% endif %}
             </div>
         {% else %}
             <div class="card-box">

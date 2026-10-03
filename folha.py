@@ -5,22 +5,47 @@ from datetime import date, datetime
 
 from tributacao import br_money
 
-# Portaria Interministerial MPS/MF — tabela 2025/2026 (progressiva)
-TETO_INSS = 8157.41
-FAIXAS_INSS = [
-    (1518.00, 0.075),
-    (2793.88, 0.09),
-    (4190.83, 0.12),
-    (TETO_INSS, 0.14),
-]
+# Tabelas por vigência: a competência da folha escolhe a tabela (a mais recente com início <= competência).
+# INSS do empregado — Portarias Interministeriais MPS/MF de 2025 e 2026 (progressiva).
+TABELAS_INSS = (
+    (date(2025, 1, 1), ((1518.00, 0.075), (2793.88, 0.09), (4190.83, 0.12), (8157.41, 0.14))),
+    (date(2026, 1, 1), ((1621.00, 0.075), (2902.84, 0.09), (4354.27, 0.12), (8475.55, 0.14))),
+)
 
-FAIXAS_IRRF = [
-    (2259.20, 0.0, 0.0),
-    (2826.65, 0.075, 169.44),
-    (3751.05, 0.15, 381.44),
-    (4664.68, 0.225, 662.77),
-    (10**12, 0.275, 896.00),
-]
+# IRRF mensal: (faixas (limite, alíquota, dedução), desconto simplificado mensal).
+# Fev/2024: Lei 14.848/2024. Mai/2025: Lei 15.191/2025.
+TABELAS_IRRF = (
+    (
+        date(2024, 2, 1),
+        (
+            (2259.20, 0.0, 0.0),
+            (2826.65, 0.075, 169.44),
+            (3751.05, 0.15, 381.44),
+            (4664.68, 0.225, 662.77),
+            (10**12, 0.275, 896.00),
+        ),
+        564.80,
+    ),
+    (
+        date(2025, 5, 1),
+        (
+            (2428.80, 0.0, 0.0),
+            (2826.65, 0.075, 182.16),
+            (3751.05, 0.15, 394.16),
+            (4664.68, 0.225, 675.49),
+            (10**12, 0.275, 908.73),
+        ),
+        607.20,
+    ),
+)
+
+# Redução do IRRF mensal da Lei 15.270/2025, a partir de jan/2026, sobre os rendimentos tributáveis do mês:
+# até 5.000 o imposto zera; de 5.000,01 a 7.350 reduz 978,62 − 0,133145 × rendimentos.
+REDUTOR_IRRF_INICIO = date(2026, 1, 1)
+REDUTOR_IRRF_ISENCAO = 5000.00
+REDUTOR_IRRF_LIMITE = 7350.00
+REDUTOR_IRRF_CONSTANTE = 978.62
+REDUTOR_IRRF_FATOR = 0.133145
 
 ALIQUOTA_INSS_AUTONOMO = 0.11
 ALIQUOTA_INSS_PATRONAL = 0.20
@@ -41,13 +66,44 @@ def _num(valor):
         return 0.0
 
 
-def inss_empregado(bruto):
-    base = min(max(_num(bruto), 0.0), TETO_INSS)
+def _referencia(ano=None, mes=None):
+    try:
+        if ano and mes:
+            return date(int(ano), int(mes), 1)
+    except (TypeError, ValueError):
+        pass
+    hoje = date.today()
+    return date(hoje.year, hoje.month, 1)
+
+
+def _vigente(tabelas, ano=None, mes=None):
+    ref = _referencia(ano, mes)
+    escolhida = tabelas[0]
+    for item in tabelas:
+        if item[0] <= ref:
+            escolhida = item
+    return escolhida
+
+
+def faixas_inss(ano=None, mes=None):
+    return _vigente(TABELAS_INSS, ano, mes)[1]
+
+
+def teto_inss(ano=None, mes=None):
+    return faixas_inss(ano, mes)[-1][0]
+
+
+TETO_INSS = teto_inss()
+
+
+def inss_empregado(bruto, ano=None, mes=None):
+    faixas = faixas_inss(ano, mes)
+    base = min(max(_num(bruto), 0.0), faixas[-1][0])
     if base <= 0:
         return 0.0
     anterior = 0.0
     total = 0.0
-    for limite, aliquota in FAIXAS_INSS:
+    for limite, aliquota in faixas:
         faixa = min(base, limite) - anterior
         if faixa > 0:
             total += faixa * aliquota
@@ -57,11 +113,12 @@ def inss_empregado(bruto):
     return round(total, 2)
 
 
-def irrf_progressivo(base):
+def irrf_progressivo(base, ano=None, mes=None):
+    """Imposto pela tabela progressiva vigente, sem desconto simplificado nem redutor."""
     valor = max(_num(base), 0.0)
     if valor <= 0:
         return 0.0
-    for limite, aliquota, deducao in FAIXAS_IRRF:
+    for limite, aliquota, deducao in _vigente(TABELAS_IRRF, ano, mes)[1]:
         if valor <= limite:
             if aliquota == 0:
                 return 0.0
@@ -69,20 +126,97 @@ def irrf_progressivo(base):
     return 0.0
 
 
-def inss_autonomo(bruto):
-    base = min(max(_num(bruto), 0.0), TETO_INSS)
+def desconto_simplificado_irrf(ano=None, mes=None):
+    return _vigente(TABELAS_IRRF, ano, mes)[2]
+
+
+def redutor_irrf(rendimentos, imposto, ano=None, mes=None):
+    """Redução da Lei 15.270/2025, limitada ao imposto calculado."""
+    imposto = max(_num(imposto), 0.0)
+    rendimentos = max(_num(rendimentos), 0.0)
+    if imposto <= 0 or _referencia(ano, mes) < REDUTOR_IRRF_INICIO:
+        return 0.0
+    if rendimentos <= REDUTOR_IRRF_ISENCAO:
+        return round(imposto, 2)
+    if rendimentos <= REDUTOR_IRRF_LIMITE:
+        reducao = REDUTOR_IRRF_CONSTANTE - REDUTOR_IRRF_FATOR * rendimentos
+        return round(min(max(reducao, 0.0), imposto), 2)
+    return 0.0
+
+
+def irrf_mensal(rendimentos, inss, ano=None, mes=None):
+    """IRRF do salário: usa o que for melhor entre deduzir o INSS ou o desconto simplificado, depois o redutor."""
+    rendimentos = max(_num(rendimentos), 0.0)
+    simplificado = desconto_simplificado_irrf(ano, mes)
+    deducao_legal = max(_num(inss), 0.0)
+    usa_simplificado = simplificado > deducao_legal
+    deducao = simplificado if usa_simplificado else deducao_legal
+    base = round(max(rendimentos - deducao, 0.0), 2)
+    imposto = irrf_progressivo(base, ano, mes)
+    reducao = redutor_irrf(rendimentos, imposto, ano, mes)
+    return {
+        "base": base,
+        "deducao": round(deducao, 2),
+        "desconto_simplificado": usa_simplificado,
+        "imposto_tabela": imposto,
+        "redutor": reducao,
+        "irrf": round(max(imposto - reducao, 0.0), 2),
+    }
+
+
+def inss_autonomo(bruto, ano=None, mes=None):
+    base = min(max(_num(bruto), 0.0), teto_inss(ano, mes))
     return round(base * ALIQUOTA_INSS_AUTONOMO, 2)
 
 
-def dsr_horista(valor_horas, ano=None, mes=None):
-    """DSR habitual de 1/6 sobre as horas-aula. Se ano/mês forem informados, usa dias úteis/domingos."""
+def dsr_horista(valor_horas, ano=None, mes=None, feriados=()):
+    """DSR das horas-aula: valor × (domingos + feriados) ÷ dias úteis do mês. Sem mês, 1/6 habitual."""
     horas = _num(valor_horas)
     if ano and mes:
-        dias = monthrange(int(ano), int(mes))[1]
-        domingos = sum(1 for d in range(1, dias + 1) if date(int(ano), int(mes), d).weekday() == 6)
-        uteis = max(dias - domingos, 1)
-        return round(horas * (domingos / uteis), 2)
+        ano, mes = int(ano), int(mes)
+        dias = monthrange(ano, mes)[1]
+        feriados_mes = set()
+        for item in feriados or ():
+            if isinstance(item, datetime):
+                item = item.date()
+            elif isinstance(item, str):
+                try:
+                    item = date.fromisoformat(item[:10])
+                except ValueError:
+                    continue
+            if isinstance(item, date) and item.year == ano and item.month == mes:
+                feriados_mes.add(item)
+        descansos = sum(
+            1 for d in range(1, dias + 1)
+            if date(ano, mes, d).weekday() == 6 or date(ano, mes, d) in feriados_mes
+        )
+        uteis = max(dias - descansos, 1)
+        return round(horas * (descansos / uteis), 2)
     return round(horas / 6.0, 2)
+
+
+def _data(valor):
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    if isinstance(valor, str) and valor:
+        try:
+            return date.fromisoformat(valor[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def dias_proporcionais_admissao(func, ano=None, mes=None):
+    """Dias a pagar no mês de admissão/readmissão (salário ÷ 30 × dias). None se o mês é cheio."""
+    if not ano or not mes:
+        return None
+    inicio = _data(func.get("data_inicio_contrato") or func.get("data_contratacao"))
+    if not inicio or inicio.year != int(ano) or inicio.month != int(mes) or inicio.day == 1:
+        return None
+    ultimo = monthrange(int(ano), int(mes))[1]
+    return max(0, min(ultimo - inicio.day + 1, 30))
 
 
 def _eh_aprendiz(tipo_contrato):
@@ -333,8 +467,8 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
 
     if tipo in ("rpa", "autonomo", "extra_pf"):
         bruto = _num(func.get("salario") or func.get("valor_servico")) + adicional_he
-        inss_f = inss_autonomo(bruto)
-        irrf = irrf_progressivo(bruto - inss_f)
+        inss_f = inss_autonomo(bruto, ano, mes)
+        irrf = irrf_mensal(bruto, inss_f, ano, mes)["irrf"]
         descontos = inss_f + irrf
         inss_p = round(bruto * ALIQUOTA_INSS_PATRONAL, 2)
         rat = round(bruto * ALIQUOTA_RAT, 2)
@@ -363,11 +497,19 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         valor_hora = _num(func.get("valor_hora"))
         horas = _num(func.get("horas_mes"))
         valor_horas = round(valor_hora * horas, 2)
-        dsr = dsr_horista(valor_horas, ano, mes)
+        feriados = func.get("feriados_competencia") or ()
+        dsr = dsr_horista(valor_horas, ano, mes, feriados)
         bruto = round(valor_horas + dsr + adicional_he + dsr_he, 2)
-        resultado["observacao"] = f"Horista: {horas:g} h × {br_money(valor_hora)} + DSR de {br_money(dsr)}."
+        resultado["observacao"] = (
+            f"Horista: {horas:g} h × {br_money(valor_hora)} + DSR de {br_money(dsr)} "
+            f"(domingos{' e feriados' if feriados else ''} do mês ÷ dias úteis)."
+        )
+        salario_mes = round(bruto - dsr - adicional_he - dsr_he, 2)
     else:
-        bruto = round(_num(func.get("salario")) + adicional_he + dsr_he, 2)
+        salario_cheio = _num(func.get("salario"))
+        dias_admissao = dias_proporcionais_admissao(func, ano, mes)
+        salario_mes = round(salario_cheio / 30.0 * dias_admissao, 2) if dias_admissao is not None else salario_cheio
+        bruto = round(salario_mes + adicional_he + dsr_he, 2)
         dsr = 0.0
         if aprendiz:
             resultado["observacao"] = (
@@ -376,6 +518,11 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
             )
         else:
             resultado["observacao"] = "CLT mensalista: salário fixo. INSS progressivo e IRRF sobre o bruto."
+        if dias_admissao is not None:
+            resultado["observacao"] += (
+                f" Mês de admissão: {br_money(salario_cheio)} ÷ 30 × {dias_admissao} dia(s) = {br_money(salario_mes)}."
+            )
+        resultado["dias_admissao"] = dias_admissao
     if adicional_he or dsr_he:
         partes = []
         if he["adicional_he_50"]:
@@ -400,21 +547,27 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
                 " (compensação no mês, art. 59 §6º CLT; tolerância de 10 min/dia, art. 58 §1º)."
             )
 
-    inss_f = inss_empregado(bruto)
-    irrf = irrf_progressivo(bruto - inss_f)
     desconto_faltas = _num(func.get("desconto_faltas"))
     desconto_dsr_faltas = _num(func.get("desconto_dsr_faltas"))
     dias_falta = int(func.get("dias_falta_desconto") or 0)
     semanas_dsr = int(func.get("semanas_dsr_falta") or 0)
+    base_tributavel = round(max(bruto - desconto_faltas - desconto_dsr_faltas, 0.0), 2)
+    inss_f = inss_empregado(base_tributavel, ano, mes)
+    ir = irrf_mensal(base_tributavel, inss_f, ano, mes)
+    irrf = ir["irrf"]
     descontos = inss_f + irrf + desconto_faltas + desconto_dsr_faltas
     if desconto_faltas or desconto_dsr_faltas:
         resultado["observacao"] += (
             f" Faltas não justificadas confirmadas: {dias_falta} dia(s) "
             f"({br_money(desconto_faltas)})"
             + (f" + DSR de {semanas_dsr} semana(s) ({br_money(desconto_dsr_faltas)})" if desconto_dsr_faltas else "")
-            + " — Lei 605/1949."
+            + f" — Lei 605/1949. INSS, IRRF e FGTS sobre {br_money(base_tributavel)}."
         )
-    patronal = encargos_clt(bruto, regime, tipo)
+    if ir["desconto_simplificado"] and ir["imposto_tabela"]:
+        resultado["observacao"] += f" IRRF com desconto simplificado de {br_money(ir['deducao'])}."
+    if ir["redutor"]:
+        resultado["observacao"] += f" Redução do IRRF (Lei 15.270/2025): {br_money(ir['redutor'])}."
+    patronal = encargos_clt(base_tributavel, regime, tipo)
     simples = (regime or "").lower() in ("simples_nacional", "simples")
     if aprendiz:
         resultado["observacao"] += (
@@ -431,10 +584,14 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
     resultado.update(patronal)
     resultado.update(
         {
-            "salario": (bruto - dsr - adicional_he - dsr_he) if tipo in ("clt_horista", "horista") else _num(func.get("salario")),
+            "salario": salario_mes,
             "dsr": dsr,
             "dsr_he": dsr_he,
             "bruto": bruto,
+            "base_inss": base_tributavel,
+            "base_irrf": ir["base"],
+            "base_fgts": base_tributavel,
+            "irrf_redutor": ir["redutor"],
             "inss_funcionario": inss_f,
             "irrf": irrf,
             "desconto_faltas": round(desconto_faltas, 2),
