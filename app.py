@@ -28,6 +28,8 @@ from email_envio import (
 )
 from psycopg2.extras import RealDictCursor, execute_values
 from alunos import (
+    normalizar_desconto,
+    valor_mensalidade_liquido,
     cadastrar_aluno,
     cadastrar_alunos_lote,
     importar_planilha_alunos,
@@ -1298,7 +1300,9 @@ def _gerar_mensalidades_lote(cursor, alunos_ok):
     linhas = []
     for row in alunos_ok:
         dados = row.get("aluno") or {}
-        valor = float(dados.get("valor_mensalidade") or 0)
+        valor = valor_mensalidade_liquido(
+            dados.get("valor_mensalidade"), dados.get("desconto_tipo"), dados.get("desconto_valor")
+        )
         if valor <= 0 or not row.get("aluno_id"):
             continue
         inicio = dados.get("contrato_inicio") or datetime.now().strftime("%Y-%m-%d")
@@ -1325,6 +1329,21 @@ def _gerar_mensalidades_lote(cursor, alunos_ok):
         page_size=500,
     )
     return len(linhas)
+
+
+STATUS_MENSALIDADE_ABERTA = ("Pendente", "Atrasado")
+
+
+def _mensalidades_abertas_divergentes(mensalidades, valor_liquido):
+    """Parcelas do contrato ainda não pagas com valor diferente da mensalidade com desconto."""
+    if not valor_liquido or valor_liquido <= 0:
+        return []
+    return [
+        m for m in mensalidades or []
+        if m.get("parcela_contrato")
+        and (m.get("status") or "") in STATUS_MENSALIDADE_ABERTA
+        and abs(float(m.get("valor") or 0) - valor_liquido) > 0.004
+    ]
 
 
 def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos, descricao_base="Mensalidade", forcar=False):
@@ -8303,6 +8322,15 @@ def pagina_alunos():
                     foto_aluno = _salvar_foto("foto")
                 except ValueError as e:
                     flash(str(e), "danger")
+                desconto_tipo_edit = None
+                desconto_valor_edit = None
+                if "desconto_tipo" in request.form:
+                    desconto_tipo_edit = normalizar_desconto(request.form.get("desconto_tipo"))
+                    desconto_valor_edit = _parse_moeda(request.form.get("desconto_valor"), 0.0)
+                    if desconto_tipo_edit in ("nenhum", "bolsa"):
+                        desconto_valor_edit = 0.0
+                    elif desconto_tipo_edit == "percentual":
+                        desconto_valor_edit = min(desconto_valor_edit, 100.0)
 
                 conexao = obter_conexao()
                 if conexao:
@@ -8327,6 +8355,8 @@ def pagina_alunos():
                                     contrato_meses = COALESCE(%s, contrato_meses),
                                     contrato_inicio = COALESCE(%s::date, contrato_inicio),
                                     turnos_mensalidade = COALESCE(%s, turnos_mensalidade),
+                                    desconto_tipo = COALESCE(%s, desconto_tipo),
+                                    desconto_valor = COALESCE(%s, desconto_valor),
                                     foto_url = COALESCE(%s, foto_url)
                                 WHERE id = %s;
                             """, (
@@ -8347,6 +8377,8 @@ def pagina_alunos():
                                 request.form.get("contrato_meses") or None,
                                 limpar_campo("contrato_inicio"),
                                 limpar_campo("turnos_mensalidade"),
+                                desconto_tipo_edit,
+                                desconto_valor_edit,
                                 foto_aluno,
                                 aluno_id
                             ))
@@ -8358,6 +8390,48 @@ def pagina_alunos():
                     finally:
                         conexao.close()
                 return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+
+        if acao == "ajustar_mensalidades_abertas":
+            aluno_id = request.form.get("aluno_id", type=int)
+            if not aluno_id:
+                return redirect(url_for("pagina_alunos"))
+            if not pode_acao(session.get("usuario_papel"), "financeiro", "alterar", session.get("permissoes")):
+                flash("Sem permissão para alterar mensalidades.", "danger")
+                return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
+            conexao = obter_conexao()
+            if conexao:
+                try:
+                    with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                        cursor.execute(
+                            "SELECT valor_mensalidade, desconto_tipo, desconto_valor FROM alunos WHERE id = %s",
+                            (aluno_id,),
+                        )
+                        al = cursor.fetchone() or {}
+                        liquido = valor_mensalidade_liquido(
+                            al.get("valor_mensalidade"), al.get("desconto_tipo"), al.get("desconto_valor")
+                        )
+                        if liquido <= 0:
+                            raise ValueError("Mensalidade com desconto zerada: ajuste as parcelas no Financeiro.")
+                        cursor.execute(
+                            """
+                            UPDATE financeiro_mensalidades
+                            SET valor = %s
+                            WHERE aluno_id = %s
+                              AND parcela_contrato IS NOT NULL
+                              AND status = ANY(%s)
+                              AND ABS(valor - %s) > 0.004
+                            """,
+                            (liquido, aluno_id, list(STATUS_MENSALIDADE_ABERTA), liquido),
+                        )
+                        qtd = cursor.rowcount
+                        conexao.commit()
+                        flash(f"{qtd} mensalidade(s) em aberto ajustada(s) para R$ {br_money(liquido)}.", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(str(e), "danger")
+                finally:
+                    conexao.close()
+            return redirect(url_for("detalhes_aluno", aluno_id=aluno_id))
 
         if acao in ("editar_autorizado", "deletar_autorizado", "nao_autorizar_busca"):
             aluno_id = request.form.get("aluno_id")
@@ -8492,16 +8566,11 @@ def pagina_alunos():
             valor_mensalidade = _parse_moeda(request.form.get("valor_mensalidade"), 0.0)
             desconto_valor = _parse_moeda(request.form.get("desconto_valor"), 0.0)
 
-            desconto_tipo_raw = request.form.get("desconto_tipo", "nenhum").strip().lower()
-            mapeamento_desconto = {
-                "porcentagem": "percentual",
-                "percentual": "percentual",
-                "fixo": "valor_fixo",
-                "valor_fixo": "valor_fixo",
-                "bolsa": "bolsa",
-                "nenhum": "nenhum",
-            }
-            desconto_tipo = mapeamento_desconto.get(desconto_tipo_raw, "nenhum")
+            desconto_tipo = normalizar_desconto(request.form.get("desconto_tipo"))
+            if desconto_tipo == "percentual" and desconto_valor > 100:
+                flash("Desconto percentual acima de 100%: foi limitado a 100%.", "warning")
+                desconto_valor = 100.0
+            valor_cobrado = valor_mensalidade_liquido(valor_mensalidade, desconto_tipo, desconto_valor)
 
             try:
                 foto_aluno = _salvar_foto("foto")
@@ -8594,11 +8663,17 @@ def pagina_alunos():
                                 )
                                 row_al = cursor.fetchone()
                                 al_id = row_al["id"] if row_al else None
-                                if al_id and valor_mensalidade > 0:
+                                if al_id and valor_cobrado > 0:
                                     nger = _gerar_mensalidades_contrato(
-                                        cursor, al_id, valor_mensalidade, inicio_c, meses_c, turnos_c
+                                        cursor, al_id, valor_cobrado, inicio_c, meses_c, turnos_c
                                     )
-                                    flash(f"Contrato de {meses_c} meses gerou {nger} mensalidade(s).", "success")
+                                    texto_desc = (
+                                        f" de R$ {br_money(valor_cobrado)} (com desconto sobre R$ {br_money(valor_mensalidade)})"
+                                        if valor_cobrado < valor_mensalidade else ""
+                                    )
+                                    flash(f"Contrato de {meses_c} meses gerou {nger} mensalidade(s){texto_desc}.", "success")
+                                elif al_id and valor_mensalidade > 0 and desconto_tipo == "bolsa":
+                                    flash("Bolsa integral: nenhuma mensalidade foi gerada.", "success")
                                 conexao_c.commit()
                         except Exception as e:
                             conexao_c.rollback()
@@ -9054,7 +9129,8 @@ def detalhes_aluno(aluno_id):
 
                 cursor.execute("""
                     SELECT id, descricao, valor, data_vencimento, data_pagamento, status, forma_pagamento,
-                           COALESCE(juros_valor, 0) AS juros_valor, COALESCE(multa_valor, 0) AS multa_valor
+                           COALESCE(juros_valor, 0) AS juros_valor, COALESCE(multa_valor, 0) AS multa_valor,
+                           parcela_contrato
                     FROM financeiro_mensalidades
                     WHERE aluno_id = %s
                     ORDER BY data_vencimento DESC;
@@ -9213,9 +9289,16 @@ def detalhes_aluno(aluno_id):
                 vistos.add(nome)
                 disciplinas_aluno.append(nome)
 
+    mensalidade_liquida = valor_mensalidade_liquido(
+        aluno.get("valor_mensalidade"), aluno.get("desconto_tipo"), aluno.get("desconto_valor")
+    )
+    abertas_divergentes = _mensalidades_abertas_divergentes(financeiro_aluno, mensalidade_liquida)
+
     return render_template(
         "aluno_detalhes.html",
         aluno=aluno,
+        mensalidade_liquida=mensalidade_liquida,
+        abertas_divergentes=abertas_divergentes,
         responsaveis=responsaveis,
         turmas=turmas_aluno,
         financeiro=financeiro_aluno,
@@ -11426,7 +11509,8 @@ def pagina_financeiro():
                         venc_lote = datetime.strptime(data_vencimento_lote[:10], "%Y-%m-%d").date()
                         cursor.execute(
                             """
-                            SELECT id, valor_mensalidade, contrato_meses, contrato_inicio, turnos_mensalidade
+                            SELECT id, valor_mensalidade, contrato_meses, contrato_inicio, turnos_mensalidade,
+                                   desconto_tipo, desconto_valor
                             FROM alunos
                             WHERE COALESCE(NULLIF(status, ''), situacao::text, 'ativo') ILIKE 'ativo'
                               AND valor_mensalidade > 0
@@ -11444,7 +11528,9 @@ def pagina_financeiro():
                             geradas += _gerar_mensalidades_contrato(
                                 cursor,
                                 al["id"],
-                                float(al["valor_mensalidade"] or 0),
+                                valor_mensalidade_liquido(
+                                    al["valor_mensalidade"], al.get("desconto_tipo"), al.get("desconto_valor")
+                                ),
                                 venc_lote,
                                 1,
                                 al.get("turnos_mensalidade") or "manha",

@@ -73,6 +73,37 @@ def _turno_planilha(texto):
     return achados[0]
 
 
+TIPOS_DESCONTO = {
+    "porcentagem": "percentual",
+    "percentual": "percentual",
+    "fixo": "valor_fixo",
+    "valor_fixo": "valor_fixo",
+    "bolsa": "bolsa",
+    "nenhum": "nenhum",
+}
+
+
+def normalizar_desconto(tipo):
+    return TIPOS_DESCONTO.get(str(tipo or "nenhum").strip().lower(), "nenhum")
+
+
+def valor_mensalidade_liquido(valor, desconto_tipo=None, desconto_valor=0):
+    """Mensalidade cobrada depois do desconto do aluno (percentual, valor fixo ou bolsa integral)."""
+    try:
+        bruto = max(float(valor or 0), 0.0)
+        desconto = max(float(desconto_valor or 0), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    tipo = normalizar_desconto(desconto_tipo)
+    if tipo == "bolsa":
+        return 0.0
+    if tipo == "percentual":
+        return round(bruto * (1 - min(desconto, 100.0) / 100.0), 2)
+    if tipo == "valor_fixo":
+        return round(max(bruto - desconto, 0.0), 2)
+    return round(bruto, 2)
+
+
 def _vazio_para_nulo(valor):
     texto = str(valor or "").strip()
     return texto or None

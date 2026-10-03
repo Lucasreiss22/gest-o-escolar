@@ -59,11 +59,32 @@
                         <small class="text-muted fs-6">
                             Matrícula: <strong>{{ aluno.matricula or 'Não gerada' }}</strong> |
                             Mensalidade Base: <strong>R$ {{ (aluno.valor_mensalidade or aluno.mensalidade_base or 0.0)|moeda }}</strong>
+                            {% set desc_tipo = (aluno.desconto_tipo or 'nenhum')|string|lower %}
+                            {% if desc_tipo == 'bolsa' %}
+                            · <strong>Bolsa integral</strong>
+                            {% elif desc_tipo in ['percentual', 'valor_fixo'] and (aluno.desconto_valor or 0) > 0 %}
+                            · desconto de {% if desc_tipo == 'percentual' %}{{ "%g"|format(aluno.desconto_valor|float) }}%{% else %}R$ {{ aluno.desconto_valor|moeda }}{% endif %}
+                            = <strong>R$ {{ mensalidade_liquida|moeda }}</strong>
+                            {% endif %}
                             · {{ aluno.contrato_meses or 12 }} meses
                             · {{ rotulo_turno(aluno.turnos_mensalidade) }}
                         </small>
                     </div>
                 </div>
+
+                {% if abertas_divergentes %}
+                <div class="alert alert-warning d-flex flex-wrap align-items-center gap-2 mb-0">
+                    <div class="flex-grow-1">
+                        {{ abertas_divergentes|length }} mensalidade(s) em aberto estão com valor diferente do contrato com desconto
+                        (<strong>R$ {{ mensalidade_liquida|moeda }}</strong>).
+                    </div>
+                    <form method="POST" action="{{ url_for('pagina_alunos') }}" class="m-0">
+                        <input type="hidden" name="acao" value="ajustar_mensalidades_abertas">
+                        <input type="hidden" name="aluno_id" value="{{ aluno.id }}">
+                        <button type="submit" class="btn btn-warning btn-sm fw-bold">Ajustar para R$ {{ mensalidade_liquida|moeda }}</button>
+                    </form>
+                </div>
+                {% endif %}
 
                 <hr>
 
@@ -1209,7 +1230,7 @@
                             
                             <div class="col-md-6">
                                 <label class="form-label small fw-bold">Valor (R$)</label>
-                                <input type="text" name="valor" class="form-control" value="{{ aluno.valor_mensalidade|moeda_campo }}" data-moeda placeholder="Digite o valor" inputmode="numeric" required>
+                                <input type="text" name="valor" class="form-control" value="{{ mensalidade_liquida|moeda_campo }}" data-moeda placeholder="Digite o valor" inputmode="numeric" required>
                             </div>
                             
                             <div class="col-md-6">
@@ -1287,8 +1308,8 @@
                                 <input type="text" name="telefone_principal" class="form-control" value="{{ aluno.telefone_principal or aluno.telefone or '' }}">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label small fw-bold">E-mail *</label>
-                                <input type="email" name="email" class="form-control" value="{{ aluno.email or '' }}" required>
+                                <label class="form-label small fw-bold">E-mail do aluno (opcional)</label>
+                                <input type="email" name="email" class="form-control" value="{{ aluno.email or '' }}" placeholder="Os avisos vão para o responsável">
                             </div>
                             <div class="col-md-4">
                                 {% with foto_name='foto', foto_atual=aluno.foto_url, foto_rotulo='Foto do aluno' %}{% include '_foto_circulo.html' %}{% endwith %}
@@ -1323,6 +1344,21 @@
                             <div class="col-md-4">
                                 <label class="form-label small fw-bold">Início do contrato</label>
                                 <input type="date" name="contrato_inicio" class="form-control" value="{{ aluno.contrato_inicio or '' }}">
+                            </div>
+                            {% set desc_edit = (aluno.desconto_tipo or 'nenhum')|string|lower %}
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Tipo de desconto</label>
+                                <select name="desconto_tipo" class="form-select">
+                                    <option value="nenhum" {% if desc_edit not in ['percentual', 'valor_fixo', 'bolsa'] %}selected{% endif %}>Nenhum</option>
+                                    <option value="percentual" {% if desc_edit == 'percentual' %}selected{% endif %}>Percentual (%)</option>
+                                    <option value="valor_fixo" {% if desc_edit == 'valor_fixo' %}selected{% endif %}>Valor fixo (R$)</option>
+                                    <option value="bolsa" {% if desc_edit == 'bolsa' %}selected{% endif %}>Bolsa integral</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small fw-bold">Valor do desconto</label>
+                                <input type="text" name="desconto_valor" class="form-control" data-moeda inputmode="numeric" value="{{ (aluno.desconto_valor or 0)|moeda_campo }}">
+                                <small class="text-muted">Percentual: 10,00 = 10%.</small>
                             </div>
                         </div>
                     </div>

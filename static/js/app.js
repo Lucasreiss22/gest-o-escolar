@@ -750,6 +750,30 @@
     else iniciar();
 })();
 
+/* Campo obrigatório numa aba escondida: abre a aba e mostra o aviso no campo. */
+(function () {
+    var tratando = false;
+    document.addEventListener("invalid", function (event) {
+        var campo = event.target;
+        if (tratando || !campo || !campo.closest) return;
+        tratando = true;
+        var aba = campo.closest(".tab-pane");
+        var botao = aba && aba.id && !aba.classList.contains("active") && window.bootstrap
+            ? document.querySelector('[data-bs-target="#' + aba.id + '"], [href="#' + aba.id + '"]')
+            : null;
+        if (!botao) {
+            setTimeout(function () { tratando = false; }, 0);
+            return;
+        }
+        window.bootstrap.Tab.getOrCreateInstance(botao).show();
+        setTimeout(function () {
+            tratando = false;
+            campo.focus();
+            if (campo.reportValidity) campo.reportValidity();
+        }, 200);
+    }, true);
+})();
+
 /* Snapshot dos valores iniciais do formulário → auditoria "antes → depois" */
 (function () {
     var IGNORAR = /^(auditoria_antes|acao|csrf_token|form_login|permanecer_logado)$/i;

@@ -290,8 +290,8 @@
                                         <input type="text" name="telefone_secundario" class="form-control" placeholder="(00) 00000-0000">
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="form-label small fw-bold">E-mail do aluno *</label>
-                                        <input type="email" name="email" class="form-control" placeholder="aluno@email.com" required>
+                                        <label class="form-label small fw-bold">E-mail do aluno (opcional)</label>
+                                        <input type="email" name="email" class="form-control" placeholder="Se vazio, usa o do responsável">
                                     </div>
                                     <div class="col-12">
                                         {% include '_endereco_correios.html' %}
@@ -339,6 +339,7 @@
                                     <div class="col-md-4">
                                         <label class="form-label small fw-bold">Valor do Desconto</label>
                                         <input type="text" name="desconto_valor" class="form-control" placeholder="Digite o valor" value="" data-moeda inputmode="numeric">
+                                        <small class="text-muted">Percentual: 10,00 = 10%. As mensalidades já saem com o desconto.</small>
                                     </div>
                                 </div>
                             </div>
