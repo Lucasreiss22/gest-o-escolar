@@ -17,6 +17,7 @@ from database import (
 )
 from email_envio import enviar_email, exigencia_email, normalizar_email, smtp_configurado
 from permissoes import PACOTES_INICIAIS, TELAS_PLANO
+from senhas import conferir_senha, gerar_hash
 
 PACOTE_COMPLETO = "completo"
 _TODAS_TELAS = [codigo for codigo, _rotulo in TELAS_PLANO]
@@ -241,13 +242,39 @@ def salvar_senha_plataforma(email, senha, nome=None):
                 WHERE LOWER(email) = %s
                 RETURNING *
                 """,
-                (senha, nome, normalizar_email(email)),
+                (gerar_hash(senha), nome, normalizar_email(email)),
             )
             row = cursor.fetchone()
         conexao.commit()
         return row
     finally:
         conexao.close()
+
+
+def conferir_senha_plataforma(admin, senha):
+    """Confere a senha do admin da plataforma e converte senha antiga em texto puro para hash."""
+    if not admin:
+        return False
+    ok, regravar = conferir_senha(admin.get("senha"), senha)
+    if ok and regravar:
+        conexao = obter_conexao(master=True)
+        if conexao:
+            try:
+                with conexao.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE plataforma_admins SET senha = %s WHERE id = %s",
+                        (gerar_hash(senha), admin.get("id")),
+                    )
+                conexao.commit()
+            except Exception as e:
+                print(f"regravar hash admin: {e}")
+                try:
+                    conexao.rollback()
+                except Exception:
+                    pass
+            finally:
+                conexao.close()
+    return ok
 
 
 def buscar_escola_por_email(email):
@@ -1878,18 +1905,19 @@ def ativar_escola(escola, senha):
         conexao = obter_conexao()
         if not conexao:
             raise RuntimeError("Não conectou no banco da escola.")
+        senha_hash = gerar_hash(senha)
         try:
             with conexao.cursor() as cursor:
                 cursor.execute("SELECT id FROM usuarios WHERE LOWER(email) = %s", (escola["email_admin"],))
                 if cursor.fetchone():
                     cursor.execute(
                         "UPDATE usuarios SET senha = %s, papel = 'admin', nome = %s WHERE LOWER(email) = %s",
-                        (senha, escola["nome"], escola["email_admin"]),
+                        (senha_hash, escola["nome"], escola["email_admin"]),
                     )
                 else:
                     cursor.execute(
                         "INSERT INTO usuarios (nome, email, senha, papel) VALUES (%s, %s, %s, 'admin')",
-                        (escola["nome"], escola["email_admin"], senha),
+                        (escola["nome"], escola["email_admin"], senha_hash),
                     )
             conexao.commit()
         finally:
@@ -2009,7 +2037,7 @@ def garantir_login_colaborador(email, escola):
                     ON CONFLICT (email) DO NOTHING
                     RETURNING id
                     ''',
-                    (nome, email, secrets.token_urlsafe(9), papel),
+                    (nome, email, gerar_hash(secrets.token_urlsafe(16)), papel),
                 )
                 criado = cursor.fetchone()
             conexao.commit()
@@ -2050,6 +2078,7 @@ def usuario_da_escola(email, senha, escola=None):
         conexao = obter_conexao()
         if not conexao:
             return None, escola
+        confere = False
         try:
             with conexao.cursor() as cursor:
                 cursor.execute(
@@ -2057,17 +2086,23 @@ def usuario_da_escola(email, senha, escola=None):
                     (normalizar_email(email),),
                 )
                 usuario = cursor.fetchone()
+                confere, regravar = conferir_senha((usuario or {}).get("senha"), senha)
+                if confere and regravar:
+                    cursor.execute(
+                        "UPDATE usuarios SET senha = %s WHERE id = %s",
+                        (gerar_hash(senha), usuario["id"]),
+                    )
+                    conexao.commit()
         except Exception as e:
             print(f"usuario_da_escola: {e}")
             try:
                 conexao.rollback()
             except Exception:
                 pass
-            usuario = None
         finally:
             conexao.close()
     finally:
         limpar_banco_escola(token)
-    if usuario and usuario.get("senha") == senha:
+    if confere:
         return usuario, escola
     return None, escola

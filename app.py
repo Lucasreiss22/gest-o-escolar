@@ -187,6 +187,7 @@ from auditoria import (
 )
 from plataforma import (
     buscar_admin_plataforma,
+    conferir_senha_plataforma,
     buscar_escola_por_email,
     buscar_escola_por_token,
     cadastrar_escola,
@@ -231,6 +232,7 @@ from plataforma import (
     validar_otp,
     ativar_escola as concluir_ativacao_escola,
 )
+from senhas import gerar_hash
 import calendar as calendario_lib
 from datetime import datetime, date, timedelta
 import json
@@ -3297,7 +3299,7 @@ def _usuario_admin_escola(escola):
                 if not usuario:
                     cursor.execute(
                         "INSERT INTO usuarios (nome, email, senha, papel) VALUES (%s, %s, %s, 'admin') RETURNING *",
-                        (escola["nome"], escola["email_admin"], secrets.token_urlsafe(12)),
+                        (escola["nome"], escola["email_admin"], gerar_hash(secrets.token_urlsafe(16))),
                     )
                     usuario = cursor.fetchone()
             conexao.commit()
@@ -3476,7 +3478,7 @@ def login_adm():
     if not senha:
         flash("Digite a senha.", "danger")
         return _tela_login("adm", email)
-    if (admin.get("senha") or "").strip() == senha:
+    if conferir_senha_plataforma(admin, senha):
         _entrar_plataforma(admin)
         return redirect(url_for("plataforma_escolas"))
     flash("Senha incorreta. Use a senha que você criou neste sistema, não a do Gmail.", "danger")
@@ -3663,7 +3665,7 @@ def _login_senha(email):
             with conexao.cursor() as cursor:
                 cursor.execute(
                     "UPDATE usuarios SET senha = %s WHERE LOWER(email) = %s",
-                    (senha, email),
+                    (gerar_hash(senha), email),
                 )
             conexao.commit()
             conexao.close()
@@ -3679,8 +3681,7 @@ def _login_senha(email):
         return redirect(url_for("login"))
     if eh_super_admin(email):
         admin = buscar_admin_plataforma(email)
-        armazenada = (admin.get("senha") if admin else "") or ""
-        if admin and armazenada.strip() == senha:
+        if conferir_senha_plataforma(admin, senha):
             _entrar_plataforma(admin)
             return redirect(url_for("plataforma_escolas"))
         flash("Senha incorreta. Use a senha que você criou neste sistema (não a do Gmail e não 123456, a menos que tenha escolhido essa).", "danger")
@@ -4561,7 +4562,9 @@ def gerenciar_usuarios():
                     if criar_login:
                         novo_login = not uid
                         if novo_login and not senha:
-                            senha = secrets.token_urlsafe(9)
+                            senha = secrets.token_urlsafe(16)
+                        if senha:
+                            senha = gerar_hash(senha)
                         if uid:
                             cursor.execute("SELECT papel FROM usuarios WHERE id = %s", (uid,))
                             atual = cursor.fetchone() or {}
