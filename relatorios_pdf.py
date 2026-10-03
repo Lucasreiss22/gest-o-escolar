@@ -2188,6 +2188,12 @@ def pdf_ponto(
         pdf.linha("Horas positivas", resumo.get("positivo_fmt") or "0h00")
         pdf.linha("Horas negativas", resumo.get("negativo_fmt") or "0h00")
         pdf.linha("Saldo líquido (banco)", resumo.get("liquido_fmt") or "0h00", negrito=True)
+        if resumo.get("descanso_fmt"):
+            pdf.linha("Domingo/feriado trabalhado (HE 100%)", resumo["descanso_fmt"], negrito=True)
+        pdf.paragrafo(
+            "Mesma regra da folha: diferença de até 10 min no dia não conta; "
+            "domingo e feriado não têm jornada esperada."
+        )
         pdf.linha("Total presença (entrada→saída)", resumo.get("presenca_fmt") or "—")
         pdf.linha("Total em café", resumo.get("cafe_fmt") or "—")
         pdf.linha("Total em almoço", resumo.get("almoco_fmt") or "—")

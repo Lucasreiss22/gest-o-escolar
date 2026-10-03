@@ -2446,6 +2446,20 @@ def _feriados_do_mes(cursor, ano, mes):
         return set()
 
 
+def _feriados_periodo(cursor, inicio, fim):
+    datas = set()
+    ano, mes = inicio.year, inicio.month
+    while (ano, mes) <= (fim.year, fim.month):
+        datas |= _feriados_do_mes(cursor, ano, mes)
+        ano, mes = (ano + 1, 1) if mes == 12 else (ano, mes + 1)
+    return datas
+
+
+def _dia_descanso_ponto(data_ref, feriados):
+    """Domingo ou feriado geral: não há jornada esperada e o trabalhado é HE 100%."""
+    return data_ref.weekday() == 6 or data_ref in (feriados or ())
+
+
 def _horas_extras_ponto(cursor, funcionario_id, competencia):
     """Horas extras do mês apuradas pelo ponto eletrônico (CLT).
 
@@ -2488,10 +2502,11 @@ def _horas_extras_ponto(cursor, funcionario_id, competencia):
         dref = row["data_ref"]
         if not hasattr(dref, "weekday"):
             dref = datetime.strptime(str(dref)[:10], "%Y-%m-%d").date()
-        calc = _saldo_dia_ponto(_mapa_registro_ponto(row), jornada, dref, agora)
+        descanso = _dia_descanso_ponto(dref, feriados)
+        calc = _saldo_dia_ponto(_mapa_registro_ponto(row), jornada, dref, agora, descanso=descanso)
         if calc["incompleto"]:
             continue
-        if dref.weekday() == 6 or dref in feriados:
+        if descanso:
             if calc["trabalhado_min"] > TOLERANCIA_PONTO_MIN:
                 resultado["domingo_feriado_min"] += calc["trabalhado_min"]
                 resultado["dias_com_extra"] += 1
@@ -13078,11 +13093,12 @@ def _ler_jornada_ponto(cursor, funcionario_id=None):
     return max(60, jornada)
 
 
-def _saldo_dia_ponto(registro, jornada_min, data_ref, agora, falta=None):
+def _saldo_dia_ponto(registro, jornada_min, data_ref, agora, falta=None, descanso=False):
     """
     Horas trabalhadas = (saída - entrada) − café − almoço.
     Saldo = trabalhado − jornada esperada.
     Falta confirmada sem trabalho conta jornada negativa.
+    Domingo/feriado (descanso): esperado 0, todo o trabalhado é saldo positivo.
     """
     jornada_min = max(60, int(jornada_min or 480))
     r = registro or {}
@@ -13108,6 +13124,14 @@ def _saldo_dia_ponto(registro, jornada_min, data_ref, agora, falta=None):
     if r.get("almoco") and r.get("almoco_volta"):
         total -= _minutos_entre_ponto(r.get("almoco"), r.get("almoco_volta"), data_ref, agora) or 0
     total = max(0, total)
+    if descanso:
+        return {
+            "incompleto": False,
+            "trabalhado_min": total,
+            "esperado_min": 0,
+            "saldo_min": total,
+            "tipo": "descanso",
+        }
     return {
         "incompleto": False,
         "trabalhado_min": total,
@@ -13115,6 +13139,25 @@ def _saldo_dia_ponto(registro, jornada_min, data_ref, agora, falta=None):
         "saldo_min": total - jornada_min,
         "tipo": "ponto",
     }
+
+
+def _somar_banco_dia(totais, calc):
+    """Acumula o dia no banco com a mesma regra das horas extras da folha."""
+    if calc.get("incompleto"):
+        return "pendente"
+    saldo = int(calc.get("saldo_min") or 0)
+    if calc.get("tipo") == "descanso":
+        if saldo > TOLERANCIA_PONTO_MIN:
+            totais["descanso"] += saldo
+            return "descanso"
+        return "tolerancia"
+    if calc.get("tipo") != "falta" and abs(saldo) <= TOLERANCIA_PONTO_MIN:
+        return "tolerancia" if saldo else "ok"
+    if saldo > 0:
+        totais["positivo"] += saldo
+    elif saldo < 0:
+        totais["negativo"] += -saldo
+    return "conta"
 
 
 def _parse_hora_ponto_hoje(hora_txt, data_ref, agora):
@@ -13246,6 +13289,13 @@ def _pode_aprovar_ponto():
     """Secretaria e admin por padrão; qualquer papel se a matriz marcar a sub-ação."""
     papel = normalizar_papel(session.get("usuario_papel"))
     return pode_subacao(papel, "ponto", "aprovar_retroativo", session.get("permissoes"))
+
+
+def _pode_decidir_proprio_ponto(funcionario_alvo, meu_funcionario_id):
+    """Ninguém aprova o próprio pedido, exceto o administrador da escola."""
+    if not funcionario_alvo or not meu_funcionario_id or int(funcionario_alvo) != int(meu_funcionario_id):
+        return True
+    return normalizar_papel(session.get("usuario_papel")) == "admin"
 
 
 def _registro_dia_ponto(cursor, funcionario_id, data_ref):
@@ -13406,6 +13456,8 @@ def _tratar_ponto_retroativo(cursor, acao, meu_funcionario_id):
             raise ValueError("Solicitação não encontrada.")
         if (sol.get("status") or "") != "pendente":
             raise ValueError("Esta solicitação não está mais pendente.")
+        if not _pode_decidir_proprio_ponto(sol.get("funcionario_id"), meu_funcionario_id):
+            raise ValueError("Outra pessoa com permissão precisa aprovar ou rejeitar o seu próprio ponto.")
         if acao == "rejeitar_ponto_retroativo":
             cursor.execute(
                 """
@@ -13653,6 +13705,7 @@ def ponto():
     banco_dias = []
     banco_positivo = 0
     banco_negativo = 0
+    banco_descanso = 0
     banco_liquido = 0
     batidas_ok = set()
     contadores = []
@@ -13939,13 +13992,10 @@ def ponto():
                     conexao.commit()
                     return redirect(url_for("ponto", abrir="painel-batidas"))
                 elif acao == "excluir_ponto":
-                    cursor.execute(
-                        "DELETE FROM ponto_registros WHERE id = %s AND funcionario_id = %s",
-                        (request.form.get("ponto_id", type=int), funcionario_id),
+                    raise ValueError(
+                        "Registro de ponto não pode ser excluído. "
+                        "Para corrigir um dia, use Ponto retroativo: o pedido passa pela aprovação."
                     )
-                    flash("Registro de ponto removido.", "success")
-                    conexao.commit()
-                    return redirect(url_for("ponto", abrir="painel-historico"))
                 elif acao == "enviar_atestado":
                     midia_id = _salvar_midia("arquivo", {"pdf"})
                     if not midia_id:
@@ -14138,19 +14188,17 @@ def ponto():
                         dref = datetime.strptime(str(dref)[:10], "%Y-%m-%d").date()
                     faltas_mes_map[dref] = dict(item)
                 dias_chaves = sorted(set(regs_mes.keys()) | set(faltas_mes_map.keys()))
+                feriados_mes = _feriados_do_mes(cursor, ano, mes)
                 banco_dias = []
-                banco_positivo = 0
-                banco_negativo = 0
+                totais_banco = {"positivo": 0, "negativo": 0, "descanso": 0}
                 for dia in dias_chaves:
                     mapa = regs_mes.get(dia) or {}
                     calc = _saldo_dia_ponto(
-                        mapa, jornada_minutos, dia, agora, faltas_mes_map.get(dia)
+                        mapa, jornada_minutos, dia, agora, faltas_mes_map.get(dia),
+                        descanso=_dia_descanso_ponto(dia, feriados_mes),
                     )
                     saldo = int(calc["saldo_min"])
-                    if saldo > 0:
-                        banco_positivo += saldo
-                    elif saldo < 0:
-                        banco_negativo += abs(saldo)
+                    conta = _somar_banco_dia(totais_banco, calc)
                     banco_dias.append(
                         {
                             "data_ref": dia,
@@ -14164,8 +14212,12 @@ def ponto():
                             "saldo_min": saldo,
                             "incompleto": calc["incompleto"],
                             "tipo": calc.get("tipo"),
+                            "conta": conta,
                         }
                     )
+                banco_positivo = totais_banco["positivo"]
+                banco_negativo = totais_banco["negativo"]
+                banco_descanso = totais_banco["descanso"]
                 banco_liquido = banco_positivo - banco_negativo
 
             if gestao:
@@ -14265,12 +14317,17 @@ def ponto():
         banco_positivo_fmt=_fmt_minutos_banco(banco_positivo),
         banco_negativo_fmt=_fmt_minutos_banco(-banco_negativo if banco_negativo else 0),
         banco_liquido_fmt=_fmt_minutos_banco(banco_liquido),
+        banco_descanso=banco_descanso,
+        banco_descanso_fmt=_fmt_minutos_banco(banco_descanso),
+        tolerancia_ponto=TOLERANCIA_PONTO_MIN,
         mes_filtro=mes_filtro,
         atestados_pendentes=atestados_pendentes,
         faltas_pendentes=faltas_pendentes,
         faltas_mes=faltas_mes,
         equipe=equipe,
         pode_aprovar_ponto=pode_aprovar_ponto,
+        meu_funcionario_id=funcionario_id,
+        decide_proprio_ponto=_pode_decidir_proprio_ponto(funcionario_id, funcionario_id),
         minhas_solicitacoes=minhas_solicitacoes,
         solicitacoes_pendentes=solicitacoes_pendentes,
         data_ontem=(agora.date() - timedelta(days=1)).isoformat(),
@@ -14378,9 +14435,10 @@ def ponto_relatorio_pdf():
             tot_cafe = 0
             tot_almoco = 0
             tot_trabalhado = 0
-            banco_pos = 0
-            banco_neg = 0
-            for item in cursor.fetchall() or []:
+            totais_banco = {"positivo": 0, "negativo": 0, "descanso": 0}
+            linhas_ponto = cursor.fetchall() or []
+            feriados_periodo = _feriados_periodo(cursor, inicio, fim)
+            for item in linhas_ponto:
                 m = _mapa_registro_ponto(item)
                 dref = item["data_ref"]
                 if not hasattr(dref, "year"):
@@ -14394,17 +14452,20 @@ def ponto_relatorio_pdf():
                 presenca_min = 0
                 if m.get("entrada") and m.get("saida"):
                     presenca_min = _minutos_entre_ponto(m["entrada"], m["saida"], dref, agora) or 0
-                calc = _saldo_dia_ponto(m, jornada, dref, agora)
+                calc = _saldo_dia_ponto(
+                    m, jornada, dref, agora, descanso=_dia_descanso_ponto(dref, feriados_periodo)
+                )
                 saldo = int(calc.get("saldo_min") or 0)
+                conta = _somar_banco_dia(totais_banco, calc)
                 if not calc.get("incompleto"):
                     tot_presenca += presenca_min
                     tot_cafe += cafe_min
                     tot_almoco += almoco_min
                     tot_trabalhado += int(calc.get("trabalhado_min") or 0)
-                    if saldo > 0:
-                        banco_pos += saldo
-                    elif saldo < 0:
-                        banco_neg += abs(saldo)
+                sufixo_saldo = {
+                    "descanso": " (dom./feriado 100%)",
+                    "tolerancia": " (tolerância)",
+                }.get(conta, "")
                 registros.append(
                     {
                         "data_ref": item["data_ref"],
@@ -14422,8 +14483,8 @@ def ponto_relatorio_pdf():
                         "trabalhado_fmt": _fmt_minutos_banco(calc.get("trabalhado_min") or 0)
                         if not calc.get("incompleto")
                         else "—",
-                        "esperado_fmt": _fmt_minutos_banco(calc.get("esperado_min") or jornada),
-                        "saldo_fmt": _fmt_minutos_banco(saldo) if not calc.get("incompleto") else "pendente",
+                        "esperado_fmt": _fmt_minutos_banco(calc.get("esperado_min") or 0),
+                        "saldo_fmt": (_fmt_minutos_banco(saldo) + sufixo_saldo) if not calc.get("incompleto") else "pendente",
                     }
                 )
             # Faltas confirmadas no período entram no banco negativo
@@ -14451,7 +14512,7 @@ def ponto_relatorio_pdf():
                     for r in registros
                 )
                 if not tem_fechado:
-                    banco_neg += jornada
+                    totais_banco["negativo"] += jornada
                     registros.append(
                         {
                             "data_ref": dref,
@@ -14488,11 +14549,14 @@ def ponto_relatorio_pdf():
                 (funcionario_id, fim, inicio, inicio, fim),
             )
             atestados = [dict(r) for r in (cursor.fetchall() or [])]
+            banco_pos = totais_banco["positivo"]
+            banco_neg = totais_banco["negativo"]
             resumo = {
                 "jornada_fmt": _fmt_minutos_banco(jornada),
                 "positivo_fmt": _fmt_minutos_banco(banco_pos),
                 "negativo_fmt": _fmt_minutos_banco(-banco_neg if banco_neg else 0),
                 "liquido_fmt": _fmt_minutos_banco(banco_pos - banco_neg),
+                "descanso_fmt": _fmt_minutos_banco(totais_banco["descanso"]) if totais_banco["descanso"] else "",
                 "presenca_fmt": _fmt_minutos_banco(tot_presenca),
                 "cafe_fmt": _fmt_minutos_banco(tot_cafe),
                 "almoco_fmt": _fmt_minutos_banco(tot_almoco),
