@@ -446,9 +446,14 @@
                     <span class="calc-link">Ver o cálculo</span>
                 </button>
                 <button type="button" class="card-resumo" data-abre="dlg-fator">
-                    <h4>Fator R</h4>
-                    <div class="valor">{{ "%.2f"|format(ap.fator_r_pct) }}%</div>
+                    <h4>{% if ap.fator_r_aplicavel %}Fator R{% else %}Anexo do Simples{% endif %}</h4>
+                    {% if ap.fator_r_aplicavel %}
+                    <div class="valor">{% if ap.fator_r_acima_100 %}acima de 100%{% else %}{{ "%.2f"|format(ap.fator_r_pct) }}%{% endif %}</div>
                     <span class="calc-link">Anexo {{ ap.anexo }} · ver o cálculo</span>
+                    {% else %}
+                    <div class="valor">Anexo III</div>
+                    <span class="calc-link">Ensino: sem Fator R · ver por quê</span>
+                    {% endif %}
                 </button>
                 <button type="button" class="card-resumo tributos" data-abre="dlg-das">
                     <h4>DAS do mês</h4>
@@ -474,7 +479,9 @@
                         </tbody>
                     </table>
                     <div class="calc-passo"><strong>Soma dos meses que entram</strong>R$ {{ (ap.rbt_acumulado)|moeda }} em {{ ap.meses_atividade }} mês(es).</div>
-                    {% if ap.annualizado %}
+                    {% if ap.inicio_atividade %}
+                    <div class="calc-passo"><strong>Primeiro mês de atividade</strong>Sem receita nos meses anteriores: R$ {{ (ap.receita_mes)|moeda }} × 12 = R$ {{ (ap.rbt12)|moeda }} (LC 123/2006, art. 18, § 2º).</div>
+                    {% elif ap.annualizado %}
                     <div class="calc-passo"><strong>Annualização</strong>Menos de 12 meses na janela: (R$ {{ (ap.rbt_acumulado)|moeda }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ (ap.rbt12)|moeda }}.</div>
                     {% endif %}
                     <div class="calc-passo"><strong>RBT12</strong>R$ {{ (ap.rbt12)|moeda }}</div>
@@ -498,7 +505,9 @@
                         </tbody>
                     </table>
                     <div class="calc-passo"><strong>Soma da folha</strong>R$ {{ (ap.fs_acumulado)|moeda }}</div>
-                    {% if ap.annualizado %}
+                    {% if ap.inicio_atividade %}
+                    <div class="calc-passo"><strong>Primeiro mês de atividade</strong>Folha do mês × 12 = R$ {{ (ap.fs12)|moeda }}.</div>
+                    {% elif ap.annualizado %}
                     <div class="calc-passo"><strong>Annualização</strong>(R$ {{ (ap.fs_acumulado)|moeda }} ÷ {{ ap.meses_atividade }}) × 12 = R$ {{ (ap.fs12)|moeda }}.</div>
                     {% endif %}
                     <div class="calc-passo"><strong>FS12</strong>R$ {{ (ap.fs12)|moeda }}</div>
@@ -507,11 +516,17 @@
             </dialog>
 
             <dialog id="dlg-fator" class="calc-painel">
-                <div class="calc-head"><h3>Cálculo do Fator R</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
+                <div class="calc-head"><h3>{% if ap.fator_r_aplicavel %}Cálculo do Fator R{% else %}Por que o anexo é o III{% endif %}</h3><button type="button" class="btn" data-fecha>Fechar</button></div>
                 <div class="calc-body">
+                    {% if ap.fator_r_aplicavel %}
                     <div class="calc-passo"><strong>Fórmula</strong>Fator R = FS12 ÷ RBT12</div>
-                    <div class="calc-passo"><strong>Conta</strong>R$ {{ (ap.fs12)|moeda }} ÷ R$ {{ (ap.rbt12)|moeda }} = {{ "%.2f"|format(ap.fator_r_pct) }}%</div>
-                    <div class="calc-passo"><strong>Anexo</strong>{% if ap.fator_r_pct >= 28 %}{{ "%.2f"|format(ap.fator_r_pct) }}% é igual ou maior que 28%, então o anexo é o III.{% else %}{{ "%.2f"|format(ap.fator_r_pct) }}% ficou abaixo de 28%, então o anexo é o V.{% endif %}</div>
+                    <div class="calc-passo"><strong>Conta</strong>R$ {{ (ap.fs12)|moeda }} ÷ R$ {{ (ap.rbt12)|moeda }} = {% if ap.fator_r_acima_100 %}acima de 100% (a folha passou a receita dos 12 meses){% else %}{{ "%.2f"|format(ap.fator_r_pct) }}%{% endif %}</div>
+                    <div class="calc-passo"><strong>Anexo</strong>{% if ap.usa_anexo_iii %}Igual ou maior que 28%, então o anexo é o III.{% else %}{{ "%.2f"|format(ap.fator_r_pct) }}% ficou abaixo de 28%, então o anexo é o V.{% endif %}</div>
+                    {% else %}
+                    <div class="calc-passo"><strong>Atividade</strong>Escola / ensino, conforme Configurações.</div>
+                    <div class="calc-passo"><strong>Regra</strong>Creche, pré-escola, ensino fundamental e médio, escolas técnicas, de línguas, de artes, preparatórios e cursos livres são tributados direto no Anexo III, sem Fator R (LC 123/2006, art. 18, § 5º-B, I).</div>
+                    <div class="calc-passo"><strong>Só para referência</strong>FS12 ÷ RBT12 = {% if ap.fator_r_acima_100 %}acima de 100%{% else %}{{ "%.2f"|format(ap.fator_r_pct) }}%{% endif %}. Não muda o anexo.</div>
+                    {% endif %}
                     {% with campo='fator' %}{% include '_simples_envio.html' %}{% endwith %}
                 </div>
             </dialog>

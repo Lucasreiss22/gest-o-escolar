@@ -44,6 +44,7 @@ from alunos import (
 )
 from simples_nacional import (
     montar_quadro_simples,
+    primeira_competencia_sistema,
     upsert_competencia,
     importar_competencias,
     gravar_importacao,
@@ -84,6 +85,7 @@ from nfse import (
 )
 from tributacao import (
     apurar_simples,
+    normalizar_atividade_simples,
     apurar_pis_cofins,
     apurar_lucro_presumido,
     meses_do_trimestre,
@@ -3003,6 +3005,18 @@ def listar_lancamentos_mes(cursor, mes_filtro, status=None):
     return cursor.fetchall()
 
 
+def atividade_simples_escola(cursor):
+    cursor.execute("SAVEPOINT atividade_simples")
+    try:
+        cursor.execute("SELECT simples_atividade FROM configuracoes WHERE id = 1")
+        row = cursor.fetchone() or {}
+        cursor.execute("RELEASE SAVEPOINT atividade_simples")
+        return normalizar_atividade_simples(row.get("simples_atividade"))
+    except Exception:
+        cursor.execute("ROLLBACK TO SAVEPOINT atividade_simples")
+        return normalizar_atividade_simples(None)
+
+
 def calcular_apuracao_simples(cursor, mes_filtro):
     regime = regime_apuracao_escola(cursor)
     quadro = montar_quadro_simples(cursor, mes_filtro, regime)
@@ -3012,6 +3026,8 @@ def calcular_apuracao_simples(cursor, mes_filtro):
     apuracao = apurar_simples(
         quadro["rbt12"], quadro["fs12"], n_meses, quadro["receita_mes"],
         acrescimos_mora=mora["total"],
+        atividade=atividade_simples_escola(cursor),
+        folha_mes=quadro.get("folha_mes") or 0,
     )
     apuracao["mora"] = mora
     ano, mes = parse_mes(mes_filtro)
@@ -11833,7 +11849,10 @@ def pagina_financeiro():
                         if cfg_carga.get("regime_tributario"):
                             regime_carga = cfg_carga["regime_tributario"]
                         qtd = 0
+                        primeira_receita = primeira_competencia_sistema(cursor, regime_apuracao_escola(cursor))
                         for comp in janela_competencias(mes_redir) + [mes_redir]:
+                            if primeira_receita and comp < primeira_receita:
+                                continue
                             folha = folha_sistema_mes(cursor, comp)
                             if not folha:
                                 _det, totais_c = montar_folha_contratos(cursor, regime_carga, comp)
@@ -11842,7 +11861,11 @@ def pagina_financeiro():
                                 upsert_competencia(cursor, comp, None, folha, "folha", "Folha e encargos do sistema")
                                 qtd += 1
                         conexao.commit()
-                        flash(f"Folha e encargos carregados em {qtd} competência(s).", "success")
+                        aviso_inicio = (
+                            f" Meses antes de {primeira_receita} ficaram de fora porque a escola ainda não tinha receita."
+                            if primeira_receita else ""
+                        )
+                        flash(f"Folha e encargos carregados em {qtd} competência(s).{aviso_inicio}", "success")
             except Exception as e:
                 conexao.rollback()
                 flash(f"❌ Erro ao processar financeiro: {e}", "danger")
@@ -14482,6 +14505,7 @@ def pagina_configuracoes():
             email_contato = request.form.get("email_contato")
             regime_tributario = request.form.get("regime_tributario")
             regime_apuracao = normalizar_regime_apuracao(request.form.get("regime_apuracao"))
+            simples_atividade = normalizar_atividade_simples(request.form.get("simples_atividade"))
             if conexao:
                 try:
                     with conexao.cursor() as cursor:
@@ -14489,19 +14513,24 @@ def pagina_configuracoes():
                             "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS regime_apuracao VARCHAR(20) DEFAULT 'competencia'"
                         )
                         cursor.execute(
+                            "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS simples_atividade VARCHAR(20) DEFAULT 'ensino'"
+                        )
+                        cursor.execute(
                             """
                             INSERT INTO configuracoes (
-                                id, nome_escola, ano_letivo, email_contato, regime_tributario, regime_apuracao
+                                id, nome_escola, ano_letivo, email_contato, regime_tributario, regime_apuracao,
+                                simples_atividade
                             )
-                            VALUES (1, %s, %s, %s, %s, %s)
+                            VALUES (1, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (id) DO UPDATE
                             SET nome_escola = EXCLUDED.nome_escola,
                                 ano_letivo = EXCLUDED.ano_letivo,
                                 email_contato = EXCLUDED.email_contato,
                                 regime_tributario = EXCLUDED.regime_tributario,
-                                regime_apuracao = EXCLUDED.regime_apuracao;
+                                regime_apuracao = EXCLUDED.regime_apuracao,
+                                simples_atividade = EXCLUDED.simples_atividade;
                             """,
-                            (nome_escola, ano_letivo, email_contato, regime_tributario, regime_apuracao),
+                            (nome_escola, ano_letivo, email_contato, regime_tributario, regime_apuracao, simples_atividade),
                         )
                         conexao.commit()
                         session["escola_email_contato"] = (email_contato or "").strip()

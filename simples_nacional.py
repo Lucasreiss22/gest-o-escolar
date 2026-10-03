@@ -90,7 +90,15 @@ _ORIGENS_CONGELADAS = {"manual", "planilha", "pgdas"}
 
 
 def primeira_competencia_sistema(cursor, regime_apuracao="competencia"):
-    cursor.execute("SELECT MIN(competencia) AS c FROM simples_competencias")
+    """Primeiro mês de atividade. Linha só com folha (receita zero) não marca o início."""
+    cursor.execute(
+        """
+        SELECT MIN(competencia) AS c
+        FROM simples_competencias
+        WHERE COALESCE(receita_bruta, 0) > 0 OR origem = ANY(%s)
+        """,
+        (sorted(_ORIGENS_CONGELADAS),),
+    )
     row = cursor.fetchone() or {}
     if row.get("c"):
         return row["c"]
@@ -358,10 +366,14 @@ def carregar_sistema(cursor, mes_apuracao, regime_apuracao="competencia"):
     return qtd
 
 
-def carregar_folhas(cursor, mes_apuracao):
+def carregar_folhas(cursor, mes_apuracao, regime_apuracao="competencia"):
+    """Só grava folha a partir do primeiro mês com receita, para não puxar a RBT12 para meses sem atividade."""
     comps = janela_competencias(mes_apuracao) + [mes_apuracao]
+    primeira = primeira_competencia_sistema(cursor, regime_apuracao)
     qtd = 0
     for comp in comps:
+        if primeira and comp < primeira:
+            continue
         folha = folha_sistema_mes(cursor, comp)
         if folha:
             upsert_competencia(cursor, comp, None, folha, "folha", "Folha e encargos do sistema")

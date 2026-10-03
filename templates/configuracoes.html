@@ -90,10 +90,18 @@
                     <div class="form-group" style="grid-column: span 2;">
                         <label>Regime Tributário da Escola</label>
                         <select name="regime_tributario" required>
-                            <option value="simples_nacional" {% if config.regime_tributario == "simples_nacional" %}selected{% endif %}>Simples Nacional (Fator R: Anexo III ou V)</option>
+                            <option value="simples_nacional" {% if config.regime_tributario == "simples_nacional" %}selected{% endif %}>Simples Nacional</option>
                             <option value="lucro_presumido" {% if config.regime_tributario == "lucro_presumido" or not config.regime_tributario %}selected{% endif %}>Lucro Presumido</option>
                             <option value="lucro_real" {% if config.regime_tributario == "lucro_real" %}selected{% endif %}>Lucro Real</option>
                         </select>
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label for="simples_atividade">Atividade no Simples Nacional</label>
+                        <select id="simples_atividade" name="simples_atividade">
+                            <option value="ensino" {% if config.simples_atividade != "fator_r" %}selected{% endif %}>Escola / ensino: Anexo III direto, sem Fator R</option>
+                            <option value="fator_r" {% if config.simples_atividade == "fator_r" %}selected{% endif %}>Outra atividade sujeita ao Fator R (Anexo III ou V)</option>
+                        </select>
+                        <small style="color:#64748b;line-height:1.4;">Creche, pré-escola, ensino fundamental e médio, escolas técnicas, de línguas, de artes, preparatórios e cursos livres vão direto ao Anexo III (LC 123/2006, art. 18, § 5º-B, I). Só vale quando o regime é Simples Nacional. Confirme com a contabilidade.</small>
                     </div>
                     <div class="form-group" style="grid-column: span 2;">
                         <label for="regime_apuracao">Regime de apuração dos impostos</label>

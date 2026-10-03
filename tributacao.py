@@ -31,6 +31,15 @@ ANEXO_V = [
 LIMITE_SIMPLES = 4_800_000.00
 FATOR_R_MINIMO = 0.28
 
+# Creche, pré-escola, ensino fundamental e médio, escolas técnicas, de línguas, de artes,
+# preparatórios e escolas livres: Anexo III direto, sem Fator R (LC 123/2006, art. 18, § 5º-B, I).
+ATIVIDADE_ENSINO = "ensino"
+ATIVIDADE_FATOR_R = "fator_r"
+
+
+def normalizar_atividade_simples(valor):
+    return ATIVIDADE_FATOR_R if str(valor or "").strip().lower() == ATIVIDADE_FATOR_R else ATIVIDADE_ENSINO
+
 
 def normalizar_regime_apuracao(valor):
     texto = str(valor or "").strip().lower()
@@ -171,15 +180,28 @@ def apurar_simples(
     receita_mes,
     annualizado=False,
     acrescimos_mora=0.0,
+    atividade=ATIVIDADE_ENSINO,
+    folha_mes=0.0,
 ):
     """DAS sobre a receita bruta. `acrescimos_mora` só é informado na tela:
-    juros/multa por atraso não compõem a receita bruta (Res. CGSN 140/2018, art. 2º, § 5º, II)."""
+    juros/multa por atraso não compõem a receita bruta (Res. CGSN 140/2018, art. 2º, § 5º, II).
+
+    Primeiro mês de atividade (sem receita nos meses anteriores): a receita do próprio mês
+    vezes 12 define a faixa (LC 123/2006, art. 18, § 2º)."""
+    atividade = normalizar_atividade_simples(atividade)
     rbt12, rbt_annualizada = annualizar(rbt_acumulado, meses_atividade)
     fs12, fs_annualizada = annualizar(fs_acumulado, meses_atividade)
     annualizado = annualizado or rbt_annualizada or fs_annualizada
+    inicio_atividade = False
+    if rbt12 <= 0 and float(receita_mes or 0) > 0:
+        rbt12 = float(receita_mes) * 12.0
+        fs12 = float(folha_mes or 0) * 12.0
+        annualizado = True
+        inicio_atividade = True
 
     fator_r = (fs12 / rbt12) if rbt12 > 0 else 0.0
-    usa_anexo_iii = fator_r >= FATOR_R_MINIMO
+    fator_r_aplicavel = atividade == ATIVIDADE_FATOR_R
+    usa_anexo_iii = (not fator_r_aplicavel) or fator_r >= FATOR_R_MINIMO
     anexo = "III" if usa_anexo_iii else "V"
     tabela = ANEXO_III if usa_anexo_iii else ANEXO_V
     faixa = localizar_faixa(rbt12, tabela)
@@ -195,7 +217,11 @@ def apurar_simples(
         "rbt12": rbt12,
         "fs12": fs12,
         "fator_r": fator_r,
-        "fator_r_pct": fator_r * 100.0,
+        "fator_r_pct": min(fator_r * 100.0, 100.0),
+        "fator_r_acima_100": fator_r > 1.0,
+        "fator_r_aplicavel": fator_r_aplicavel,
+        "atividade": atividade,
+        "inicio_atividade": inicio_atividade,
         "anexo": anexo,
         "usa_anexo_iii": usa_anexo_iii,
         "faixa": faixa["faixa"],

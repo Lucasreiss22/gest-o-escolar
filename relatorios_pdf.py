@@ -659,20 +659,52 @@ def pdf_calculo_fs12(escola, mes_label, apuracao, regime_apuracao="competencia",
     return _saida(pdf)
 
 
+def _fator_r_texto(ap):
+    if ap.get("fator_r_acima_100"):
+        return "acima de 100%"
+    return f"{float(ap.get('fator_r_pct') or 0):.2f}%"
+
+
+def _explicar_anexo(pdf, ap):
+    """Anexo do Simples: ensino vai direto ao III; outras atividades seguem o Fator R."""
+    anexo = ap.get("anexo") or "-"
+    if ap.get("fator_r_aplicavel", True):
+        pdf.linha("Fator R", _fator_r_texto(ap), negrito=True)
+        if ap.get("usa_anexo_iii"):
+            pdf.paragrafo("O Fator R alcança 28%. Pela Lei Complementar 123/2006, o anexo é o III.")
+        else:
+            pdf.paragrafo(f"{_fator_r_texto(ap)} ficou abaixo de 28%. Pela Lei Complementar 123/2006, o anexo é o V.")
+    else:
+        pdf.paragrafo(
+            "Atividade de ensino (creche, pré-escola, ensino fundamental e médio, escolas técnicas, de línguas, "
+            "de artes, preparatórios e cursos livres): tributada direto no Anexo III, sem Fator R "
+            f"(LC 123/2006, art. 18, § 5º-B, I). A relação folha ÷ receita ({_fator_r_texto(ap)}) fica só como referência."
+        )
+    pdf.linha("Anexo", anexo, negrito=True)
+
+
+def _explicar_inicio_atividade(pdf, ap):
+    if ap.get("inicio_atividade"):
+        pdf.paragrafo(
+            f"Primeiro mês de atividade, sem receita nos meses anteriores: RBT12 = receita do mês × 12 = "
+            f"{_brl(ap.get('rbt12'))} (LC 123/2006, art. 18, § 2º)."
+        )
+        return True
+    return False
+
+
 def pdf_calculo_fator_r(escola, mes_label, apuracao, regime_apuracao="competencia"):
     ap = apuracao or {}
-    fator = float(ap.get("fator_r_pct") or 0)
-    anexo = ap.get("anexo") or "-"
     fs = float(ap.get("fs12") or 0)
     rbt = float(ap.get("rbt12") or 0)
-    pdf = RelatorioPDF("Cálculo do Fator R")
+    pdf = RelatorioPDF("Cálculo do Fator R" if ap.get("fator_r_aplicavel", True) else "Anexo do Simples Nacional")
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label}")
     pdf.paragrafo(
         "O Fator R é a folha dos 12 meses anteriores dividida pela receita bruta dos mesmos 12 meses. "
-        "A Lei Complementar 123/2006 usa 28% como corte. Igual ou acima, a escola de educação fica no Anexo III. "
-        "Abaixo, fica no Anexo V. A Resolução CGSN 140/2018 descreve essa divisão. "
-        "O mês da apuração não entra nela."
+        "Nas atividades sujeitas a ele, 28% ou mais leva ao Anexo III e menos de 28% ao Anexo V. "
+        "Escolas de ensino regular não usam o Fator R: vão direto ao Anexo III. "
+        "O mês da apuração não entra na conta."
     )
     linhas = []
     for linha in _quadro_linhas(ap):
@@ -697,12 +729,8 @@ def pdf_calculo_fator_r(escola, mes_label, apuracao, regime_apuracao="competenci
         )
     else:
         pdf.paragrafo("A RBT12 está zerada, então o Fator R não tem como ser dividido.")
-    pdf.linha("Fator R usado na apuração", f"{fator:.2f}%", negrito=True)
-    if fator >= 28:
-        pdf.paragrafo(f"{fator:.2f}% alcança 28%. Por isso o anexo é o III.")
-    else:
-        pdf.paragrafo(f"{fator:.2f}% não alcança 28%. Por isso o anexo é o V.")
-    pdf.linha("Anexo", anexo, negrito=True)
+    _explicar_inicio_atividade(pdf, ap)
+    _explicar_anexo(pdf, ap)
     return _saida(pdf)
 
 
@@ -716,7 +744,6 @@ def pdf_extrato_pgdas(
     anexo = ap.get("anexo") or "-"
     aliq_nom = float(ap.get("aliquota_nominal") or 0) * 100
     aliq_ef = float(ap.get("aliquota_efetiva_pct") or 0)
-    fator = float(ap.get("fator_r_pct") or 0)
     rbt = float(ap.get("rbt12") or 0)
     fs = float(ap.get("fs12") or 0)
     receita = float(ap.get("receita_mes") or 0)
@@ -773,7 +800,7 @@ def pdf_extrato_pgdas(
         )
     pdf.linha("Soma da receita que entra", _brl(ap.get("rbt_acumulado")))
     pdf.linha("Meses considerados", ap.get("meses_atividade") or 0)
-    if ap.get("annualizado"):
+    if not _explicar_inicio_atividade(pdf, ap) and ap.get("annualizado"):
         meses = ap.get("meses_atividade") or 1
         pdf.paragrafo(
             f"Menos de 12 meses. RBT12 = ({_brl(ap.get('rbt_acumulado'))} ÷ {meses}) × 12 = {_brl(rbt)}."
@@ -797,12 +824,7 @@ def pdf_extrato_pgdas(
             f"A folha {_brl(fs)} dividida pela receita {_brl(rbt)} dá {razao:.6f}, "
             f"ou {razao * 100:.2f}%. Essa conta é o Fator R."
         )
-    pdf.linha("Fator R", f"{fator:.2f}%", negrito=True)
-    if fator >= 28:
-        pdf.paragrafo(f"{fator:.2f}% alcança 28%. Pela Lei Complementar 123/2006, o anexo é o III.")
-    else:
-        pdf.paragrafo(f"{fator:.2f}% ficou abaixo de 28%. Pela Lei Complementar 123/2006, o anexo é o V.")
-    pdf.linha("Anexo", anexo, negrito=True)
+    _explicar_anexo(pdf, ap)
 
     pdf.secao("Como o DAS foi calculado")
     pdf.linha("Faixa", ap.get("faixa") or "-")
@@ -850,7 +872,7 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
         pdf.tabela(["Competência", "Entra", "Receita bruta"], linhas_rbt, [55, 30, 70])
     pdf.linha("Soma dos meses que entram", _brl(ap.get("rbt_acumulado")))
     pdf.linha("Meses considerados", ap.get("meses_atividade") or 0)
-    if ap.get("annualizado"):
+    if not _explicar_inicio_atividade(pdf, ap) and ap.get("annualizado"):
         pdf.paragrafo("Menos de 12 meses na janela: o valor foi annualizado (soma ÷ meses × 12).")
     pdf.linha("RBT12 usada na faixa", _brl(ap.get("rbt12")), negrito=True)
 
@@ -868,11 +890,10 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
     pdf.linha("Soma da folha", _brl(ap.get("fs_acumulado")))
     pdf.linha("FS12", _brl(ap.get("fs12")), negrito=True)
 
-    pdf.secao("Fator R")
+    pdf.secao("Fator R e anexo")
     pdf.linha("Fórmula", "FS12 ÷ RBT12")
     pdf.linha("Cálculo", f"{_brl(ap.get('fs12'))} ÷ {_brl(ap.get('rbt12'))}")
-    pdf.linha("Fator R", f"{float(ap.get('fator_r_pct') or 0):.2f}%", negrito=True)
-    pdf.linha("Anexo", f"{ap.get('anexo') or '-'} (Anexo III se Fator R ≥ 28%)")
+    _explicar_anexo(pdf, ap)
 
     pdf.secao("DAS do mês")
     aliq_nom = float(ap.get("aliquota_nominal") or 0) * 100
