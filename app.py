@@ -135,6 +135,7 @@ from folha import (
     rotulo_contrato,
     impostos_nota,
     contrato_vigente,
+    situacao_folha_mes,
     dia_pagamento_valido,
     aplicar_ajuste_competencia,
     _contrato_clt,
@@ -2684,7 +2685,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         """
         SELECT *
         FROM funcionarios
-        WHERE COALESCE(ativo, TRUE) = TRUE
+        WHERE COALESCE(ativo, TRUE) = TRUE OR data_fim_contrato IS NOT NULL
         ORDER BY nome_completo
         """
     )
@@ -2703,7 +2704,7 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
     }
     for row in funcionarios:
         dados = aplicar_ajuste_competencia(dict(row), ajustes.get(row.get("id")))
-        if not contrato_vigente(dados, ano, mes):
+        if situacao_folha_mes(dados, ano, mes) != "folha":
             continue
         try:
             info = _descontos_ponto_folha(cursor, dados.get("id"), mes_filtro, dados)
@@ -4961,6 +4962,38 @@ def _params_rescisao_do_form(form, defaults=None):
     }
 
 
+def _folha_do_mes_da_saida(cursor, funcionario_id, data_desligamento):
+    """Contracheque já gerado/enviado no mês do desligamento (o saldo de salário poderia sair em dobro)."""
+    competencia = str(data_desligamento or "")[:7]
+    if not funcionario_id or len(competencia) != 7:
+        return None
+    cursor.execute("SAVEPOINT folha_mes_saida")
+    try:
+        cursor.execute(
+            "SELECT bruto, liquido FROM folha_itens WHERE funcionario_id = %s AND competencia = %s",
+            (funcionario_id, competencia),
+        )
+        item = cursor.fetchone()
+        cursor.execute(
+            "SELECT enviado_em FROM folha_envios WHERE funcionario_id = %s AND competencia = %s",
+            (funcionario_id, competencia),
+        )
+        envio = cursor.fetchone()
+        cursor.execute("RELEASE SAVEPOINT folha_mes_saida")
+    except Exception:
+        cursor.execute("ROLLBACK TO SAVEPOINT folha_mes_saida")
+        return None
+    if not item and not envio:
+        return None
+    return {
+        "competencia": competencia,
+        "rotulo": nome_mes_extenso(competencia),
+        "bruto": float((item or {}).get("bruto") or 0),
+        "liquido": float((item or {}).get("liquido") or 0),
+        "enviado_em": (envio or {}).get("enviado_em"),
+    }
+
+
 @app.route("/rescisao", methods=["GET", "POST"])
 def pagina_rescisao():
     if "usuario_id" not in session:
@@ -4981,6 +5014,7 @@ def pagina_rescisao():
     selecionado = None
     historico = []
     calculo = None
+    folha_mes_saida = None
     params = _params_rescisao_do_form(None)
     lista = []
 
@@ -5043,9 +5077,10 @@ def pagina_rescisao():
                 params["regime_tributario"] = ((cursor.fetchone() or {}).get("regime_tributario") or "simples_nacional")
                 calculo = calcular_rescisao(dict(selecionado), params)
                 # Espelha avos/dias calculados nos campos ajustáveis
-                params["dias_aviso"] = str(calculo.get("dias_aviso") or "")
+                params["dias_aviso"] = str(calculo.get("dias_aviso_informado", calculo.get("dias_aviso")) or "")
                 params["avos_13"] = str(calculo.get("avos_13") or "")
                 params["avos_ferias_proporcionais"] = str(calculo.get("avos_ferias_proporcionais") or "")
+                folha_mes_saida = _folha_do_mes_da_saida(cursor, fid, calculo.get("data_desligamento"))
                 acao = request.form.get("acao") or "calcular"
                 if acao == "confirmar":
                     if not pode_acao(papel, "rescisao", "alterar", perms):
@@ -5116,6 +5151,7 @@ def pagina_rescisao():
         selecionado=selecionado,
         historico=historico,
         alerta_readmissao=alerta_readmissao(historico),
+        folha_mes_saida=folha_mes_saida,
         calculo=calculo,
         params=params,
         tipos_rescisao=TIPOS_RESCISAO,
@@ -5359,7 +5395,7 @@ def dashboard():
                 cursor.execute(
                     """
                     SELECT COUNT(*) AS total FROM funcionarios
-                    WHERE COALESCE(ativo, TRUE) = TRUE
+                    WHERE COALESCE(ativo, TRUE) = TRUE AND LOWER(COALESCE(cargo, '')) LIKE '%professor%'
                     """
                 )
                 metrics["total_professores"] = _contar(cursor.fetchone())
@@ -10487,6 +10523,75 @@ def excluir_professor(id):
     return redirect(url_for("pagina_professores"))
 
 
+class TurmaDuplicada(ValueError):
+    pass
+
+
+def _professor_restrito(papel):
+    """Professor só enxerga as próprias turmas: devolve o id do cadastro (0 se não houver). None = sem restrição."""
+    if normalizar_papel(papel) != "professor":
+        return None
+    fid = session.get("funcionario_id") or _id_funcionario_da_sessao()
+    try:
+        return int(fid or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _ids_turmas_professor(cursor, funcionario_id):
+    if not funcionario_id:
+        return set()
+    cursor.execute(
+        """
+        SELECT t.id FROM turmas t
+        WHERE t.professor_responsavel_id = %s
+           OR EXISTS (SELECT 1 FROM turma_professores tp WHERE tp.turma_id = t.id AND tp.funcionario_id = %s)
+        """,
+        (funcionario_id, funcionario_id),
+    )
+    return {(r["id"] if isinstance(r, dict) else r[0]) for r in (cursor.fetchall() or [])}
+
+
+def _checar_turma_professor(cursor, funcionario_id, turma_id=None, aluno_id=None):
+    permitidas = _ids_turmas_professor(cursor, funcionario_id)
+    if turma_id and int(turma_id) not in permitidas:
+        raise PermissionError("Sem permissão: esta turma não é sua.")
+    if aluno_id:
+        cursor.execute(
+            "SELECT 1 FROM turma_alunos WHERE aluno_id = %s AND turma_id = ANY(%s) LIMIT 1",
+            (int(aluno_id), list(permitidas) or [0]),
+        )
+        if not cursor.fetchone():
+            raise PermissionError("Sem permissão: este aluno não está nas suas turmas.")
+    return permitidas
+
+
+def _travar_turma_unica(cursor, nome, ano_letivo):
+    """Bloqueia duas turmas com o mesmo nome no mesmo ano, inclusive em dois envios simultâneos."""
+    nome = " ".join((nome or "").split())
+    if not nome:
+        raise ValueError("Informe o nome da turma.")
+    try:
+        ano = int(str(ano_letivo or "").strip()[:4])
+    except ValueError:
+        ano = datetime.now().year
+    cursor.execute(
+        "SELECT pg_advisory_xact_lock(hashtext(current_schema() || ':turma:' || %s))",
+        (f"{nome.lower()}:{ano}",),
+    )
+    cursor.execute(
+        """
+        SELECT 1 FROM turmas
+        WHERE LOWER(REGEXP_REPLACE(TRIM(nome), '\\s+', ' ', 'g')) = LOWER(%s) AND ano_letivo = %s
+        LIMIT 1
+        """,
+        (nome, ano),
+    )
+    if cursor.fetchone():
+        raise TurmaDuplicada(f'A turma "{nome}" já existe em {ano}. Nenhuma turma nova foi criada.')
+    return nome, ano
+
+
 @app.route("/pedagogico", methods=["GET", "POST"])
 def pagina_pedagogico():
     if "usuario_id" not in session:
@@ -10510,12 +10615,20 @@ def pagina_pedagogico():
             if not pode_subacao(papel, "pedagogico", "notas", perms):
                 flash("Sem permissão para lançar notas.", "danger")
                 return redirect(url_for("pagina_pedagogico"))
+        prof_restrito = _professor_restrito(papel)
         conexao = obter_conexao()
         garantir_tabelas_pedagogicas()
 
         if conexao:
             try:
                 with conexao.cursor() as cursor:
+                    if prof_restrito is not None:
+                        _checar_turma_professor(
+                            cursor,
+                            prof_restrito,
+                            turma_id=request.form.get("turma_id", type=int),
+                            aluno_id=None if acao in ("vincular_aluno", "incluir_aluno") else request.form.get("aluno_id", type=int),
+                        )
                     if acao in ["criar_turma", "nova_turma"]:
                         etapa = (limpar_campo("etapa_ensino") or "FUNDAMENTAL").upper()
                         if etapa not in ("INFANTIL", "FUNDAMENTAL", "MEDIO", "AMBOS", "FUNDAMENTAL_1", "FUNDAMENTAL_2"):
@@ -10527,8 +10640,11 @@ def pagina_pedagogico():
                         prof_resp = limpar_campo("professor_id") or None
                         padrao_id = request.form.get("carga_padrao_id", type=int)
                         turno = limpar_campo("turno")
-                        ano_letivo = limpar_campo("ano_letivo") or "2026"
-                        nome_turma = limpar_campo("nome_turma") or limpar_campo("nome")
+                        nome_turma, ano_letivo = _travar_turma_unica(
+                            cursor,
+                            limpar_campo("nome_turma") or limpar_campo("nome"),
+                            limpar_campo("ano_letivo"),
+                        )
                         cursor.execute(
                             """
                             INSERT INTO turmas (nome, ano_letivo, turno, professor_responsavel_id, etapa_ensino)
@@ -11057,6 +11173,12 @@ def pagina_pedagogico():
                         )
                         conexao.commit()
                         flash("✅ Prova da turma cadastrada no calendário.", "success")
+            except TurmaDuplicada as e:
+                conexao.rollback()
+                flash(str(e), "warning")
+            except PermissionError as e:
+                conexao.rollback()
+                flash(str(e), "danger")
             except Exception as e:
                 conexao.rollback()
                 flash(f"❌ Ocorreu um erro: {e}", "danger")
@@ -11113,10 +11235,18 @@ def pagina_pedagogico():
     elif aba_ped in ("materias", "cargas") and not pode_cadastro:
         aba_ped = "turmas"
 
+    prof_restrito = _professor_restrito(papel) if pode_consultar else None
+    turma_sel_id = request.args.get("turma_sel", type=int) if pode_consultar else None
     conexao = obter_conexao() if pode_consultar else None
     if pode_consultar and conexao:
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                permitidas = None
+                if prof_restrito is not None:
+                    permitidas = _ids_turmas_professor(cursor, prof_restrito)
+                    if turma_sel_id and turma_sel_id not in permitidas:
+                        flash("Sem permissão: esta turma não é sua.", "danger")
+                        turma_sel_id = None
                 query_turmas = """
                     SELECT t.id, t.nome, t.ano_letivo, t.turno, f.nome_completo,
                            COUNT(ta.aluno_id) AS total_alunos
@@ -11126,6 +11256,9 @@ def pagina_pedagogico():
                     WHERE 1=1
                 """
                 params_turmas = []
+                if permitidas is not None:
+                    query_turmas += " AND t.id = ANY(%s)"
+                    params_turmas.append(list(permitidas) or [0])
 
                 if termo_turma:
                     query_turmas += " AND (t.nome ILIKE %s OR CAST(t.id AS TEXT) = %s)"
@@ -11230,9 +11363,19 @@ def pagina_pedagogico():
                 for row in cursor.fetchall():
                     provas_por_turma.setdefault(row["turma_id"], []).append(row)
 
+                if permitidas is not None:
+                    alunos_por_turma = {k: v for k, v in alunos_por_turma.items() if k in permitidas}
+                    disciplinas_por_turma = {k: v for k, v in disciplinas_por_turma.items() if k in permitidas}
+                    quadros_por_turma = {k: v for k, v in quadros_por_turma.items() if k in permitidas}
+                    provas_por_turma = {k: v for k, v in provas_por_turma.items() if k in permitidas}
+                    meus_alunos = {a["id"] for lista in alunos_por_turma.values() for a in lista}
+                    alunos_cadastrados = [a for a in alunos_cadastrados if a["id"] in meus_alunos]
+                    if aluno_sel_id and aluno_sel_id not in meus_alunos:
+                        flash("Sem permissão: este aluno não está nas suas turmas.", "danger")
+                        aluno_sel_id = None
+
                 data_chamada = request.args.get("data_chamada") or date.today().isoformat()
                 disc_chamada = request.args.get("disc_chamada") or "__todas__"
-                turma_sel_id = request.args.get("turma_sel", type=int)
                 if turma_sel_id:
                     cursor.execute(
                         """
@@ -11356,7 +11499,7 @@ def pagina_pedagogico():
         pode_visao_pedagogico=pode_visao,
         pode_cadastro_pedagogico=pode_cadastro,
         aba=aba_ped,
-        turma_sel=request.args.get("turma_sel", type=int) if pode_consultar else None,
+        turma_sel=turma_sel_id,
         painel=request.args.get("painel") or "horas",
         data_chamada=data_chamada,
         disc_chamada=disc_chamada,
@@ -11375,12 +11518,19 @@ def ficha_pedagogica_pdf(aluno_id):
     if modo not in {"simplificado", "completo"}:
         modo = "simplificado"
     garantir_tabelas_pedagogicas()
+    prof_restrito = _professor_restrito(session.get("usuario_papel"))
     conexao = obter_conexao()
     if not conexao:
         flash("Sem conexão com o banco.", "danger")
         return redirect(url_for("pagina_pedagogico", aba="aluno", aluno_sel=aluno_id))
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            if prof_restrito is not None:
+                try:
+                    _checar_turma_professor(cursor, prof_restrito, aluno_id=aluno_id)
+                except PermissionError as erro:
+                    flash(str(erro), "danger")
+                    return redirect(url_for("pagina_pedagogico"))
             escola = _nome_da_escola(cursor)
             cursor.execute(
                 "SELECT id, nome_completo, matricula, status FROM alunos WHERE id = %s",
@@ -14876,7 +15026,7 @@ def enviar_contracheques_mes():
             for item in itens:
                 cursor.execute("SELECT * FROM funcionarios WHERE id = %s", (item.get("id"),))
                 func = cursor.fetchone()
-                if not func:
+                if not func or func.get("ativo") is False:
                     continue
                 try:
                     dados = _func_com_ajuste(cursor, func, mes_filtro)

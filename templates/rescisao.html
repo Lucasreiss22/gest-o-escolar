@@ -362,11 +362,19 @@
                     (10 dias do término do contrato — Art. 477 §6º CLT).
                 </div>
                 {% endif %}
+                {% if folha_mes_saida and calculo.saldo_salario %}
+                <div class="alerta danger">
+                    Já existe contracheque de <strong>{{ folha_mes_saida.rotulo }}</strong> para esta pessoa
+                    {% if folha_mes_saida.bruto %}(bruto R$ {{ folha_mes_saida.bruto|moeda }}){% endif %}{% if folha_mes_saida.enviado_em %}, enviado em {{ folha_mes_saida.enviado_em.strftime('%d/%m/%Y') }}{% endif %}.
+                    Se esse valor já cobriu os dias trabalhados no mês da saída, o saldo de salário abaixo seria pago em dobro:
+                    ajuste "dias trabalhados no mês" ou desconte o adiantamento em "outros descontos".
+                </div>
+                {% endif %}
 
                 <div class="linha"><span>Saldo de salário ({{ calculo.dias_trabalhados_mes }} dias)</span><strong>R$ {{ calculo.saldo_salario|moeda }}</strong></div>
                 <div class="linha"><span>Aviso prévio ({{ calculo.dias_aviso }} dias · {{ calculo.rotulo_aviso }})</span><strong>R$ {{ calculo.aviso_indenizado|moeda }}</strong></div>
                 {% if calculo.aviso_desconto %}
-                <div class="linha"><span>Desconto aviso não cumprido</span><strong>− R$ {{ calculo.aviso_desconto|moeda }}</strong></div>
+                <div class="linha"><span>Desconto aviso não cumprido ({{ calculo.dias_aviso }} dias)</span><strong>− R$ {{ calculo.aviso_desconto|moeda }}</strong></div>
                 {% endif %}
                 <div class="linha"><span>13º proporcional ({{ calculo.avos_13 }}/12{% if calculo.fator_proporcionais < 1 %} · 50% culpa recíproca{% endif %}){% if calculo.decimo_indenizado %} · indenizado R$ {{ calculo.decimo_indenizado|moeda }}{% endif %}</span><strong>R$ {{ calculo.decimo_terceiro|moeda }}</strong></div>
                 <div class="linha"><span>Férias vencidas</span><strong>R$ {{ calculo.ferias_vencidas|moeda }}</strong></div>

@@ -605,6 +605,32 @@
         }
     }, true);
 
+    document.addEventListener("submit", function (event) {
+        var form = event.target;
+        if (!form || form.tagName !== "FORM" || event.defaultPrevented) return;
+        var metodo = (form.getAttribute("method") || "get").toLowerCase();
+        if (metodo !== "post" || form.target || form.hasAttribute("data-permitir-reenvio")) return;
+        var agora = Date.now();
+        var ultimo = Number(form.dataset.enviadoEm || 0);
+        if (ultimo && agora - ultimo < 6000) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        form.dataset.enviadoEm = String(agora);
+        form.classList.add("form-enviando");
+        setTimeout(function () {
+            form.classList.remove("form-enviando");
+        }, 6000);
+    });
+
+    window.addEventListener("pageshow", function () {
+        document.querySelectorAll("form.form-enviando").forEach(function (form) {
+            form.classList.remove("form-enviando");
+            delete form.dataset.enviadoEm;
+        });
+    });
+
     document.addEventListener("input", function (event) {
         var campo = event.target;
         if (campo && campo.setCustomValidity) campo.setCustomValidity("");

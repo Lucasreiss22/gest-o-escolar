@@ -2480,7 +2480,7 @@ def _linha_rescisao_calc(pdf, calculo):
     pdf.linha(f"Saldo de salário ({c.get('dias_trabalhados_mes') or 0} dias)", _brl(c.get("saldo_salario")))
     pdf.linha(f"Aviso prévio ({c.get('dias_aviso') or 0} dias)", _brl(c.get("aviso_indenizado")))
     if float(c.get("aviso_desconto") or 0) > 0:
-        pdf.linha("Desconto aviso não cumprido", f"- {_brl(c.get('aviso_desconto'))}")
+        pdf.linha(f"Desconto aviso não cumprido ({c.get('dias_aviso') or 0} dias)", f"- {_brl(c.get('aviso_desconto'))}")
     pdf.linha(f"13º proporcional ({c.get('avos_13') or 0}/12)", _brl(c.get("decimo_terceiro")))
     pdf.linha("Férias vencidas", _brl(c.get("ferias_vencidas")))
     pdf.linha("1/3 férias vencidas", _brl(c.get("terco_ferias_vencidas")))

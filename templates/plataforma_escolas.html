@@ -641,11 +641,14 @@
                 <div class="telas">
                     {% for codigo, rotulo in telas_plano %}
                     <label>
-                        <input type="checkbox" name="telas" value="{{ codigo }}" {% if codigo in p.telas %}checked{% endif %}>
+                        <input type="checkbox" name="telas" value="{{ codigo }}" {% if codigo in p.telas %}checked{% endif %}{% if p.codigo == 'completo' %} disabled{% endif %}>
                         {{ rotulo }}
                     </label>
                     {% endfor %}
                 </div>
+                {% if p.codigo == 'completo' %}
+                <p class="hint">O pacote Completo sempre libera todas as telas, inclusive as que forem criadas depois.</p>
+                {% endif %}
                 <button class="btn-sm btn-azul" type="submit">Salvar pacote</button>
             </form>
             {% endfor %}

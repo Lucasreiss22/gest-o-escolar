@@ -294,6 +294,23 @@ def contrato_vigente(func, ano=None, mes=None):
     return True
 
 
+def situacao_folha_mes(func, ano=None, mes=None):
+    """'folha' (entra na folha), 'rescisao' (mês do desligamento: o saldo de salário sai na rescisão) ou 'fora'."""
+    ativo = func.get("ativo") is not False
+    fim = _data(func.get("data_fim_contrato"))
+    if not ano or not mes:
+        return "folha" if ativo else "fora"
+    if not contrato_vigente(func, ano, mes):
+        return "fora"
+    if ativo:
+        return "folha"
+    if not fim:
+        return "fora"
+    if (fim.year, fim.month) == (int(ano), int(mes)):
+        return "rescisao"
+    return "folha"
+
+
 def dia_pagamento_valido(valor, padrao=5):
     try:
         dia = int(valor or padrao)

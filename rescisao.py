@@ -289,6 +289,10 @@ def calcular_rescisao(func, params):
         dias_aviso = dias_aviso_proporcional(admissao, deslig)
     else:
         dias_aviso = max(0, int(dias_aviso))
+    dias_aviso_informado = dias_aviso
+    if direitos["aviso_desconto_pedido"]:
+        # Lei 12.506/2011: a proporcionalidade só favorece o empregado; no pedido o aviso é de 30 dias
+        dias_aviso = min(dias_aviso, 30)
 
     proj_dias = projetar_aviso_dias(tipo, aviso_mod, dias_aviso)
 
@@ -302,8 +306,7 @@ def calcular_rescisao(func, params):
             base_dias = (dias_aviso + 1) // 2
         aviso_valor = _money(diario * base_dias)
     elif direitos["aviso_desconto_pedido"] and aviso_mod == "nao_cumprido":
-        # Pedido sem cumprir: desconto de 30 dias (Art. 487 §2º), não o proporcional extra
-        aviso_desconto = _money(diario * 30)
+        aviso_desconto = _money(diario * dias_aviso)
 
     fator = float(direitos.get("fator_proporcionais") or 1.0)
 
@@ -420,6 +423,7 @@ def calcular_rescisao(func, params):
         "data_desligamento": deslig.isoformat(),
         "dias_trabalhados_mes": dias_mes,
         "dias_aviso": dias_aviso,
+        "dias_aviso_informado": dias_aviso_informado,
         "dias_aviso_projecao": proj_dias,
         "salario_mensal": salario_mes,
         "salario_diario": _money(diario),

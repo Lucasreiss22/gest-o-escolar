@@ -18,6 +18,9 @@ from database import (
 from email_envio import enviar_email, exigencia_email, normalizar_email, smtp_configurado
 from permissoes import PACOTES_INICIAIS, TELAS_PLANO
 
+PACOTE_COMPLETO = "completo"
+_TODAS_TELAS = [codigo for codigo, _rotulo in TELAS_PLANO]
+
 
 def email_super_admin():
     return (carregar_config().get("SUPER_ADMIN_EMAIL") or "lucaslagoasreis@gmail.com").strip().lower()
@@ -179,6 +182,10 @@ def garantir_plataforma():
                     """,
                     (codigo, nome, descricao, json.dumps(telas)),
                 )
+            cursor.execute(
+                "UPDATE plataforma_pacotes SET telas = %s WHERE codigo = %s AND telas::text <> %s",
+                (json.dumps(_TODAS_TELAS), PACOTE_COMPLETO, json.dumps(_TODAS_TELAS)),
+            )
             from nfse import garantir_tabela_plataforma
             garantir_tabela_plataforma(cursor)
             for coluna, spec in (
@@ -298,7 +305,10 @@ def listar_pacotes():
             linhas = []
             for row in cursor.fetchall() or []:
                 item = dict(row)
-                item["telas"] = _telas_validas(item.get("telas"))
+                if item.get("codigo") == PACOTE_COMPLETO:
+                    item["telas"] = list(_TODAS_TELAS)
+                else:
+                    item["telas"] = _telas_validas(item.get("telas"))
                 linhas.append(item)
             return linhas
     finally:
@@ -310,7 +320,7 @@ def salvar_pacote(codigo, valor, telas):
     conhecidos = {item[0] for item in PACOTES_INICIAIS}
     if codigo not in conhecidos:
         raise ValueError("Pacote não encontrado.")
-    telas_ok = _telas_validas(telas)
+    telas_ok = list(_TODAS_TELAS) if codigo == PACOTE_COMPLETO else _telas_validas(telas)
     if not telas_ok:
         raise ValueError("Marque ao menos uma tela no pacote.")
     conexao = obter_conexao(master=True)
