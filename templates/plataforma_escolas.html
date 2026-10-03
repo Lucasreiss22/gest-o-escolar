@@ -165,7 +165,7 @@
 
         <div class="card-box">
             <h3>Gerar NFS-e</h3>
-            <p class="hint">Desligado, a nota fiscal some de todas as escolas. Nenhum campo de emissão aparece no sistema.</p>
+            <p class="hint">Chave geral: vale para as escolas que seguem a chave geral e para as notas das licenças. Para testar ou liberar uma escola só, use "NFS-e" no cartão da escola, na lista abaixo.</p>
             <form method="POST" style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
                 <input type="hidden" name="acao" value="definir_emissao_nfse">
                 <input type="hidden" name="aba" value="{{ aba }}">
@@ -603,6 +603,17 @@
                     <input type="hidden" name="escola_id" value="{{ e.id }}">
                     <input type="password" name="nova_senha" minlength="6" placeholder="Nova senha (mín. 6)" required class="campo" autocomplete="new-password">
                     <button class="btn-sm btn-ambar" type="submit">Redefinir senha</button>
+                </form>
+                <form method="POST" class="acoes">
+                    <input type="hidden" name="acao" value="definir_nfse_escola">
+                    <input type="hidden" name="aba" value="escolas">
+                    <input type="hidden" name="escola_id" value="{{ e.id }}">
+                    <select name="nfse_escola" class="campo" aria-label="NFS-e desta escola">
+                        <option value="" {% if e.nfse_habilitada is none %}selected{% endif %}>NFS-e: segue a chave geral ({{ 'ligada' if nfse_liberada else 'desligada' }})</option>
+                        <option value="1" {% if e.nfse_habilitada is sameas true %}selected{% endif %}>NFS-e ligada só nesta escola</option>
+                        <option value="0" {% if e.nfse_habilitada is sameas false %}selected{% endif %}>NFS-e desligada nesta escola</option>
+                    </select>
+                    <button class="btn-sm btn-cinza" type="submit">Salvar NFS-e</button>
                 </form>
                 {% if not e.senha_definida and e.convite_token and e.ativo %}
                 <form method="POST" class="acoes">

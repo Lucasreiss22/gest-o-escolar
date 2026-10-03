@@ -199,6 +199,7 @@ def garantir_plataforma():
                 ("nfse_uf", "CHAR(2)"),
                 ("nfse_cep", "VARCHAR(9)"),
                 ("telas_escola", "JSONB"),
+                ("nfse_habilitada", "BOOLEAN"),
             ):
                 cursor.execute(
                     f"ALTER TABLE plataforma_escolas ADD COLUMN IF NOT EXISTS {coluna} {spec}"
@@ -1331,6 +1332,29 @@ def salvar_telas_escola(escola_id, telas):
             cursor.execute(
                 "UPDATE plataforma_escolas SET telas_escola = %s::jsonb WHERE id = %s",
                 (json.dumps(telas_ok), escola_id),
+            )
+        conexao.commit()
+    finally:
+        conexao.close()
+    return buscar_escola_por_id(escola_id)
+
+
+def definir_nfse_escola(escola_id, valor):
+    """NFS-e só desta escola: '1' liga, '0' desliga, vazio volta a seguir a chave geral."""
+    garantir_plataforma()
+    escola = buscar_escola_por_id(escola_id)
+    if not escola:
+        raise ValueError("Escola não encontrada.")
+    texto = str(valor or "").strip()
+    habilitada = None if texto == "" else texto == "1"
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "UPDATE plataforma_escolas SET nfse_habilitada = %s WHERE id = %s",
+                (habilitada, escola_id),
             )
         conexao.commit()
     finally:

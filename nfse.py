@@ -473,8 +473,9 @@ def garantir_tabela_escola(cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_notas_aluno ON notas_fiscais (aluno_id)")
 
 
-def emissao_nfse_ligada():
-    """Liga a NFS-e de todas as escolas. Sem a coluna ou sem banco, fica desligada."""
+def emissao_nfse_ligada(escola_id=None):
+    """Chave geral da plataforma; a escola pode ter a própria (plataforma_escolas.nfse_habilitada, vazio = segue a geral).
+    Sem a coluna ou sem banco, fica desligada."""
     from database import obter_conexao
 
     conexao = obter_conexao(master=True)
@@ -482,6 +483,18 @@ def emissao_nfse_ligada():
         return False
     try:
         with conexao.cursor() as cursor:
+            if escola_id:
+                cursor.execute("SAVEPOINT nfse_escola")
+                try:
+                    cursor.execute("SELECT nfse_habilitada FROM plataforma_escolas WHERE id = %s", (escola_id,))
+                    escola = cursor.fetchone()
+                    cursor.execute("RELEASE SAVEPOINT nfse_escola")
+                except Exception:
+                    cursor.execute("ROLLBACK TO SAVEPOINT nfse_escola")
+                    escola = None
+                propria = (escola.get("nfse_habilitada") if isinstance(escola, dict) else escola[0]) if escola else None
+                if propria is not None:
+                    return bool(propria)
             cursor.execute("SELECT emissao_habilitada FROM plataforma_nfse WHERE id = 1")
             linha = cursor.fetchone()
         if not linha:

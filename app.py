@@ -198,6 +198,7 @@ from plataforma import (
     regenerar_convite_escola,
     buscar_escola_por_id,
     definir_pacote_escola,
+    definir_nfse_escola,
     preparar_cobranca_escolas,
     salvar_regra_cobranca_escola,
     listar_pacotes,
@@ -1644,7 +1645,7 @@ def _nfse_liberada_cached(forcar=False):
     ):
         return bool(session.get("nfse_liberada_cache"))
     try:
-        ligada = bool(emissao_nfse_ligada())
+        ligada = bool(emissao_nfse_ligada(None if session.get("super_admin") else session.get("escola_id")))
     except Exception:
         ligada = False
     session["nfse_liberada_cache"] = ligada
@@ -3876,9 +3877,9 @@ def plataforma_escolas():
                 _limpar_cache_nfse_sessao()
                 g.nfse_liberada = bool(ligada)
                 flash(
-                    "A geração de NFS-e foi ligada em todas as escolas."
+                    "Chave geral da NFS-e ligada (escolas que seguem a chave geral e licenças)."
                     if ligada
-                    else "A geração de NFS-e foi desligada em todas as escolas.",
+                    else "Chave geral da NFS-e desligada. Escolas ligadas individualmente continuam emitindo.",
                     "success",
                 )
             except Exception as e:
@@ -4133,6 +4134,14 @@ def plataforma_escolas():
                     )
             except Exception as e:
                 flash(f"Não foi possível aplicar o pacote: {e}", "danger")
+        elif acao == "definir_nfse_escola":
+            try:
+                escola = definir_nfse_escola(request.form.get("escola_id"), request.form.get("nfse_escola"))
+                estado = escola.get("nfse_habilitada")
+                texto = "segue a chave geral" if estado is None else ("ligada só nesta escola" if estado else "desligada nesta escola")
+                flash(f"NFS-e de {escola.get('nome')}: {texto}. Vale no próximo minuto para quem já está logado.", "success")
+            except Exception as e:
+                flash(f"Não foi possível salvar a NFS-e da escola: {e}", "danger")
         elif acao == "salvar_telas_escola":
             try:
                 escola_id = request.form.get("escola_id")
