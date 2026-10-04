@@ -260,6 +260,16 @@ from empresa import (
     tem_dados_empresa,
 )
 from unidades import TIPOS_UNIDADE, resumo_unidade
+from fechamento import (
+    MOTIVO_MINIMO_REABERTURA,
+    competencias_fechadas as listar_competencias_fechadas,
+    fechar_competencia,
+    folha_fechada,
+    historico_fechamento,
+    info_fechamento,
+    item_fechado,
+    reabrir_competencia,
+)
 import calendar as calendario_lib
 from datetime import datetime, date, timedelta
 import json
@@ -2822,6 +2832,47 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
     return itens, totais
 
 
+def _folha_competencia(cursor, regime, mes_filtro=None):
+    """Folha do mês: snapshot se a competência estiver fechada, cálculo ao vivo se aberta."""
+    if mes_filtro:
+        garantir_tabelas_folha()
+        fechada = folha_fechada(cursor, str(mes_filtro)[:7])
+        if fechada is not None:
+            return fechada
+    return montar_folha_contratos(cursor, regime, mes_filtro)
+
+
+def _item_contracheque(cursor, func, regime, mes_filtro):
+    """Contracheque de uma pessoa: snapshot se fechada; se aberta, None quando não há folha no mês."""
+    fechado = item_fechado(cursor, str(mes_filtro)[:7], func.get("id"))
+    if fechado is not None or info_fechamento(cursor, str(mes_filtro)[:7]):
+        return fechado
+    ano, mes = parse_mes(mes_filtro)
+    dados = _func_com_ajuste(cursor, func, mes_filtro)
+    if situacao_folha_mes(dados, ano, mes) != "folha":
+        return None
+    item = calcular_folha_pessoa(dados, regime, ano, mes)
+    item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
+    try:
+        item["valor_hora_extra_cadastro"] = float(dados.get("valor_hora_extra") or 0)
+    except (TypeError, ValueError):
+        item["valor_hora_extra_cadastro"] = 0.0
+    return item
+
+
+def _motivo_sem_contracheque(cursor, func, mes_filtro):
+    ano, mes = parse_mes(mes_filtro)
+    if info_fechamento(cursor, str(mes_filtro)[:7]):
+        return f"{func.get('nome_completo') or 'Colaborador'} não está na folha fechada de {nome_mes_extenso(mes_filtro)}."
+    dados = _func_com_ajuste(cursor, func, mes_filtro)
+    if situacao_folha_mes(dados, ano, mes) == "rescisao":
+        return (
+            f"{func.get('nome_completo') or 'Colaborador'} foi desligado(a) em {nome_mes_extenso(mes_filtro)}: "
+            "o saldo de salário deste mês é pago no termo de rescisão, não em contra-cheque."
+        )
+    return f"{func.get('nome_completo') or 'Colaborador'} não tem contrato vigente em {nome_mes_extenso(mes_filtro)}."
+
+
 def _registrar_folha_item(cursor, item, competencia):
     import json
     cursor.execute(
@@ -2870,10 +2921,11 @@ def _registrar_folha_item(cursor, item, competencia):
     )
 
 
-def _montar_pdf_contracheque(escola, mes_filtro, func, regime):
-    ano, mes = parse_mes(mes_filtro)
-    item = calcular_folha_pessoa(dict(func), regime, ano, mes)
-    item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
+def _montar_pdf_contracheque(escola, mes_filtro, func, regime, item=None):
+    if item is None:
+        ano, mes = parse_mes(mes_filtro)
+        item = calcular_folha_pessoa(dict(func), regime, ano, mes)
+        item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
     buffer = pdf_contracheque(escola or "Gestão Escolar", nome_mes_extenso(mes_filtro), item)
     return item, buffer
 
@@ -2905,13 +2957,13 @@ def _emails_colaborador(func, cursor=None):
     return destinos
 
 
-def _enviar_contracheque_pessoa(func, regime, mes_filtro, escola, destinos=None):
+def _enviar_contracheque_pessoa(func, regime, mes_filtro, escola, destinos=None, item=None):
     destinos = list(destinos or [])
     if not destinos:
         destinos = _emails_colaborador(func)
     if not destinos:
         raise RuntimeError(f"{func.get('nome_completo') or 'Colaborador'} sem e-mail válido para receber o contra-cheque.")
-    item, buffer = _montar_pdf_contracheque(escola, mes_filtro, func, regime)
+    item, buffer = _montar_pdf_contracheque(escola, mes_filtro, func, regime, item=item)
     nome_arq = f"contracheque_{func.get('id')}_{mes_filtro}.pdf"
     nome = item.get("nome_completo") or func.get("nome_completo") or "colaborador"
     enviar_email(
@@ -2948,6 +3000,7 @@ def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
                     pass
             regime = cfg.get("regime_tributario") or "simples_nacional"
             escola = cfg.get("nome_escola") or "Gestão Escolar"
+            fechada = info_fechamento(cursor, competencia) is not None
             ajustes = _mapa_ajustes_folha(cursor, competencia)
             cursor.execute("SELECT * FROM funcionarios WHERE COALESCE(ativo, TRUE) = TRUE")
             for func in cursor.fetchall() or []:
@@ -2956,17 +3009,22 @@ def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
                     continue
                 if dia_pagamento_valido(dados.get("dia_pagamento")) != hoje.day:
                     continue
-                try:
-                    info = _descontos_ponto_folha(cursor, dados.get("id"), competencia, dados)
-                    if info:
-                        dados.update(info)
-                except Exception:
-                    pass
-                dados["feriados_competencia"] = _feriados_competencia(cursor, competencia)
-                dados = _aplicar_he_ponto(cursor, dados, competencia)
-                item = calcular_folha_pessoa(dados, regime, hoje.year, hoje.month)
-                item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
-                _registrar_folha_item(cursor, item, competencia)
+                if fechada:
+                    item = item_fechado(cursor, competencia, dados.get("id"))
+                    if item is None:
+                        continue
+                else:
+                    try:
+                        info = _descontos_ponto_folha(cursor, dados.get("id"), competencia, dados)
+                        if info:
+                            dados.update(info)
+                    except Exception:
+                        pass
+                    dados["feriados_competencia"] = _feriados_competencia(cursor, competencia)
+                    dados = _aplicar_he_ponto(cursor, dados, competencia)
+                    item = calcular_folha_pessoa(dados, regime, hoje.year, hoje.month)
+                    item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
+                    _registrar_folha_item(cursor, item, competencia)
                 gerados += 1
                 if not enviar or enviados >= limite:
                     continue
@@ -2980,7 +3038,7 @@ def _processar_contracheques_escola(hoje=None, enviar=True, limite=3):
                     continue
                 try:
                     destinos = _emails_colaborador(dados, cursor)
-                    _enviar_contracheque_pessoa(dados, regime, competencia, escola, destinos=destinos)
+                    _enviar_contracheque_pessoa(dados, regime, competencia, escola, destinos=destinos, item=item)
                     cursor.execute(
                         """
                         INSERT INTO folha_envios (funcionario_id, competencia)
@@ -12447,7 +12505,7 @@ def pagina_financeiro():
                                 continue
                             folha = folha_sistema_mes(cursor, comp)
                             if not folha:
-                                _det, totais_c = montar_folha_contratos(cursor, regime_carga, comp)
+                                _det, totais_c = _folha_competencia(cursor, regime_carga, comp)
                                 folha = float(totais_c.get("custo_escola") or 0)
                             if folha:
                                 upsert_competencia(cursor, comp, None, folha, "folha", "Folha e encargos do sistema")
@@ -12478,6 +12536,7 @@ def pagina_financeiro():
         return redirect(url_for("pagina_financeiro", **params_redir))
 
     lancamentos, alunos, professores_detalhes = [], [], []
+    folha_fechamento = None
     turmas_simples = []
     emails_escola = []
     custos_mes = []
@@ -12596,8 +12655,9 @@ def pagina_financeiro():
                     recebimentos_caixa = listar_recebimentos_mes(cursor, mes_filtro)
 
                 # 3. Folha de pagamento por tipo de contrato
-                professores_detalhes, totais_folha = montar_folha_contratos(cursor, regime_tributario, mes_filtro)
+                professores_detalhes, totais_folha = _folha_competencia(cursor, regime_tributario, mes_filtro)
                 totais["folha_pagamento"] = totais_folha["custo_escola"]
+                folha_fechamento = info_fechamento(cursor, mes_filtro)
 
                 custos_mes = listar_custos_do_mes(cursor, mes_filtro)
                 resumo_custos = resumir_custos_operacionais(custos_mes)
@@ -12796,6 +12856,7 @@ def pagina_financeiro():
         cadastro_simples=cadastro_simples,
         turmas_simples=turmas_simples,
         professores_detalhes=professores_detalhes,
+        folha_fechamento=folha_fechamento,
         totais_folha=totais_folha,
         isencao_aprendiz=isencao_aprendiz,
         custos_mes=custos_mes,
@@ -12896,7 +12957,7 @@ def extrato_pgdas_pdf():
                 if apuracao_mes.get("competencia"):
                     comps.append(apuracao_mes.get("competencia"))
                 folhas = listar_folha_janela(cursor, comps)
-                itens_mes, totais_mes = montar_folha_contratos(cursor, "simples_nacional", mes_filtro)
+                itens_mes, totais_mes = _folha_competencia(cursor, "simples_nacional", mes_filtro)
                 buffer = pdf_calculo_fs12(
                     escola, mes_label, apuracao, regime_apuracao,
                     folhas=folhas, itens_mes=itens_mes, totais_mes=totais_mes,
@@ -13056,7 +13117,7 @@ def relatorio_cartao_financeiro(tipo):
                     total,
                 )
             elif tipo == "folha":
-                itens, totais = montar_folha_contratos(cursor, regime, mes_filtro)
+                itens, totais = _folha_competencia(cursor, regime, mes_filtro)
                 buffer = pdf_folha_pagamento(escola, mes_label, regime, itens, totais)
                 nome_arquivo = f"folha_{mes_filtro}.pdf"
             elif tipo in ("compras", "servicos"):
@@ -13106,7 +13167,7 @@ def relatorio_cartao_financeiro(tipo):
                     (mes_filtro,),
                 )
                 recebido = float((cursor.fetchone() or {}).get("recebido") or 0)
-                _itens_folha, totais_folha = montar_folha_contratos(cursor, regime, mes_filtro)
+                _itens_folha, totais_folha = _folha_competencia(cursor, regime, mes_filtro)
                 folha = float(totais_folha.get("custo_escola") or 0)
                 custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
                 if regime == "simples_nacional":
@@ -13218,7 +13279,7 @@ def relatorio_tributario():
             if regime == "simples_nacional":
                 apuracao, colaboradores = calcular_apuracao_simples(cursor, mes_filtro)
                 receitas_mes = listar_lancamentos_mes(cursor, mes_filtro)
-                _itens_folha, totais_folha = montar_folha_contratos(cursor, regime, mes_filtro)
+                _itens_folha, totais_folha = _folha_competencia(cursor, regime, mes_filtro)
                 custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
                 buffer = pdf_simples_nacional(
                     escola,
@@ -13284,7 +13345,7 @@ def relatorio_tributario():
                         acrescimos_mora=mora_mes["total"],
                         acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
                     )
-                    _itens_folha, totais_folha = montar_folha_contratos(cursor, regime, mes_filtro)
+                    _itens_folha, totais_folha = _folha_competencia(cursor, regime, mes_filtro)
                     totais["tributos"] = apuracao_p["tributos"]
                     totais["folha_pagamento"] = totais_folha.get("custo_escola") or 0
                     buffer = pdf_lucro_presumido(
@@ -13333,7 +13394,7 @@ def relatorio_pdf_folha():
             cursor.execute("SELECT nome_escola, regime_tributario FROM configuracoes WHERE id = 1;")
             cfg = cursor.fetchone() or {}
             regime = cfg.get("regime_tributario") or "lucro_presumido"
-            itens, totais = montar_folha_contratos(cursor, regime, mes_filtro)
+            itens, totais = _folha_competencia(cursor, regime, mes_filtro)
             buffer = pdf_folha_pagamento(
                 cfg.get("nome_escola") or "Gestão Escolar",
                 nome_mes_extenso(mes_filtro),
@@ -14021,9 +14082,8 @@ def _tratar_ponto_retroativo(cursor, acao, meu_funcionario_id):
 
     usuario_id, usuario_nome = _usuario_ponto_atual()
     hoje = _agora_ponto_br().date()
-    # Não há competência de folha fechada no sistema. O conjunto fica vazio
-    # de propósito: a validação existe e passa a bloquear se um dia for preenchido.
-    competencias_fechadas = ()
+    garantir_tabelas_folha()
+    competencias_fechadas = listar_competencias_fechadas(cursor)
 
     if acao in {"aprovar_ponto_retroativo", "rejeitar_ponto_retroativo"}:
         if not _pode_aprovar_ponto():
@@ -15227,19 +15287,29 @@ def atestado_ponto(atestado_id):
 def contracheque():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
-    mes_filtro = request.args.get("mes") or datetime.now().strftime("%Y-%m")
+    mes_filtro = _mes_contracheque(request.args.get("mes"))
     garantir_tabelas_folha()
-    try:
-        _processar_contracheques_escola(enviar=False)
-    except Exception:
-        pass
+    schema = session.get("escola_db") or ""
+    if _contracheque_auto_dia.get(schema) != date.today():
+        try:
+            _processar_contracheques_escola(enviar=False)
+            _contracheque_auto_dia[schema] = date.today()
+        except Exception:
+            pass
     if not session.get("funcionario_id"):
         session["funcionario_id"] = _id_funcionario_da_sessao()
     conexao = obter_conexao()
     item = None
     itens = []
+    totais = {}
+    aviso_item = ""
+    fechamento = None
+    historico = []
     escola = "Gestão Escolar"
-    admin_folha = pode_modulo(session.get("usuario_papel"), "financeiro")
+    papel = session.get("usuario_papel")
+    admin_folha = pode_modulo(papel, "financeiro")
+    pode_fechar = admin_folha and pode_acao(papel, "financeiro", "alterar", session.get("permissoes"))
+    pode_reabrir = normalizar_papel(papel) == "admin"
     if conexao:
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -15247,33 +15317,168 @@ def contracheque():
                 cfg = cursor.fetchone() or {}
                 escola = cfg.get("nome_escola") or escola
                 regime = cfg.get("regime_tributario") or "lucro_presumido"
+                fechamento = info_fechamento(cursor, mes_filtro)
                 fid = session.get("funcionario_id")
                 if admin_folha:
-                    itens, _totais = montar_folha_contratos(cursor, regime, mes_filtro)
+                    itens, totais = _folha_competencia(cursor, regime, mes_filtro)
+                    historico = historico_fechamento(cursor, mes_filtro)
                     fid = request.args.get("funcionario_id", type=int) or fid
                 if fid:
-                    cursor.execute("SELECT * FROM funcionarios WHERE id = %s", (fid,))
-                    func = cursor.fetchone()
-                    if func:
-                        ano, mes = parse_mes(mes_filtro)
-                        dados = _func_com_ajuste(cursor, func, mes_filtro)
-                        item = calcular_folha_pessoa(dados, regime, ano, mes)
-                        item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
-                        try:
-                            item["valor_hora_extra_cadastro"] = float(dados.get("valor_hora_extra") or 0)
-                        except (TypeError, ValueError):
-                            item["valor_hora_extra_cadastro"] = 0.0
+                    item = next((i for i in itens if i.get("id") == fid), None)
+                    if item is None:
+                        cursor.execute("SELECT * FROM funcionarios WHERE id = %s", (fid,))
+                        func = cursor.fetchone()
+                        if func:
+                            item = _item_contracheque(cursor, func, regime, mes_filtro)
+                            if item is None:
+                                aviso_item = _motivo_sem_contracheque(cursor, func, mes_filtro)
         finally:
             conexao.close()
     return render_template(
         "contracheque.html",
         item=item,
         itens=itens,
+        totais=totais,
+        aviso_item=aviso_item,
         admin_folha=admin_folha,
+        pode_fechar=pode_fechar,
+        pode_reabrir=pode_reabrir,
+        fechamento=fechamento,
+        historico_fechamento=historico,
+        motivo_minimo=MOTIVO_MINIMO_REABERTURA,
+        competencia_futura=mes_filtro > datetime.now().strftime("%Y-%m"),
         mes_atual=mes_filtro,
         mes_label=nome_mes_extenso(mes_filtro),
         escola=escola,
     )
+
+
+_contracheque_auto_dia = {}
+
+
+def _mes_contracheque(valor):
+    valor = (valor or "").strip()[:7]
+    try:
+        parse_mes(valor)
+        if len(valor) == 7 and valor[4] == "-":
+            return valor
+    except Exception:
+        pass
+    return datetime.now().strftime("%Y-%m")
+
+
+def _auditar_folha(acao, descricao, detalhe=""):
+    try:
+        registrar_auditoria(
+            session.get("escola_id"),
+            session.get("escola_nome") or session.get("escola_slug") or "",
+            session.get("usuario_nome") or "",
+            session.get("usuario_email") or "",
+            acao,
+            "financeiro",
+            descricao,
+            detalhe,
+            usuario_login=session.get("usuario_email"),
+        )
+    except Exception:
+        pass
+
+
+@app.route("/contracheque/fechar", methods=["POST"])
+def fechar_competencia_folha():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    papel = session.get("usuario_papel")
+    mes_filtro = _mes_contracheque(request.form.get("mes"))
+    if not pode_acao(papel, "financeiro", "alterar", session.get("permissoes")):
+        flash("Sem permissão para fechar a folha.", "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT regime_tributario FROM configuracoes WHERE id = 1;")
+            regime = (cursor.fetchone() or {}).get("regime_tributario") or "lucro_presumido"
+            if info_fechamento(cursor, mes_filtro):
+                raise ValueError("Esta competência já está fechada.")
+            itens, totais = montar_folha_contratos(cursor, regime, mes_filtro)
+            fechar_competencia(
+                cursor, mes_filtro, itens, totais, regime,
+                usuario_id=session.get("usuario_id"), usuario_nome=session.get("usuario_nome"),
+            )
+            for item in itens:
+                _registrar_folha_item(cursor, item, mes_filtro)
+        conexao.commit()
+    except ValueError as e:
+        conexao.rollback()
+        flash(str(e), "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    except Exception as e:
+        conexao.rollback()
+        flash(f"Não foi possível fechar a folha: {e}", "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    finally:
+        conexao.close()
+    _auditar_folha(
+        "alteracao",
+        f"Fechamento da folha de {nome_mes_extenso(mes_filtro)}",
+        f"{len(itens)} contra-cheque(s); bruto R$ {totais.get('bruto')}; líquido R$ {totais.get('liquido')}; "
+        f"custo da escola R$ {totais.get('custo_escola')}",
+    )
+    flash(
+        f"Folha de {nome_mes_extenso(mes_filtro)} fechada com {len(itens)} contra-cheque(s). "
+        "Contra-cheques, PDFs, Financeiro e Simples deste mês passam a usar os valores gravados agora.",
+        "success",
+    )
+    return redirect(url_for("contracheque", mes=mes_filtro))
+
+
+@app.route("/contracheque/reabrir", methods=["POST"])
+def reabrir_competencia_folha():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    mes_filtro = _mes_contracheque(request.form.get("mes"))
+    if normalizar_papel(session.get("usuario_papel")) != "admin":
+        flash("Só o administrador da escola pode reabrir uma folha fechada.", "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    motivo = (request.form.get("motivo") or "").strip()
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            totais = reabrir_competencia(
+                cursor, mes_filtro, motivo,
+                usuario_id=session.get("usuario_id"), usuario_nome=session.get("usuario_nome"),
+            )
+        conexao.commit()
+    except ValueError as e:
+        conexao.rollback()
+        flash(str(e), "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    except Exception as e:
+        conexao.rollback()
+        flash(f"Não foi possível reabrir a folha: {e}", "danger")
+        return redirect(url_for("contracheque", mes=mes_filtro))
+    finally:
+        conexao.close()
+    _auditar_folha(
+        "alteracao",
+        f"Reabertura da folha de {nome_mes_extenso(mes_filtro)}",
+        f"Motivo: {motivo[:300]}. Totais no fechamento: líquido R$ {totais.get('liquido')}; "
+        f"custo da escola R$ {totais.get('custo_escola')}",
+    )
+    flash(
+        f"Folha de {nome_mes_extenso(mes_filtro)} reaberta. Os valores voltam a ser calculados com o cadastro e o ponto atuais; "
+        "feche de novo depois dos ajustes.",
+        "warning",
+    )
+    return redirect(url_for("contracheque", mes=mes_filtro))
 
 
 @app.route("/contracheque/enviar-mes", methods=["POST"])
@@ -15300,18 +15505,19 @@ def enviar_contracheques_mes():
                 session["escola_email_contato"] = cfg["email_contato"]
             regime = cfg.get("regime_tributario") or "simples_nacional"
             escola = cfg.get("nome_escola") or "Gestão Escolar"
-            itens, _totais = montar_folha_contratos(cursor, regime, mes_filtro)
+            fechada = info_fechamento(cursor, mes_filtro) is not None
+            itens, _totais = _folha_competencia(cursor, regime, mes_filtro)
             for item in itens:
                 cursor.execute("SELECT * FROM funcionarios WHERE id = %s", (item.get("id"),))
                 func = cursor.fetchone()
                 if not func or func.get("ativo") is False:
                     continue
                 try:
-                    dados = _func_com_ajuste(cursor, func, mes_filtro)
-                    destinos = _emails_colaborador(dados, cursor)
-                    dest = _enviar_contracheque_pessoa(dados, regime, mes_filtro, escola, destinos=destinos)
+                    destinos = _emails_colaborador(func, cursor)
+                    dest = _enviar_contracheque_pessoa(func, regime, mes_filtro, escola, destinos=destinos, item=item)
                     todos_dest.extend(dest or destinos)
-                    _registrar_folha_item(cursor, item, mes_filtro)
+                    if not fechada:
+                        _registrar_folha_item(cursor, item, mes_filtro)
                     cursor.execute(
                         """
                         INSERT INTO folha_envios (funcionario_id, competencia)
@@ -15365,6 +15571,13 @@ def ajustar_contracheque():
             if not cursor.fetchone():
                 flash("Colaborador não encontrado.", "danger")
                 return redirect(url_for("contracheque", mes=mes_filtro))
+            if info_fechamento(cursor, mes_filtro[:7]):
+                flash(
+                    f"A folha de {nome_mes_extenso(mes_filtro)} está fechada. "
+                    "Peça ao administrador para reabri-la antes de ajustar horas extras.",
+                    "danger",
+                )
+                return redirect(url_for("contracheque", mes=mes_filtro, funcionario_id=fid))
             cursor.execute(
                 """
                 INSERT INTO folha_ajustes (
@@ -15419,14 +15632,16 @@ def pdf_contracheque_rota():
             if not func:
                 flash("❌ Colaborador não encontrado.", "danger")
                 return redirect(url_for("contracheque"))
-            dados = _func_com_ajuste(cursor, func, mes_filtro)
-            ano, mes = parse_mes(mes_filtro)
-            item = calcular_folha_pessoa(dados, regime, ano, mes)
-            item["rotulo_contrato"] = rotulo_contrato(item["tipo_contrato"])
+            mes_filtro = _mes_contracheque(mes_filtro)
+            item = _item_contracheque(cursor, func, regime, mes_filtro)
+            if item is None:
+                flash(_motivo_sem_contracheque(cursor, func, mes_filtro), "danger")
+                return redirect(url_for("contracheque", mes=mes_filtro))
             buffer = pdf_contracheque(cfg.get("nome_escola") or "Gestão Escolar", nome_mes_extenso(mes_filtro), item)
+            enviar = bool(request.args.get("enviar") or request.method == "POST")
+            destinos = _emails_colaborador(func, cursor) if enviar else []
         nome_arq = f"contracheque_{fid}_{mes_filtro}.pdf"
-        if request.args.get("enviar") or request.method == "POST":
-            destinos = _emails_colaborador(dados, cursor)
+        if enviar:
             if not destinos:
                 flash("O colaborador não tem e-mail válido cadastrado.", "danger")
                 return redirect(url_for("contracheque", mes=mes_filtro))

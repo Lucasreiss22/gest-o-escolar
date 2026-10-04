@@ -130,11 +130,7 @@ def validar_data(data_ref, hoje, permitir_hoje=False):
 
 
 def validar_competencia_aberta(data_ref, competencias_fechadas=()):
-    """Bloqueia o mês se a escola tiver competência fechada.
-
-    O SGE não fecha a folha hoje. Quem chamar passa o conjunto
-    (vazio, no fluxo atual) de competências YYYY-MM bloqueadas.
-    """
+    """Bloqueia o mês se a folha da competência (YYYY-MM) já estiver fechada."""
     data_ref = parse_data(data_ref)
     competencia = f"{data_ref.year:04d}-{data_ref.month:02d}"
     fechadas = {str(item)[:7] for item in (competencias_fechadas or ()) if item}

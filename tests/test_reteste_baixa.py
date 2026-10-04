@@ -39,6 +39,9 @@ class CursorPonto:
             return {"id": 5}
         return None
 
+    def fetchall(self):
+        return []
+
     def inseriu_pedido(self):
         return any(sql.startswith("INSERT INTO ponto_solicitacoes") for sql, _p in self.sqls)
 

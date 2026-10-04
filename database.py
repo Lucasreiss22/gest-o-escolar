@@ -987,7 +987,7 @@ def garantir_tabelas_folha():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:folha:simples:rescisao2"
+    chave = f"{schema}:folha:simples:rescisao2:fechamento1"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -1254,6 +1254,8 @@ def garantir_tabelas_folha():
             garantir_tabela_escola(cursor)
             from rescisao import garantir_tabelas_rescisao
             garantir_tabelas_rescisao(cursor)
+            from fechamento import garantir_tabelas_fechamento
+            garantir_tabelas_fechamento(cursor)
             if "alunos" in mapa:
                 cursor.execute("SAVEPOINT migrar_desconto")
                 try:

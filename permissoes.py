@@ -83,6 +83,8 @@ ENDPOINTS = {
     "contracheque": "contracheque",
     "pdf_contracheque_rota": "contracheque",
     "enviar_contracheques_mes": "financeiro",
+    "fechar_competencia_folha": "financeiro",
+    "reabrir_competencia_folha": "financeiro",
     "ponto": "ponto",
     "ponto_gestao": "ponto",
     "ponto_relatorio_pdf": "ponto",

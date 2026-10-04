@@ -25,6 +25,9 @@
         .clt-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; margin:12px 0; }
         a.nome-colab { color:#0f172a; font-weight:700; text-decoration:none; }
         a.nome-colab:hover { color:#15803d; text-decoration:underline; }
+        .fechamento-box { margin-bottom:16px; border-left:4px solid #1e3a5f; }
+        .fechamento-box.fechada { border-left-color:#15803d; background:#f0fdf4; }
+        .selo-fechada { display:inline-block; background:#15803d; color:#fff; border-radius:999px; padding:2px 10px; font-size:.78rem; font-weight:700; margin-right:6px; }
     </style>
 </head>
 <body>
@@ -52,6 +55,45 @@
             {% endif %}
         </div>
         {% if admin_folha %}
+        <div class="card-box fechamento-box {% if fechamento %}fechada{% endif %}" id="fechamento-folha">
+            {% if fechamento %}
+            <p><span class="selo-fechada">Folha fechada</span>
+                {{ mes_label }} · fechada em {{ fechamento.fechada_em.strftime('%d/%m/%Y %H:%M') if fechamento.fechada_em else '—' }}
+                por {{ fechamento.fechada_nome or '—' }} · {{ fechamento.pessoas or 0 }} contra-cheque(s)</p>
+            <p class="hint">Os valores abaixo são os gravados no fechamento. Mudanças no cadastro, no ponto ou nas horas extras não alteram este mês. Para corrigir, reabra a folha.</p>
+            {% if pode_reabrir %}
+            <form action="{{ url_for('reabrir_competencia_folha') }}" method="POST" class="acoes" data-reabrir-folha>
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <input name="motivo" required minlength="{{ motivo_minimo }}" maxlength="1000" placeholder="Motivo da reabertura (mínimo {{ motivo_minimo }} caracteres)" style="flex:1; min-width:260px; padding:8px 10px; border:1px solid #cbd5e1; border-radius:8px;">
+                <button class="btn btn-claro" type="submit">Reabrir folha</button>
+            </form>
+            {% else %}
+            <p class="hint">Só o administrador da escola pode reabrir.</p>
+            {% endif %}
+            {% else %}
+            <p><strong>Folha de {{ mes_label }} aberta</strong> · valores calculados agora com o cadastro e o ponto.</p>
+            {% if competencia_futura %}
+            <p class="hint">Competência futura: o fechamento fica disponível a partir do próprio mês.</p>
+            {% elif pode_fechar %}
+            <form action="{{ url_for('fechar_competencia_folha') }}" method="POST" class="acoes" data-fechar-folha data-mes="{{ mes_label }}" data-qtd="{{ itens|length }}">
+                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                <span class="hint">{{ itens|length }} contra-cheque(s) · bruto R$ {{ (totais.bruto or 0)|moeda }} · líquido R$ {{ (totais.liquido or 0)|moeda }} · custo da escola R$ {{ (totais.custo_escola or 0)|moeda }}</span>
+                <button class="btn" type="submit">Fechar folha do mês</button>
+            </form>
+            <p class="hint" style="margin-top:6px;">Ao fechar, os contra-cheques ficam gravados como estão: PDFs, envio, Financeiro e Simples deste mês passam a usar esses valores, e o ponto retroativo do mês fica bloqueado.</p>
+            {% endif %}
+            {% endif %}
+            {% if historico_fechamento %}
+            <details style="margin-top:8px;">
+                <summary class="hint">Histórico de fechamento</summary>
+                <ul class="hint">
+                    {% for h in historico_fechamento %}
+                    <li>{{ h.em.strftime('%d/%m/%Y %H:%M') if h.em else '' }} · {{ 'Fechada' if h.acao == 'fechar' else 'Reaberta' }} por {{ h.usuario_nome or '—' }}{% if h.motivo %} · motivo: {{ h.motivo }}{% endif %}</li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% endif %}
+        </div>
         <div class="card-box" style="margin-bottom:16px;">
             <p><strong>{{ escola }}</strong> · {{ mes_label }}</p>
             <p class="hint">Clique no nome do colaborador para abrir o contra-cheque e lançar hora extra (50% em dia útil, 100% em domingo/feriado, DSR de 1/6). O envio sai pelo sistema, com o nome de quem clicou em enviar. Hotmail, Outlook e Yahoo costumam ir para Lixo eletrônico ou a aba Outros.</p>
@@ -94,8 +136,8 @@
         {% if item %}
         <div class="card-box" id="holerite">
             <p><strong>{{ item.nome_completo }}</strong> · {{ item.cargo }} · {{ item.rotulo_contrato }}</p>
-            <p class="hint">{{ escola }} · {{ mes_label }} · pagamento dia {{ item.dia_pagamento }}</p>
-            {% if admin_folha %}
+            <p class="hint">{{ escola }} · {{ mes_label }} · pagamento dia {{ item.dia_pagamento }}{% if fechamento %} · <strong>folha fechada</strong>{% endif %}</p>
+            {% if admin_folha and not fechamento %}
             <form action="{{ url_for('ajustar_contracheque') }}" method="POST" id="form-he">
                 <input type="hidden" name="mes" value="{{ mes_atual }}">
                 <input type="hidden" name="funcionario_id" value="{{ item.id }}">
@@ -153,7 +195,7 @@
             <div class="linha"><span>Hora extra 100% ({{ item.horas_extras_100|hora_br }} × R$ {{ (item.valor_hora_extra_100)|moeda }}){% if item.horas_extras_100_ponto %}<br><small class="hint">{{ item.horas_extras_100_ponto|hora_br }} vindas do ponto eletrônico do sistema{% if item.horas_extras_100_manual %} + {{ item.horas_extras_100_manual|hora_br }} lançadas à mão{% endif %}</small>{% endif %}</span><strong>R$ {{ (item.adicional_he_100)|moeda }}</strong></div>
             {% endif %}
             {% if item.tipo_contrato in ['clt_mensalista','clt_horista','horista','jovem_aprendiz','aprendiz'] and not item.horas_extras_ponto and not item.horas_extras_100_ponto %}
-            <div class="linha"><span>Horas extras do ponto eletrônico do sistema</span><strong>Nenhuma em {{ mes_label }} até agora</strong></div>
+            <div class="linha"><span>Horas extras do ponto eletrônico do sistema</span><strong>Nenhuma em {{ mes_label }}{% if not fechamento %} até agora{% endif %}</strong></div>
             {% endif %}
             {% if item.dsr_he %}
             <div class="linha"><span>DSR sobre horas extras (1/6)</span><strong>R$ {{ (item.dsr_he)|moeda }}</strong></div>
@@ -175,12 +217,21 @@
                 </form>
             </p>
         </div>
+        {% elif aviso_item %}
+        <div class="card-box" id="holerite"><p>{{ aviso_item }}</p></div>
         {% elif not admin_folha %}
         <p>Nenhum colaborador vinculado a este usuário. Peça à secretaria para ligar o e-mail do cadastro da equipe ao seu login.</p>
         {% endif %}
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script>
+    document.querySelectorAll("[data-fechar-folha]").forEach(function (f) {
+        f.addEventListener("submit", function (e) {
+            var msg = "Fechar a folha de " + f.dataset.mes + " com " + f.dataset.qtd + " contra-cheque(s)?\n\n"
+                + "Os valores do mês ficam gravados como estão. Para mudar depois, só o administrador pode reabrir, com motivo.";
+            if (!window.confirm(msg)) e.preventDefault();
+        });
+    });
     (function () {
         var horaNormal = {{ item.hora_normal if item else 0 }};
         var pontoHe50 = {{ (item.horas_extras_ponto or 0) if item else 0 }};

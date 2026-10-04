@@ -289,6 +289,7 @@
                 <h4>Folha e encargos</h4>
                 <div class="valor">R$ {{ (totais.folha_pagamento)|moeda }}</div>
                 <span class="hint" style="color: #9b59b6;">Líquido R$ {{ (totais_folha.liquido)|moeda }} · abrir relatório</span>
+                {% if folha_fechamento %}<span class="hint">Folha fechada em {{ folha_fechamento.fechada_em.strftime('%d/%m/%Y') if folha_fechamento.fechada_em else '' }}: valores gravados</span>{% endif %}
             </a>
             <a href="{% if regime_atual == 'simples_nacional' and apuracao_simples %}{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}{% else %}{{ url_for('relatorio_tributario', mes=mes_atual) }}{% endif %}" class="card-resumo tributos">
                 {% if regime_atual == 'simples_nacional' and apuracao_simples %}
