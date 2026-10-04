@@ -627,12 +627,12 @@
                     <button class="btn-sm btn-cinza" type="submit">Salvar NFS-e</button>
                 </form>
                 <details class="empresa-box">
-                    <summary>Dados da empresa{% if e.emp and e.emp.cnpj %} · CNPJ {{ e.emp.cnpj }}{% endif %}{% if e.empresa_faltando %}<span class="empresa-falta">falta: {{ e.empresa_faltando|join(', ') }}</span>{% endif %}</summary>
+                    <summary>Dados da empresa{% if e.emp and e.emp.cnpj %} · CNPJ {{ e.emp.cnpj }}{% endif %}{% if e.unidade and e.unidade.tipo != 'independente' %} · {{ 'Matriz' if e.unidade.tipo == 'matriz' else 'Filial de ' ~ (e.unidade.matriz_nome or '?') }}{% endif %}{% if e.empresa_faltando %}<span class="empresa-falta">falta: {{ e.empresa_faltando|join(', ') }}</span>{% endif %}</summary>
                     <form method="POST" class="empresa-body">
                         <input type="hidden" name="acao" value="salvar_empresa_escola">
                         <input type="hidden" name="aba" value="escolas">
                         <input type="hidden" name="escola_id" value="{{ e.id }}">
-                        {% with emp=e.emp %}{% include '_campos_empresa.html' %}{% endwith %}
+                        {% with emp=e.emp, unidade=e.unidade %}{% include '_campos_empresa.html' %}{% include '_campos_unidade.html' %}{% endwith %}
                         <p style="margin-top:10px;"><button class="btn-sm btn-azul" type="submit">Salvar dados da empresa</button></p>
                     </form>
                 </details>

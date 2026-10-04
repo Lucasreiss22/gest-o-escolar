@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from empresa import (
     COLUNAS_EMPRESA,
+    campos_apagados,
     cnpj_valido,
     copia_para_plataforma,
     cpf_valido,
@@ -109,14 +110,33 @@ class TestPersistencia(unittest.TestCase):
         self.assertIn("ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20)", sql)
         self.assertIn("data_abertura DATE", sql)
 
-    def test_salvar_upsert(self):
+    def test_salvar_so_os_preenchidos(self):
         dados, _ = dados_empresa_do_form({"cnpj": "11222333000181", "razao_social": "X"})
         cur = CursorFalso()
-        salvar_empresa(cur, dados)
+        alvo = salvar_empresa(cur, dados)
         sql, params = cur.sqls[-1]
         self.assertIn("ON CONFLICT (id) DO UPDATE", sql)
+        self.assertEqual(sorted(alvo), ["cnpj", "razao_social"])
+        self.assertEqual(params, ("X", "11222333000181"))
+        self.assertNotIn("inscricao_municipal", sql)
+
+    def test_limpar_vazios_grava_todas(self):
+        dados, _ = dados_empresa_do_form({"razao_social": "X"})
+        cur = CursorFalso()
+        salvar_empresa(cur, dados, limpar_vazios=True)
+        _sql, params = cur.sqls[-1]
         self.assertEqual(len(params), len(COLUNAS_EMPRESA))
-        self.assertIn("11222333000181", params)
+
+    def test_form_vazio_nao_grava(self):
+        dados, _ = dados_empresa_do_form({})
+        cur = CursorFalso()
+        self.assertEqual(salvar_empresa(cur, dados), [])
+        self.assertEqual(len(cur.sqls), 1)
+
+    def test_campos_apagados(self):
+        atual = {"cnpj": "11222333000181", "inscricao_municipal": "123", "razao_social": "X"}
+        dados, _ = dados_empresa_do_form({"razao_social": "X"})
+        self.assertEqual(campos_apagados(atual, dados), ["CNPJ", "Inscrição municipal"])
 
     def test_tela_e_incompleta(self):
         cfg = {"cnpj": "11222333000181", "razao_social": "X", "data_abertura": date(2010, 2, 1), "uf": "RJ"}
@@ -134,6 +154,64 @@ class TestPersistencia(unittest.TestCase):
         self.assertEqual(copia["cnpj"], "11222333000181")
         self.assertEqual(copia["nfse_uf"], "SP")
         self.assertEqual(json.loads(copia["dados_empresa"])["logradouro"], "Rua A")
+
+
+MATRIZ = {"id": 1, "nome": "Colégio Centro", "cnpj": "11222333000181", "tipo_unidade": "matriz", "matriz_id": None, "db_nome": "esc_a"}
+FILIAL = {"id": 2, "nome": "Colégio Bairro", "cnpj": "11222333000262", "tipo_unidade": "filial", "matriz_id": 1, "db_nome": "esc_b"}
+NOVA = {"id": 3, "nome": "Colégio Norte", "cnpj": "11222333000343", "tipo_unidade": "independente", "matriz_id": None}
+OUTRA = {"id": 4, "nome": "Outra Rede", "cnpj": "99888777000100", "tipo_unidade": "matriz", "matriz_id": None}
+REDE = [MATRIZ, FILIAL, NOVA, OUTRA]
+
+
+class TestUnidades(unittest.TestCase):
+    def test_raiz(self):
+        from unidades import raiz_cnpj
+        self.assertEqual(raiz_cnpj("11.222.333/0002-62"), "11222333")
+        self.assertEqual(raiz_cnpj("123"), "")
+
+    def test_opcoes_so_com_mesma_raiz(self):
+        from unidades import matrizes_possiveis
+        self.assertEqual([m["id"] for m in matrizes_possiveis(NOVA, REDE)], [1])
+        self.assertEqual(matrizes_possiveis({"id": 9, "cnpj": ""}, REDE), [])
+
+    def test_filial_valida(self):
+        from unidades import validar_unidade
+        self.assertEqual(validar_unidade(NOVA, "filial", "1", REDE), ("filial", 1))
+
+    def test_filial_de_outra_raiz(self):
+        from unidades import validar_unidade
+        with self.assertRaises(ValueError) as ctx:
+            validar_unidade(NOVA, "filial", 4, REDE)
+        self.assertIn("raiz de CNPJ", str(ctx.exception))
+
+    def test_filial_de_quem_nao_e_matriz(self):
+        from unidades import validar_unidade
+        with self.assertRaises(ValueError):
+            validar_unidade(NOVA, "filial", 2, REDE)
+        with self.assertRaises(ValueError):
+            validar_unidade(NOVA, "filial", None, REDE)
+        with self.assertRaises(ValueError):
+            validar_unidade(NOVA, "filial", 3, REDE)
+
+    def test_matriz_com_filiais_nao_muda(self):
+        from unidades import validar_unidade
+        with self.assertRaises(ValueError) as ctx:
+            validar_unidade(MATRIZ, "independente", None, REDE)
+        self.assertIn("Colégio Bairro", str(ctx.exception))
+        self.assertEqual(validar_unidade(MATRIZ, "matriz", 99, REDE), ("matriz", None))
+
+    def test_sem_cnpj(self):
+        from unidades import validar_unidade
+        with self.assertRaises(ValueError):
+            validar_unidade({"id": 5, "cnpj": None}, "matriz", None, REDE)
+        self.assertEqual(validar_unidade({"id": 5, "cnpj": None}, "xyz", None, REDE), ("independente", None))
+
+    def test_resumo(self):
+        from unidades import resumo_unidade
+        r = resumo_unidade(MATRIZ, REDE)
+        self.assertEqual(r["filiais"], [{"id": 2, "nome": "Colégio Bairro"}])
+        f = resumo_unidade(FILIAL, REDE)
+        self.assertEqual((f["tipo"], f["matriz_nome"], f["db_nome"]), ("filial", "Colégio Centro", "esc_b"))
 
 
 if __name__ == "__main__":

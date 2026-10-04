@@ -953,3 +953,35 @@
         preparar();
     }
 })();
+
+/* Dados da empresa: matriz só para filial; confirmar antes de apagar campos já salvos */
+(function () {
+    document.addEventListener("change", function (ev) {
+        var sel = ev.target;
+        if (!sel || sel.name !== "tipo_unidade") return;
+        var bloco = sel.closest("[data-unidade]");
+        if (!bloco) return;
+        bloco.querySelectorAll("[data-so-filial]").forEach(function (el) {
+            el.hidden = sel.value !== "filial";
+        });
+    });
+
+    document.addEventListener("submit", function (ev) {
+        var form = ev.target;
+        if (!form || !form.querySelector) return;
+        var limpar = form.querySelector("input[name='limpar_vazios']");
+        if (!limpar || !limpar.checked) return;
+        var nomes = [];
+        form.querySelectorAll("[data-empresa] input[type='text'], [data-empresa] input[type='email'], [data-empresa] input[type='date'], [data-empresa] select").forEach(function (campo) {
+            var original = campo.tagName === "SELECT"
+                ? (Array.prototype.find.call(campo.options, function (o) { return o.defaultSelected; }) || {}).value
+                : campo.defaultValue;
+            if (original && !String(campo.value || "").trim()) {
+                var rotulo = campo.closest(".form-group") && campo.closest(".form-group").querySelector("label");
+                nomes.push(rotulo ? rotulo.textContent.trim() : campo.name);
+            }
+        });
+        if (!nomes.length) return;
+        if (!window.confirm("Apagar estes dados já salvos?\n\n- " + nomes.join("\n- "))) ev.preventDefault();
+    }, true);
+})();

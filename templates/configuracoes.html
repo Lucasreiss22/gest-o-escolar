@@ -140,6 +140,7 @@
             <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
                 <input type="hidden" name="acao" value="salvar_empresa">
                 {% include '_campos_empresa.html' %}
+                {% include '_campos_unidade.html' %}
                 <button type="submit" class="btn btn-primary">Salvar dados da empresa</button>
             </form>
         </div>

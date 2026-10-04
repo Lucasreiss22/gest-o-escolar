@@ -179,16 +179,33 @@ def garantir_colunas_empresa(cursor):
     cursor.execute("ALTER TABLE configuracoes " + ", ".join(partes))
 
 
-def salvar_empresa(cursor, dados):
+def salvar_empresa(cursor, dados, limpar_vazios=False):
+    """Grava só os campos preenchidos; campo em branco mantém o valor salvo, a não ser com limpar_vazios."""
     garantir_colunas_empresa(cursor)
-    colunas = ", ".join(COLUNAS_EMPRESA)
-    marcadores = ", ".join(["%s"] * len(COLUNAS_EMPRESA))
-    atualiza = ", ".join(f"{c} = EXCLUDED.{c}" for c in COLUNAS_EMPRESA)
+    alvo = [c for c in COLUNAS_EMPRESA if limpar_vazios or dados.get(c) not in (None, "")]
+    if not alvo:
+        return []
+    colunas = ", ".join(alvo)
+    marcadores = ", ".join(["%s"] * len(alvo))
+    atualiza = ", ".join(f"{c} = EXCLUDED.{c}" for c in alvo)
     cursor.execute(
         f"INSERT INTO configuracoes (id, {colunas}) VALUES (1, {marcadores}) "
         f"ON CONFLICT (id) DO UPDATE SET {atualiza}",
-        tuple(dados.get(c) for c in COLUNAS_EMPRESA),
+        tuple(dados.get(c) for c in alvo),
     )
+    return alvo
+
+
+def ler_empresa(cursor):
+    cursor.execute("SELECT * FROM configuracoes WHERE id = 1")
+    linha = cursor.fetchone() or {}
+    return {c: linha.get(c) for c in COLUNAS_EMPRESA}
+
+
+def campos_apagados(atual, dados):
+    """Rótulos dos campos que tinham valor e vieram em branco."""
+    rotulos = {coluna: rotulo for _campo, coluna, rotulo, _t in CAMPOS_EMPRESA}
+    return [rotulos[c] for c in COLUNAS_EMPRESA if (atual or {}).get(c) not in (None, "") and dados.get(c) in (None, "")]
 
 
 def dados_empresa_tela(cfg):

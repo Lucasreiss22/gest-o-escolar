@@ -1,0 +1,45 @@
+{# Classificação da unidade na rede. Espera `unidade` (unidades.resumo_unidade), `tipos_unidade` e `pode_unidade`. #}
+{% if unidade %}
+<div data-unidade style="margin-top:6px;">
+    <h4 style="margin:6px 0 10px;font-size:0.95rem;">Classificação da unidade</h4>
+    {% if pode_unidade %}
+    <div class="form-grid">
+        <div class="form-group">
+            <label>Esta escola é</label>
+            <select name="tipo_unidade">
+                {% for codigo, rotulo in tipos_unidade %}
+                <option value="{{ codigo }}" {% if unidade.tipo == codigo %}selected{% endif %}>{{ rotulo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group" data-so-filial {% if unidade.tipo != 'filial' %}hidden{% endif %}>
+            <label>Matriz correspondente</label>
+            <select name="matriz_id">
+                <option value="">Escolha a matriz</option>
+                {% for m in unidade.opcoes_matriz %}
+                <option value="{{ m.id }}" {% if unidade.matriz_id == m.id %}selected{% endif %}>{{ m.nome }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group" data-so-filial {% if unidade.tipo != 'filial' %}hidden{% endif %}>
+            <label>Banco de dados da unidade</label>
+            <input type="text" value="{{ unidade.db_nome or '' }}" readonly title="Vinculado automaticamente ao espaço desta escola">
+        </div>
+    </div>
+    <p class="hint" style="font-size:0.82rem;color:#64748b;line-height:1.4;margin:0 0 10px;">
+        Matriz e filiais têm a mesma raiz de CNPJ (8 primeiros números); só aparecem aqui as matrizes com a mesma raiz.
+        {% if not unidade.tem_cnpj %}Preencha e salve o CNPJ antes de classificar como matriz ou filial.{% endif %}
+        {% if unidade.tipo == 'filial' and not unidade.opcoes_matriz %}Nenhuma matriz com a mesma raiz de CNPJ: classifique a matriz primeiro.{% endif %}
+        A DRE da matriz pode consolidar os resultados das filiais.
+    </p>
+    {% else %}
+    <p style="font-size:0.9rem;margin:0 0 10px;">
+        {{ dict(tipos_unidade)[unidade.tipo] }}{% if unidade.matriz_nome %} de {{ unidade.matriz_nome }}{% endif %}.
+        Só o administrador da escola muda esta classificação.
+    </p>
+    {% endif %}
+    {% if unidade.filiais %}
+    <p style="font-size:0.85rem;margin:0 0 10px;">Filiais vinculadas: {{ unidade.filiais|map(attribute='nome')|join(', ') }}.</p>
+    {% endif %}
+</div>
+{% endif %}

@@ -1,5 +1,6 @@
 {# Campos do cadastro da escola como empresa. Espera `emp` (dict do empresa.dados_empresa_tela) e `portes_empresa`. #}
 {% set emp = emp or {} %}
+<div data-empresa>
 <div class="form-grid">
     <div class="form-group" style="grid-column: span 2;">
         <label>Razão social</label>
@@ -111,4 +112,11 @@
         <label>Telefone do contador</label>
         <input type="text" name="contador_telefone" maxlength="30" value="{{ emp.contador_telefone }}">
     </div>
+</div>
+{% if emp.razao_social or emp.cnpj %}
+<label style="display:flex;gap:8px;align-items:flex-start;font-size:0.85rem;color:#475569;margin:0 0 12px;">
+    <input type="checkbox" name="limpar_vazios" value="1" style="margin-top:3px;">
+    <span>Campo deixado em branco mantém o valor já salvo. Marque para <strong>apagar</strong> os campos que deixei em branco (pede confirmação).</span>
+</label>
+{% endif %}
 </div>

@@ -17,7 +17,8 @@ from database import (
     obter_conexao_nova,
 )
 from email_envio import enviar_email, exigencia_email, normalizar_email, smtp_configurado
-from empresa import copia_para_plataforma, salvar_empresa
+from empresa import COLUNAS_EMPRESA, copia_para_plataforma, ler_empresa, salvar_empresa
+from unidades import validar_unidade
 from permissoes import PACOTES_INICIAIS, TELAS_PLANO
 from senhas import conferir_senha, gerar_hash
 
@@ -210,6 +211,8 @@ def garantir_plataforma():
                 ("telas_escola", "JSONB"),
                 ("nfse_habilitada", "BOOLEAN"),
                 ("dados_empresa", "JSONB"),
+                ("tipo_unidade", "VARCHAR(20) DEFAULT 'independente'"),
+                ("matriz_id", "INT REFERENCES plataforma_escolas(id) ON DELETE SET NULL"),
             ):
                 cursor.execute(
                     f"ALTER TABLE plataforma_escolas ADD COLUMN IF NOT EXISTS {coluna} {spec}"
@@ -1851,8 +1854,8 @@ def sincronizar_empresa_plataforma(escola_id, dados):
         conexao.close()
 
 
-def salvar_empresa_da_escola(escola_id, dados):
-    """Plataforma editando o cadastro: grava no espaço da escola e na cópia da plataforma."""
+def salvar_empresa_da_escola(escola_id, dados, limpar_vazios=False):
+    """Plataforma editando o cadastro: grava no espaço da escola e copia o resultado completo para a plataforma."""
     escola = buscar_escola_por_id(escola_id)
     if not escola:
         raise ValueError("Escola não encontrada.")
@@ -1863,14 +1866,64 @@ def salvar_empresa_da_escola(escola_id, dados):
             raise RuntimeError("Não conectou no espaço da escola.")
         try:
             with conexao.cursor() as cursor:
-                salvar_empresa(cursor, dados)
+                salvar_empresa(cursor, dados, limpar_vazios=limpar_vazios)
+                completo = ler_empresa(cursor)
             conexao.commit()
         finally:
             conexao.close()
     finally:
         limpar_banco_escola(token)
-    sincronizar_empresa_plataforma(escola_id, dados)
+    sincronizar_empresa_plataforma(escola_id, completo)
     return escola
+
+
+def ler_empresas_das_escolas(escolas):
+    """Dados da empresa lidos do schema de cada escola (a fonte), não da cópia da plataforma. {id: dados}."""
+    resultado = {}
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        return resultado
+    try:
+        with conexao.cursor() as cursor:
+            for escola in escolas or []:
+                schema = _schema_seguro(escola.get("db_nome") or "")
+                if not schema or schema == "public":
+                    continue
+                cursor.execute("SAVEPOINT ler_empresa")
+                try:
+                    cursor.execute(f'SELECT * FROM "{schema}".configuracoes WHERE id = 1')
+                    linha = cursor.fetchone() or {}
+                    resultado[escola["id"]] = {c: linha.get(c) for c in COLUNAS_EMPRESA}
+                    cursor.execute("RELEASE SAVEPOINT ler_empresa")
+                except Exception:
+                    cursor.execute("ROLLBACK TO SAVEPOINT ler_empresa")
+        conexao.rollback()
+    finally:
+        conexao.close()
+    return resultado
+
+
+def definir_unidade_escola(escola_id, tipo, matriz_id):
+    """Classifica a escola como matriz, filial ou independente (regras em unidades.validar_unidade)."""
+    garantir_plataforma()
+    escolas = [dict(e) for e in (listar_escolas() or [])]
+    escola = next((e for e in escolas if e.get("id") == escola_id), None)
+    if not escola:
+        raise ValueError("Escola não encontrada.")
+    tipo, matriz_id = validar_unidade(escola, tipo, matriz_id, escolas)
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                "UPDATE plataforma_escolas SET tipo_unidade = %s, matriz_id = %s WHERE id = %s",
+                (tipo, matriz_id, escola_id),
+            )
+        conexao.commit()
+    finally:
+        conexao.close()
+    return tipo, matriz_id
 
 
 def cadastrar_escola(nome, email_admin, empresa=None):

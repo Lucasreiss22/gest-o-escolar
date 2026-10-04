@@ -210,6 +210,8 @@ from plataforma import (
     definir_nfse_escola,
     salvar_empresa_da_escola,
     sincronizar_empresa_plataforma,
+    definir_unidade_escola,
+    ler_empresas_das_escolas,
     preparar_cobranca_escolas,
     salvar_regra_cobranca_escola,
     listar_pacotes,
@@ -248,13 +250,16 @@ from senhas import gerar_hash
 from empresa import (
     PORTES as PORTES_EMPRESA,
     UFS as UFS_EMPRESA,
+    campos_apagados,
     dados_empresa_do_form,
     dados_empresa_tela,
     empresa_incompleta,
     garantir_colunas_empresa,
+    ler_empresa,
     salvar_empresa,
     tem_dados_empresa,
 )
+from unidades import TIPOS_UNIDADE, resumo_unidade
 import calendar as calendario_lib
 from datetime import datetime, date, timedelta
 import json
@@ -318,6 +323,23 @@ def _formatar_cnpj(valor):
     if len(digitos) != 14:
         return (valor or "").strip()
     return f"{digitos[:2]}.{digitos[2:5]}.{digitos[5:8]}/{digitos[8:12]}-{digitos[12:]}"
+
+
+def _salvar_unidade_do_form(escola_id, form):
+    """Matriz/filial/independente vindo do formulário; avisa só quando a classificação muda."""
+    atual = buscar_escola_por_id(escola_id) or {}
+    tipo, matriz_id = definir_unidade_escola(escola_id, form.get("tipo_unidade"), form.get("matriz_id"))
+    if (atual.get("tipo_unidade") or "independente") != tipo or atual.get("matriz_id") != matriz_id:
+        flash(f"Classificação da unidade: {dict(TIPOS_UNIDADE)[tipo]}.", "success")
+
+
+def _unidade_da_escola(escola_id):
+    try:
+        escolas = [dict(e) for e in (listar_escolas() or [])]
+    except Exception:
+        return None
+    escola = next((e for e in escolas if e.get("id") == escola_id), None)
+    return resumo_unidade(escola, escolas) if escola else None
 
 
 def _invalidar_identidade_pdf():
@@ -4205,8 +4227,13 @@ def plataforma_escolas():
                 dados_emp, erros_empresa = dados_empresa_do_form(request.form)
                 if erros_empresa:
                     raise ValueError(" ".join(erros_empresa))
-                escola = salvar_empresa_da_escola(request.form.get("escola_id", type=int), dados_emp)
+                escola_id_emp = request.form.get("escola_id", type=int)
+                escola = salvar_empresa_da_escola(
+                    escola_id_emp, dados_emp, limpar_vazios=request.form.get("limpar_vazios") == "1"
+                )
                 flash(f"Dados da empresa de {escola.get('nome')} salvos.", "success")
+                if "tipo_unidade" in request.form:
+                    _salvar_unidade_do_form(escola_id_emp, request.form)
             except Exception as e:
                 flash(f"Não foi possível salvar os dados da empresa: {e}", "danger")
         elif acao == "definir_nfse_escola":
@@ -4392,17 +4419,23 @@ def plataforma_escolas():
             finally:
                 conexao.close()
         escolas = [dict(item) for item in (listar_escolas() or [])]
+        empresas_reais = ler_empresas_das_escolas(escolas)
         for esc in escolas:
-            bruto = esc.get("dados_empresa") or {}
-            if isinstance(bruto, str):
-                try:
-                    bruto = json.loads(bruto)
-                except ValueError:
-                    bruto = {}
-            if not bruto.get("cnpj") and esc.get("cnpj"):
-                bruto["cnpj"] = esc.get("cnpj")
+            bruto = empresas_reais.get(esc["id"])
+            if bruto is None:
+                bruto = esc.get("dados_empresa") or {}
+                if isinstance(bruto, str):
+                    try:
+                        bruto = json.loads(bruto)
+                    except ValueError:
+                        bruto = {}
+                if not bruto.get("cnpj") and esc.get("cnpj"):
+                    bruto["cnpj"] = esc.get("cnpj")
             esc["emp"] = dados_empresa_tela(bruto)
             esc["empresa_faltando"] = empresa_incompleta(bruto)
+            esc["cnpj"] = bruto.get("cnpj") or esc.get("cnpj")
+        for esc in escolas:
+            esc["unidade"] = resumo_unidade(esc, escolas)
     except Exception as e:
         flash(f"Não foi possível carregar as escolas: {e}", "danger")
     try:
@@ -4518,6 +4551,8 @@ def plataforma_escolas():
         "plataforma_escolas.html",
         escolas=escolas,
         portes_empresa=PORTES_EMPRESA,
+        tipos_unidade=TIPOS_UNIDADE,
+        pode_unidade=True,
         pacotes=pacotes,
         telas_plano=TELAS_PLANO,
         aba=aba,
@@ -15701,24 +15736,38 @@ def pagina_configuracoes():
                 for erro in erros_empresa:
                     flash(erro, "danger")
                 return redirect(url_for("pagina_configuracoes") + "#dados-empresa")
+            limpar = request.form.get("limpar_vazios") == "1"
+            completo = None
             if conexao:
                 try:
-                    with conexao.cursor() as cursor:
-                        salvar_empresa(cursor, dados_emp)
+                    with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                        apagados = campos_apagados(ler_empresa(cursor), dados_emp) if limpar else []
+                        salvar_empresa(cursor, dados_emp, limpar_vazios=limpar)
+                        completo = ler_empresa(cursor)
                     conexao.commit()
                     _invalidar_identidade_pdf()
-                    flash("Dados da empresa salvos.", "success")
+                    msg = "Dados da empresa salvos."
+                    if apagados:
+                        msg += " Apagados: " + ", ".join(apagados) + "."
+                    flash(msg, "success")
                 except Exception as e:
                     conexao.rollback()
                     flash(f"Não foi possível salvar os dados da empresa: {e}", "danger")
-                    dados_emp = None
                 finally:
                     conexao.close()
-                if dados_emp and session.get("escola_id"):
-                    try:
-                        sincronizar_empresa_plataforma(session["escola_id"], dados_emp)
-                    except Exception as e:
-                        _log(f"[empresa] cópia para a plataforma falhou: {e}")
+            if completo and session.get("escola_id"):
+                try:
+                    sincronizar_empresa_plataforma(session["escola_id"], completo)
+                except Exception as e:
+                    _log(f"[empresa] cópia para a plataforma falhou: {e}")
+                if "tipo_unidade" in request.form:
+                    if normalizar_papel(session.get("usuario_papel")) != "admin":
+                        flash("Só o administrador da escola muda a classificação matriz/filial.", "danger")
+                    else:
+                        try:
+                            _salvar_unidade_do_form(session["escola_id"], request.form)
+                        except ValueError as e:
+                            flash(str(e), "danger")
             return redirect(url_for("pagina_configuracoes") + "#dados-empresa")
 
         return redirect(url_for("pagina_configuracoes"))
@@ -15787,6 +15836,9 @@ def pagina_configuracoes():
         empresa_faltando=empresa_incompleta(config),
         portes_empresa=PORTES_EMPRESA,
         ufs_empresa=UFS_EMPRESA,
+        unidade=_unidade_da_escola(session.get("escola_id")) if session.get("escola_id") else None,
+        tipos_unidade=TIPOS_UNIDADE,
+        pode_unidade=normalizar_papel(session.get("usuario_papel")) == "admin",
         equipe_acesso=equipe_acesso,
         acesso=acesso,
         areas_acesso=[
