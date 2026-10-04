@@ -987,7 +987,7 @@ def garantir_tabelas_folha():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:folha:simples:rescisao2:fechamento1"
+    chave = f"{schema}:folha:simples:rescisao2:fechamento1:feriados1"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -1208,6 +1208,9 @@ def garantir_tabelas_folha():
                 ("configuracoes", "ponto_responsavel_cargo", "VARCHAR(100)"),
                 ("configuracoes", "ponto_he_folha", "BOOLEAN DEFAULT TRUE"),
                 ("configuracoes", "irrf_13_redutor", "VARCHAR(20) DEFAULT 'bruto'"),
+                ("configuracoes", "feriados_nacionais_auto", "BOOLEAN DEFAULT TRUE"),
+                ("configuracoes", "feriado_carnaval", "BOOLEAN DEFAULT FALSE"),
+                ("configuracoes", "feriado_corpus_christi", "BOOLEAN DEFAULT FALSE"),
                 ("funcionarios", "ponto_minutos_cafe", "INT"),
                 ("funcionarios", "ponto_minutos_almoco", "INT"),
                 ("funcionarios", "ponto_jornada_minutos", "INT"),

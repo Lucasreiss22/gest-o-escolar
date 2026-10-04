@@ -75,8 +75,8 @@
                 {% if abertas_divergentes %}
                 <div class="alert alert-warning d-flex flex-wrap align-items-center gap-2 mb-0">
                     <div class="flex-grow-1">
-                        {{ abertas_divergentes|length }} mensalidade(s) em aberto estão com valor diferente do contrato com desconto
-                        (<strong>R$ {{ mensalidade_liquida|moeda }}</strong>).
+                        {{ abertas_divergentes|length }} mensalidade(s) em aberto, do mês atual em diante, estão com valor diferente do contrato com desconto
+                        (<strong>R$ {{ mensalidade_liquida|moeda }}</strong>). Meses passados não são alterados.
                     </div>
                     <form method="POST" action="{{ url_for('pagina_alunos') }}" class="m-0">
                         <input type="hidden" name="acao" value="ajustar_mensalidades_abertas">

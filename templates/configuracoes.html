@@ -188,9 +188,34 @@
                 <p style="color:#64748b;font-size:0.85rem;line-height:1.45;margin-top:0;">
                     Para contrato CLT, o saldo do ponto no mês vira hora extra na folha: tolerância de 10 min por dia (art. 58 §1º CLT),
                     compensação entre dias a mais e a menos no próprio mês (art. 59 §6º), 50% nos dias normais e 100% em domingo e feriado
-                    cadastrado no calendário. No contracheque aparece como vinda do ponto eletrônico do sistema.
+                    (nacional ou cadastrado no calendário). No contracheque aparece como vinda do ponto eletrônico do sistema.
                 </p>
                 <button type="submit" class="btn btn-primary">Salvar configurações do ponto</button>
+            </form>
+        </div>
+
+        <div class="card-box" id="feriados">
+            <h3 class="card-title">Feriados nacionais</h3>
+            <p style="color:#64748b;font-size:0.9rem;line-height:1.45;">
+                Os feriados nacionais entram sozinhos no calendário, no ponto (hora extra 100%) e no DSR da folha:
+                01/01, Sexta-feira Santa, 21/04, 01/05, 07/09, 12/10, 02/11, 15/11, 20/11 e 25/12.
+                Feriados estaduais e municipais continuam sendo cadastrados no Calendário, com o tipo Feriado.
+            </p>
+            <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
+                <input type="hidden" name="acao" value="salvar_feriados">
+                <label style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                    <input type="checkbox" name="feriados_nacionais_auto" value="1" {% if config.feriados_nacionais_auto is not sameas false %}checked{% endif %}>
+                    Incluir os feriados nacionais automaticamente
+                </label>
+                <label style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                    <input type="checkbox" name="feriado_carnaval" value="1" {% if config.feriado_carnaval %}checked{% endif %}>
+                    Tratar o Carnaval (segunda e terça) como feriado (é ponto facultativo federal; marque se for feriado na sua cidade ou se a escola não abre)
+                </label>
+                <label style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                    <input type="checkbox" name="feriado_corpus_christi" value="1" {% if config.feriado_corpus_christi %}checked{% endif %}>
+                    Tratar Corpus Christi como feriado (é ponto facultativo federal e feriado em muitos municípios)
+                </label>
+                <button type="submit" class="btn btn-primary">Salvar feriados</button>
             </form>
         </div>
 

@@ -1086,8 +1086,9 @@
             <!-- Gerar Cobrança Individual -->
             <div class="card-box" style="margin-bottom: 0;">
                 <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 15px;">Gerar Nova Cobrança</h3>
-                <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="form-nova-cobranca">
+                <form action="{{ url_for('pagina_financeiro') }}" method="POST" class="form-nova-cobranca" data-confirmar-passadas="data_vencimento" data-meses-campo="duracao">
                     <input type="hidden" name="acao" value="criar_cobranca">
+                    <input type="hidden" name="gerar_passadas" value="0">
                     <input type="hidden" name="aba" value="receitas">
                     <input type="hidden" name="mes" value="{{ mes_atual }}">
                     <div class="form-group span-2">

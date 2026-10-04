@@ -229,7 +229,10 @@
         f.addEventListener("submit", function (e) {
             var msg = "Fechar a folha de " + f.dataset.mes + " com " + f.dataset.qtd + " contra-cheque(s)?\n\n"
                 + "Os valores do mês ficam gravados como estão. Para mudar depois, só o administrador pode reabrir, com motivo.";
-            if (!window.confirm(msg)) e.preventDefault();
+            if (!window.confirm(msg)) {
+                e.preventDefault();
+                delete f.dataset.enviadoEm;
+            }
         });
     });
     (function () {

@@ -982,6 +982,50 @@
             }
         });
         if (!nomes.length) return;
-        if (!window.confirm("Apagar estes dados já salvos?\n\n- " + nomes.join("\n- "))) ev.preventDefault();
+        if (!window.confirm("Apagar estes dados já salvos?\n\n- " + nomes.join("\n- "))) {
+            ev.preventDefault();
+            delete form.dataset.enviadoEm;
+        }
     }, true);
+})();
+
+/* Parcelas: meses anteriores ao atual só entram se o usuário confirmar */
+(function () {
+    function rotulo(ano, mes) {
+        return String(mes).padStart(2, "0") + "/" + ano;
+    }
+
+    document.addEventListener("submit", function (ev) {
+        var form = ev.target;
+        if (!form || !form.dataset || !form.dataset.confirmarPassadas || ev.defaultPrevented) return;
+        var campo = form.querySelector("[name='" + form.dataset.confirmarPassadas + "']");
+        var oculto = form.querySelector("input[name='gerar_passadas']");
+        if (!campo || !oculto) return;
+        oculto.value = "0";
+        var m = /^(\d{4})-(\d{2})/.exec(campo.value || "");
+        if (!m) return;
+        var hoje = new Date();
+        var ini = Number(m[1]) * 12 + Number(m[2]) - 1;
+        var atual = hoje.getFullYear() * 12 + hoje.getMonth();
+        if (ini >= atual) return;
+        var camposMeses = form.dataset.mesesCampo ? form.querySelector("[name='" + form.dataset.mesesCampo + "']") : null;
+        var meses = Math.max(parseInt(camposMeses && camposMeses.value, 10) || 1, 1);
+        var passadas = Math.min(atual - ini, meses);
+        var fim = ini + passadas - 1;
+        var faixa = rotulo(Math.floor(ini / 12), ini % 12 + 1)
+            + (passadas > 1 ? " a " + rotulo(Math.floor(fim / 12), fim % 12 + 1) : "");
+        var restantes = meses - passadas;
+        var msg = "O início é " + rotulo(Math.floor(ini / 12), ini % 12 + 1) + ", antes do mês atual.\n\n"
+            + "Gerar também " + passadas + " parcela(s) de meses passados (" + faixa + ")?\n"
+            + "Elas entram como receita desses meses. Competências já apuradas no Simples continuam bloqueadas.\n\n"
+            + "OK = gerar também os meses passados\n"
+            + "Cancelar = gerar só do mês atual em diante (" + restantes + " parcela(s))";
+        oculto.value = window.confirm(msg) ? "1" : "0";
+    }, true);
+
+    document.addEventListener("change", function (ev) {
+        var box = ev.target;
+        if (!box || !box.dataset || !box.dataset.confirmarCheck || !box.checked) return;
+        if (!window.confirm(box.dataset.confirmarCheck)) box.checked = false;
+    });
 })();

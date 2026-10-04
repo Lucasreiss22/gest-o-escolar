@@ -260,6 +260,8 @@ from empresa import (
     tem_dados_empresa,
 )
 from unidades import TIPOS_UNIDADE, resumo_unidade
+from parcelas import juntar_planos, plano_parcelas, texto_puladas, travas_da_escola
+from feriados import feriados_nacionais_mes
 from fechamento import (
     MOTIVO_MINIMO_REABERTURA,
     competencias_fechadas as listar_competencias_fechadas,
@@ -1432,7 +1434,7 @@ def _rotulo_turno_mensalidade(turnos):
     return mapa.get((turnos or "manha").strip().lower(), "manhã")
 
 
-def _gerar_mensalidades_lote(cursor, alunos_ok):
+def _gerar_mensalidades_lote(cursor, alunos_ok, gerar_passadas=False, travas=None, planos_out=None):
     ids = [row["aluno_id"] for row in alunos_ok if row.get("aluno_id")]
     if not ids:
         return 0
@@ -1459,8 +1461,11 @@ def _gerar_mensalidades_lote(cursor, alunos_ok):
         meses = max(int(dados.get("contrato_meses") or 12), 1)
         turnos = dados.get("turnos_mensalidade") or "manha"
         rotulo = _rotulo_turno_mensalidade(turnos)
-        for i in range(meses):
-            venc = _add_months(inicio, i)
+        plano = plano_parcelas(inicio, meses, gerar_passadas=gerar_passadas, travas=travas)
+        if planos_out is not None:
+            planos_out.append(plano)
+        for numero, venc in plano["gerar"]:
+            i = numero - 1
             comp = venc.strftime("%Y-%m")
             if (row["aluno_id"], comp) in existentes:
                 continue
@@ -1484,8 +1489,8 @@ def _gerar_mensalidades_lote(cursor, alunos_ok):
 STATUS_MENSALIDADE_ABERTA = ("Pendente", "Atrasado")
 
 
-def _mensalidades_abertas_divergentes(mensalidades, valor_liquido):
-    """Parcelas do contrato ainda não pagas com valor diferente da mensalidade com desconto."""
+def _mensalidades_abertas_divergentes(mensalidades, valor_liquido, a_partir=None):
+    """Parcelas do contrato ainda não pagas, de `a_partir` (YYYY-MM) em diante, com valor diferente do contrato com desconto."""
     if not valor_liquido or valor_liquido <= 0:
         return []
     return [
@@ -1493,17 +1498,33 @@ def _mensalidades_abertas_divergentes(mensalidades, valor_liquido):
         if m.get("parcela_contrato")
         and (m.get("status") or "") in STATUS_MENSALIDADE_ABERTA
         and abs(float(m.get("valor") or 0) - valor_liquido) > 0.004
+        and (not a_partir or _competencia_vencimento(m.get("data_vencimento")) >= a_partir)
     ]
 
 
-def _gerar_mensalidades_contrato(cursor, aluno_id, valor, inicio, meses, turnos, descricao_base="Mensalidade", forcar=False):
+def _competencia_vencimento(valor):
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%Y-%m")
+    texto = str(valor or "")
+    if len(texto) >= 10 and texto[2] == "/":
+        return f"{texto[6:10]}-{texto[3:5]}"
+    return texto[:7]
+
+
+def _gerar_mensalidades_contrato(
+    cursor, aluno_id, valor, inicio, meses, turnos, descricao_base="Mensalidade", forcar=False,
+    gerar_passadas=True, travas=None, plano_out=None,
+):
     if not aluno_id or not valor or valor <= 0:
         return 0
     meses = max(int(meses or 1), 1)
     turnos = turnos or "manha"
     geradas = 0
-    for i in range(meses):
-        venc = _add_months(inicio, i)
+    plano = plano_parcelas(inicio or date.today(), meses, gerar_passadas=gerar_passadas, travas=travas)
+    if plano_out is not None:
+        plano_out.append(plano)
+    for numero, venc in plano["gerar"]:
+        i = numero - 1
         competencia = venc.strftime("%Y-%m")
         if not forcar:
             cursor.execute(
@@ -2588,8 +2609,73 @@ def _descontos_ponto_folha(cursor, funcionario_id, competencia, func=None):
 TOLERANCIA_PONTO_MIN = 10
 
 
+def _config_feriados(cursor):
+    from database import _nome_banco_atual
+
+    try:
+        memo = g.setdefault("_cfg_feriados", {})
+    except RuntimeError:
+        memo = {}
+    chave = _nome_banco_atual(master=False)
+    if chave in memo:
+        return memo[chave]
+    cfg = {"auto": True, "carnaval": False, "corpus_christi": False}
+    cursor.execute("SAVEPOINT cfg_feriados")
+    try:
+        cursor.execute(
+            "SELECT feriados_nacionais_auto, feriado_carnaval, feriado_corpus_christi FROM configuracoes WHERE id = 1"
+        )
+        row = cursor.fetchone()
+        if isinstance(row, dict):
+            cfg = {
+                "auto": row.get("feriados_nacionais_auto") is not False,
+                "carnaval": bool(row.get("feriado_carnaval")),
+                "corpus_christi": bool(row.get("feriado_corpus_christi")),
+            }
+        cursor.execute("RELEASE SAVEPOINT cfg_feriados")
+    except Exception:
+        cursor.execute("ROLLBACK TO SAVEPOINT cfg_feriados")
+    memo[chave] = cfg
+    return cfg
+
+
+def _feriados_nacionais_escola(cursor, ano, mes):
+    """{data: nome} dos feriados nacionais do mês que a escola usa (todos, salvo se desligou a carga automática)."""
+    cfg = _config_feriados(cursor)
+    if not cfg["auto"]:
+        return {}
+    return feriados_nacionais_mes(ano, mes, carnaval=cfg["carnaval"], corpus_christi=cfg["corpus_christi"])
+
+
+def _eventos_feriados_nacionais(eventos, dias, cfg):
+    """Feriados nacionais como eventos do calendário (não gravados), sem repetir feriado já cadastrado no dia."""
+    if not cfg or not cfg.get("auto") or not dias:
+        return []
+    ja_cadastrados = set()
+    for ev in eventos or []:
+        if (ev.get("tipo") or "") == "feriado" and not ev.get("turma_id") and not ev.get("aluno_id"):
+            d = ev.get("data_evento")
+            ja_cadastrados.add(d.date() if isinstance(d, datetime) else d)
+    virtuais = []
+    for ano_f, mes_f in sorted({(d.year, d.month) for d in dias}):
+        for data_f, nome in sorted(feriados_nacionais_mes(
+            ano_f, mes_f, carnaval=cfg.get("carnaval"), corpus_christi=cfg.get("corpus_christi")
+        ).items()):
+            if data_f in dias and data_f not in ja_cadastrados:
+                virtuais.append({
+                    "id": None, "titulo": nome, "tipo": "feriado", "data_evento": data_f,
+                    "descricao": "Feriado nacional, incluído automaticamente.", "turma_id": None,
+                    "aluno_id": None, "professor_id": None, "periodo": None, "automatico": True,
+                })
+    return virtuais
+
+
 def _feriados_do_mes(cursor, ano, mes):
-    """Feriados gerais do calendário da escola (não de uma turma ou aluno)."""
+    """Feriados gerais: nacionais automáticos + os do calendário da escola (não de uma turma ou aluno)."""
+    return _feriados_cadastrados_mes(cursor, ano, mes) | set(_feriados_nacionais_escola(cursor, ano, mes))
+
+
+def _feriados_cadastrados_mes(cursor, ano, mes):
     cursor.execute("SAVEPOINT feriados_mes")
     try:
         cursor.execute(
@@ -7993,6 +8079,7 @@ def calendario_escolar():
     ano_proximo = ano if mes < 12 else ano + 1
 
     turmas, professores, alunos, eventos = [], [], [], []
+    cfg_feriados = {"auto": True, "carnaval": False, "corpus_christi": False}
     contexto_aluno = contexto_turma = None
     frequencia_mes = {}
     lista_frequencia_dia = []
@@ -8061,6 +8148,7 @@ def calendario_escolar():
                     elif gestor_calendario and filtro_professor and dono == filtro_professor:
                         visiveis.append(ev)
                 eventos = visiveis
+                cfg_feriados = _config_feriados(cursor)
 
                 if contexto_aluno_id:
                     cursor.execute("SELECT id, nome_completo, matricula, cpf FROM alunos WHERE id = %s", (contexto_aluno_id,))
@@ -8219,6 +8307,7 @@ def calendario_escolar():
             return None
 
     dias_visiveis = {dia for semana in dias_do_mes for dia in semana}
+    eventos = eventos + _eventos_feriados_nacionais(eventos, dias_visiveis, cfg_feriados)
     eventos_por_dia = {}
     rotinas_do_mes = []
     for ev in eventos:
@@ -8508,6 +8597,11 @@ def relatorio_pdf_periodo(tipo):
                 sql_ev += " ORDER BY c.data_evento, c.horario NULLS LAST, c.titulo"
                 cursor.execute(sql_ev, params_ev)
                 eventos = cursor.fetchall()
+                if tipo != "rotina":
+                    dias_pdf = {inicio + timedelta(days=i) for i in range((fim - inicio).days + 1)}
+                    nacionais = _eventos_feriados_nacionais(eventos, dias_pdf, _config_feriados(cursor))
+                    if nacionais:
+                        eventos = sorted(list(eventos) + nacionais, key=lambda e: _data_iso(e.get("data_evento")) or "")
 
             if tipo in ("eventos", "completo"):
                 sql_pv = """
@@ -8831,12 +8925,17 @@ def pagina_alunos():
                               AND parcela_contrato IS NOT NULL
                               AND status = ANY(%s)
                               AND ABS(valor - %s) > 0.004
+                              AND TO_CHAR(data_vencimento, 'YYYY-MM') >= %s
                             """,
-                            (liquido, aluno_id, list(STATUS_MENSALIDADE_ABERTA), liquido),
+                            (liquido, aluno_id, list(STATUS_MENSALIDADE_ABERTA), liquido, datetime.now().strftime("%Y-%m")),
                         )
                         qtd = cursor.rowcount
                         conexao.commit()
-                        flash(f"{qtd} mensalidade(s) em aberto ajustada(s) para R$ {br_money(liquido)}.", "success")
+                        flash(
+                            f"{qtd} mensalidade(s) em aberto ajustada(s) para R$ {br_money(liquido)}, do mês atual em diante. "
+                            "Parcelas de meses passados mantêm o valor original para não alterar competências já apuradas.",
+                            "success",
+                        )
                 except Exception as e:
                     conexao.rollback()
                     flash(str(e), "danger")
@@ -8944,9 +9043,18 @@ def pagina_alunos():
                 conexao_lote = obter_conexao()
                 if conexao_lote:
                     try:
+                        planos = []
                         with conexao_lote.cursor(cursor_factory=RealDictCursor) as cursor:
-                            _gerar_mensalidades_lote(cursor, ok)
+                            _gerar_mensalidades_lote(
+                                cursor, ok,
+                                gerar_passadas=request.form.get("gerar_passadas") == "1",
+                                travas=travas_da_escola(cursor),
+                                planos_out=planos,
+                            )
                         conexao_lote.commit()
+                        aviso_parcelas = texto_puladas(juntar_planos(planos))
+                        if aviso_parcelas:
+                            flash(aviso_parcelas, "warning")
                     except Exception as e:
                         conexao_lote.rollback()
                         flash(f"Alunos salvos, mas as mensalidades do lote falharam: {e}", "danger")
@@ -9075,14 +9183,21 @@ def pagina_alunos():
                                 row_al = cursor.fetchone()
                                 al_id = row_al["id"] if row_al else None
                                 if al_id and valor_cobrado > 0:
+                                    planos = []
                                     nger = _gerar_mensalidades_contrato(
-                                        cursor, al_id, valor_cobrado, inicio_c, meses_c, turnos_c
+                                        cursor, al_id, valor_cobrado, inicio_c, meses_c, turnos_c,
+                                        gerar_passadas=request.form.get("gerar_passadas") == "1",
+                                        travas=travas_da_escola(cursor),
+                                        plano_out=planos,
                                     )
                                     texto_desc = (
                                         f" de R$ {br_money(valor_cobrado)} (com desconto sobre R$ {br_money(valor_mensalidade)})"
                                         if valor_cobrado < valor_mensalidade else ""
                                     )
                                     flash(f"Contrato de {meses_c} meses gerou {nger} mensalidade(s){texto_desc}.", "success")
+                                    aviso_parcelas = texto_puladas(juntar_planos(planos))
+                                    if aviso_parcelas:
+                                        flash(aviso_parcelas, "warning")
                                 elif al_id and valor_mensalidade > 0 and desconto_tipo == "bolsa":
                                     flash("Bolsa integral: nenhuma mensalidade foi gerada.", "success")
                                 conexao_c.commit()
@@ -9703,7 +9818,9 @@ def detalhes_aluno(aluno_id):
     mensalidade_liquida = valor_mensalidade_liquido(
         aluno.get("valor_mensalidade"), aluno.get("desconto_tipo"), aluno.get("desconto_valor")
     )
-    abertas_divergentes = _mensalidades_abertas_divergentes(financeiro_aluno, mensalidade_liquida)
+    abertas_divergentes = _mensalidades_abertas_divergentes(
+        financeiro_aluno, mensalidade_liquida, a_partir=datetime.now().strftime("%Y-%m")
+    )
 
     return render_template(
         "aluno_detalhes.html",
@@ -12024,20 +12141,39 @@ def pagina_financeiro():
                         elif valor <= 0:
                             flash("Informe o valor da mensalidade.", "danger")
                         else:
+                            planos = []
                             geradas = _gerar_mensalidades_contrato(
-                                cursor, aluno_id, valor, data_vencimento, duracao, turnos, descricao, forcar=True
+                                cursor, aluno_id, valor, data_vencimento, duracao, turnos, descricao, forcar=True,
+                                gerar_passadas=request.form.get("gerar_passadas") == "1",
+                                travas=travas_da_escola(cursor),
+                                plano_out=planos,
                             )
                             conexao.commit()
-                            mes_redir = str(data_vencimento)[:7]
+                            plano_c = juntar_planos(planos)
+                            mes_redir = plano_c["gerar"][0][1].strftime("%Y-%m") if plano_c["gerar"] else str(data_vencimento)[:7]
+                            aviso_parcelas = texto_puladas(plano_c)
                             if geradas:
                                 flash(f"Cobrança salva: {geradas} mensalidade(s) a partir de {mes_redir[5:7]}/{mes_redir[:4]}.", "success")
-                            else:
+                            elif not aviso_parcelas:
                                 flash("A cobrança não foi gravada.", "danger")
+                            if aviso_parcelas:
+                                flash(aviso_parcelas, "warning" if geradas else "danger")
 
                     elif acao == "gerar_lote":
                         descricao_lote = request.form.get("descricao_lote") or "Mensalidade"
                         data_vencimento_lote = request.form.get("data_vencimento_lote") or datetime.now().strftime("%Y-%m-%d")
                         venc_lote = datetime.strptime(data_vencimento_lote[:10], "%Y-%m-%d").date()
+                        travas_lote = travas_da_escola(cursor)
+                        comp_lote = venc_lote.strftime("%Y-%m")
+                        if comp_lote in travas_lote:
+                            raise ValueError(
+                                f"A competência {comp_lote[5:7]}/{comp_lote[:4]} já foi apurada no Simples: "
+                                "gerar mensalidades nela mudaria receita, RBT12 e DAS já declarados."
+                            )
+                        if comp_lote < datetime.now().strftime("%Y-%m") and request.form.get("gerar_passadas") != "1":
+                            raise ValueError(
+                                f"{comp_lote[5:7]}/{comp_lote[:4]} é um mês passado. Confirme a geração de meses passados para continuar."
+                            )
                         cursor.execute(
                             """
                             SELECT id, valor_mensalidade, contrato_meses, contrato_inicio, turnos_mensalidade,
@@ -12516,6 +12652,9 @@ def pagina_financeiro():
                             if primeira_receita else ""
                         )
                         flash(f"Folha e encargos carregados em {qtd} competência(s).{aviso_inicio}", "success")
+            except ValueError as e:
+                conexao.rollback()
+                flash(str(e), "danger")
             except Exception as e:
                 conexao.rollback()
                 flash(f"❌ Erro ao processar financeiro: {e}", "danger")
@@ -15918,6 +16057,34 @@ def pagina_configuracoes():
                 finally:
                     conexao.close()
             return redirect(url_for("pagina_configuracoes") + "#ponto-tempos")
+
+        if acao == "salvar_feriados":
+            if conexao:
+                try:
+                    with conexao.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            UPDATE configuracoes
+                            SET feriados_nacionais_auto = %s, feriado_carnaval = %s, feriado_corpus_christi = %s
+                            WHERE id = 1
+                            """,
+                            (
+                                request.form.get("feriados_nacionais_auto") == "1",
+                                request.form.get("feriado_carnaval") == "1",
+                                request.form.get("feriado_corpus_christi") == "1",
+                            ),
+                        )
+                    conexao.commit()
+                    flash(
+                        "Feriados salvos. Meses com folha fechada mantêm os valores gravados; os abertos já usam a nova regra.",
+                        "success",
+                    )
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"Não foi possível salvar os feriados: {e}", "danger")
+                finally:
+                    conexao.close()
+            return redirect(url_for("pagina_configuracoes") + "#feriados")
 
         if acao == "salvar_folha_cfg":
             modo_13 = normalizar_redutor_13(request.form.get("irrf_13_redutor"))
