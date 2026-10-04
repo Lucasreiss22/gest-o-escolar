@@ -32,7 +32,14 @@ def eh_super_admin(email):
     return normalizar_email(email) == email_super_admin()
 
 
+_PLATAFORMA_OK = False
+
+
 def garantir_plataforma():
+    """Cria/atualiza as tabelas da plataforma uma vez por processo (eram ~40 consultas a cada chamada)."""
+    global _PLATAFORMA_OK
+    if _PLATAFORMA_OK:
+        return
     conexao = obter_conexao(master=True)
     if not conexao:
         return
@@ -206,6 +213,7 @@ def garantir_plataforma():
                     f"ALTER TABLE plataforma_escolas ADD COLUMN IF NOT EXISTS {coluna} {spec}"
                 )
         conexao.commit()
+        _PLATAFORMA_OK = True
     except Exception as e:
         try:
             conexao.rollback()

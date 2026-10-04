@@ -185,6 +185,7 @@
         var horaNormal = {{ item.hora_normal if item else 0 }};
         var pontoHe50 = {{ (item.horas_extras_ponto or 0) if item else 0 }};
         var pontoHe100 = {{ (item.horas_extras_100_ponto or 0) if item else 0 }};
+        var fatorDsr = {{ (item.fator_dsr_he or (1/6)) if item else (1/6) }};
         var form = document.querySelector("#holerite form") || document.querySelector("form");
         var he50 = form ? form.querySelector("[name='horas_extras']") : null;
         var he100 = form ? form.querySelector("[name='horas_extras_100']") : null;
@@ -206,7 +207,7 @@
             var v100 = Math.max(horaNormal * 2, v50);
             var a50 = h50 * v50;
             var a100 = h100 * v100;
-            var dsr = (a50 + a100) / 6;
+            var dsr = (a50 + a100) * fatorDsr;
             preview.textContent = "Prévia: hora normal R$ " + horaNormal.toFixed(2)
                 + " · HE 50% R$ " + a50.toFixed(2)
                 + " · HE 100% R$ " + a100.toFixed(2)

@@ -1033,6 +1033,8 @@
                         <td>
                             {% if meu_funcionario_id and item.funcionario_id == meu_funcionario_id and not decide_proprio_ponto %}
                             <span class="hint">Seu próprio pedido: outra pessoa com permissão precisa decidir.</span>
+                            {% elif item.autoaprovacao and not sou_admin_ponto %}
+                            <span class="hint">Você lançou este pedido: outra pessoa com permissão precisa aprovar.</span>
                             {% else %}
                             <form method="POST" class="form-grid" style="min-width:220px;">
                                 <input type="hidden" name="solicitacao_id" value="{{ item.id }}">
@@ -1046,8 +1048,13 @@
                                 <input type="hidden" name="{{ linha.campo }}" value="{{ linha.depois }}">
                                 {% endfor %}
                                 <div class="form-group" style="grid-column:1/-1;">
+                                    {% if item.autoaprovacao %}
+                                    <label>Motivo (obrigatório para aprovar: pedido seu ou lançado por você)</label>
+                                    <input type="text" name="motivo_decisao" maxlength="480" placeholder="Fica registrado como autoaprovação">
+                                    {% else %}
                                     <label>Motivo da rejeição (opcional)</label>
                                     <input type="text" name="motivo_decisao" maxlength="500">
+                                    {% endif %}
                                 </div>
                                 <button class="btn btn-success" type="submit" name="acao" value="aprovar_ponto_retroativo">Aprovar</button>
                                 <button class="btn btn-danger" type="submit" name="acao" value="rejeitar_ponto_retroativo">Rejeitar</button>

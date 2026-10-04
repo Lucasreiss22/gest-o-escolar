@@ -2687,7 +2687,16 @@ def _feriados_competencia(cursor, competencia):
         ano, mes = parse_mes(str(competencia)[:7])
     except Exception:
         return []
-    return sorted(_feriados_do_mes(cursor, ano, mes))
+    from database import _nome_banco_atual
+
+    try:
+        memo = g.setdefault("_feriados_mes", {})
+    except RuntimeError:
+        memo = {}
+    chave = (_nome_banco_atual(master=False), ano, mes)
+    if chave not in memo:
+        memo[chave] = sorted(_feriados_do_mes(cursor, ano, mes))
+    return list(memo[chave])
 
 
 def _func_com_ajuste(cursor, func, competencia):
@@ -2699,7 +2708,7 @@ def _func_com_ajuste(cursor, func, competencia):
             dados.update(info)
     except Exception:
         pass
-    if competencia and (dados.get("tipo_contrato") or "").strip().lower() in ("clt_horista", "horista"):
+    if competencia:
         dados["feriados_competencia"] = _feriados_competencia(cursor, competencia)
     return _aplicar_he_ponto(cursor, dados, competencia)
 
@@ -13671,6 +13680,16 @@ def _pode_decidir_proprio_ponto(funcionario_alvo, meu_funcionario_id):
     return normalizar_papel(session.get("usuario_papel")) == "admin"
 
 
+def _autoaprovacao_ponto(sol, usuario_id, meu_funcionario_id):
+    """Pedido do próprio ponto ou lançado pela mesma pessoa que vai decidir."""
+    proprio = bool(meu_funcionario_id and sol.get("funcionario_id") and int(sol["funcionario_id"]) == int(meu_funcionario_id))
+    lancou = bool(usuario_id and sol.get("solicitado_por") and int(sol["solicitado_por"]) == int(usuario_id))
+    return proprio or lancou
+
+
+PREFIXO_AUTOAPROVACAO = "[Autoaprovação] "
+
+
 def _registro_dia_ponto(cursor, funcionario_id, data_ref):
     cursor.execute(
         """
@@ -13831,6 +13850,15 @@ def _tratar_ponto_retroativo(cursor, acao, meu_funcionario_id):
             raise ValueError("Esta solicitação não está mais pendente.")
         if not _pode_decidir_proprio_ponto(sol.get("funcionario_id"), meu_funcionario_id):
             raise ValueError("Outra pessoa com permissão precisa aprovar ou rejeitar o seu próprio ponto.")
+        if acao == "aprovar_ponto_retroativo" and _autoaprovacao_ponto(sol, usuario_id, meu_funcionario_id):
+            if normalizar_papel(session.get("usuario_papel")) != "admin":
+                raise ValueError("Você lançou este pedido: outra pessoa com permissão precisa aprová-lo.")
+            if len(motivo or "") < 10:
+                raise ValueError(
+                    "Para aprovar um pedido seu ou lançado por você, escreva o motivo (mínimo 10 caracteres). "
+                    "Ele fica registrado como autoaprovação."
+                )
+            motivo = (PREFIXO_AUTOAPROVACAO + motivo)[:500]
         if acao == "rejeitar_ponto_retroativo":
             cursor.execute(
                 """
@@ -14639,6 +14667,8 @@ def ponto():
                 solicitacoes_pendentes = _listar_solicitacoes_ponto(
                     cursor, status="pendente", limite=80
                 )
+                for item in solicitacoes_pendentes:
+                    item["autoaprovacao"] = _autoaprovacao_ponto(item, session.get("usuario_id"), funcionario_id)
             if (gestao or pode_aprovar_ponto) and not equipe:
                 cursor.execute(
                     """
@@ -14701,6 +14731,7 @@ def ponto():
         pode_aprovar_ponto=pode_aprovar_ponto,
         meu_funcionario_id=funcionario_id,
         decide_proprio_ponto=_pode_decidir_proprio_ponto(funcionario_id, funcionario_id),
+        sou_admin_ponto=normalizar_papel(session.get("usuario_papel")) == "admin",
         minhas_solicitacoes=minhas_solicitacoes,
         solicitacoes_pendentes=solicitacoes_pendentes,
         data_ontem=(agora.date() - timedelta(days=1)).isoformat(),

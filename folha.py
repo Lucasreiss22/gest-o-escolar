@@ -169,7 +169,12 @@ def inss_autonomo(bruto, ano=None, mes=None):
     return round(base * ALIQUOTA_INSS_AUTONOMO, 2)
 
 
-def dsr_horista(valor_horas, ano=None, mes=None, feriados=()):
+def fator_dsr(ano=None, mes=None, feriados=()):
+    """(Domingos + feriados) ÷ dias úteis do mês. Sem mês, 1/6 habitual."""
+    return dsr_horista(1.0, ano, mes, feriados, arredondar=False)
+
+
+def dsr_horista(valor_horas, ano=None, mes=None, feriados=(), arredondar=True):
     """DSR das horas-aula: valor × (domingos + feriados) ÷ dias úteis do mês. Sem mês, 1/6 habitual."""
     horas = _num(valor_horas)
     if ano and mes:
@@ -191,8 +196,10 @@ def dsr_horista(valor_horas, ano=None, mes=None, feriados=()):
             if date(ano, mes, d).weekday() == 6 or date(ano, mes, d) in feriados_mes
         )
         uteis = max(dias - descansos, 1)
-        return round(horas * (descansos / uteis), 2)
-    return round(horas / 6.0, 2)
+        valor = horas * (descansos / uteis)
+    else:
+        valor = horas / 6.0
+    return round(valor, 2) if arredondar else valor
 
 
 def _data(valor):
@@ -223,16 +230,18 @@ def _eh_aprendiz(tipo_contrato):
     return (tipo_contrato or "").strip().lower() in ("jovem_aprendiz", "aprendiz")
 
 
-def encargos_clt(base, regime, tipo_contrato=None):
+def encargos_clt(base, regime, tipo_contrato=None, base_provisao=None):
     """Encargos patronais CLT. Aprendiz: FGTS 2% (Lei 10.097/2000); INSS patronal segue o regime
-    (zerado no Simples; integral no Presumido/Real — STJ Tema 1342/2025)."""
+    (zerado no Simples; integral no Presumido/Real — STJ Tema 1342/2025).
+    13º e férias são provisionados sobre a remuneração sem os descontos de falta (base_provisao)."""
     salario = _num(base)
+    provisionavel = _num(base_provisao) if base_provisao is not None else salario
     aprendiz = _eh_aprendiz(tipo_contrato)
     aliq_fgts = ALIQUOTA_FGTS_APRENDIZ if aprendiz else ALIQUOTA_FGTS
     fgts = round(salario * aliq_fgts, 2)
     fgts_cheio = round(salario * ALIQUOTA_FGTS, 2)
-    provisao_13 = round(salario / 12.0, 2)
-    ferias_terco = round((salario + salario / 3.0) / 12.0, 2)
+    provisao_13 = round(provisionavel / 12.0, 2)
+    ferias_terco = round((provisionavel + provisionavel / 3.0) / 12.0, 2)
     reflexos_fgts = round((provisao_13 + ferias_terco) * aliq_fgts, 2)
     reflexos_fgts_cheio = round((provisao_13 + ferias_terco) * ALIQUOTA_FGTS, 2)
     reducao_fgts = round(max((fgts_cheio + reflexos_fgts_cheio) - (fgts + reflexos_fgts), 0.0), 2)
@@ -348,8 +357,9 @@ def _contrato_clt(tipo):
     )
 
 
-def detalhe_horas_extras(func):
-    """HE 50% (dia útil) e 100% (domingo/feriado), com DSR de 1/6 nas extras habituais (Súmula 172 TST)."""
+def detalhe_horas_extras(func, ano=None, mes=None):
+    """HE 50% (dia útil) e 100% (domingo/feriado), com DSR nas extras habituais (Súmula 172 TST):
+    domingos e feriados do mês ÷ dias úteis; sem competência, 1/6."""
     hora_n = hora_normal_clt(func)
     horas_50 = max(_num(func.get("horas_extras")), 0.0)
     horas_100 = max(_num(func.get("horas_extras_100")), 0.0)
@@ -365,8 +375,10 @@ def detalhe_horas_extras(func):
     adicional_50 = round(horas_50 * valor_50, 2)
     adicional_100 = round(horas_100 * valor_100, 2)
     adicional = round(adicional_50 + adicional_100, 2)
-    dsr_he = round(adicional / 6.0, 2) if adicional > 0 and _contrato_clt(tipo) else 0.0
+    fator = fator_dsr(ano, mes, func.get("feriados_competencia") or ())
+    dsr_he = round(adicional * fator, 2) if adicional > 0 and _contrato_clt(tipo) else 0.0
     return {
+        "fator_dsr_he": round(fator, 6),
         "hora_normal": hora_n,
         "horas_extras": horas_50,
         "horas_extras_100": horas_100,
@@ -398,7 +410,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
     tipo = (func.get("tipo_contrato") or "clt_mensalista").strip().lower()
     nome = func.get("nome_completo") or "-"
     cargo = func.get("cargo") or "-"
-    he = detalhe_horas_extras(func)
+    he = detalhe_horas_extras(func, ano, mes)
     horas_ex = he["horas_extras"]
     valor_he = he["valor_hora_extra"]
     adicional_he = he["adicional_he"]
@@ -434,6 +446,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         "valor_hora": _num(func.get("valor_hora")),
         "horas_mes": _num(func.get("horas_mes")),
         "hora_normal": he["hora_normal"],
+        "fator_dsr_he": he["fator_dsr_he"],
         "horas_extras": horas_ex,
         "horas_extras_100": he["horas_extras_100"],
         "valor_hora_extra": valor_he,
@@ -549,7 +562,8 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
                 f"{he['horas_extras_100']:g} h a 100% × {br_money(he['valor_hora_extra_100'])} = {br_money(he['adicional_he_100'])}"
             )
         if dsr_he:
-            partes.append(f"DSR sobre extras {br_money(dsr_he)} (1/6, Súmula 172 TST)")
+            regra = "domingos e feriados ÷ dias úteis do mês" if ano and mes else "1/6"
+            partes.append(f"DSR sobre extras {br_money(dsr_he)} ({regra}, Súmula 172 TST)")
         resultado["observacao"] += " Horas extras CLT: " + "; ".join(partes) + "."
         ponto_50 = resultado["horas_extras_ponto"]
         ponto_100 = resultado["horas_extras_100_ponto"]
@@ -584,7 +598,7 @@ def calcular_folha_pessoa(func, regime, ano=None, mes=None):
         resultado["observacao"] += f" IRRF com desconto simplificado de {br_money(ir['deducao'])}."
     if ir["redutor"]:
         resultado["observacao"] += f" Redução do IRRF (Lei 15.270/2025): {br_money(ir['redutor'])}."
-    patronal = encargos_clt(base_tributavel, regime, tipo)
+    patronal = encargos_clt(base_tributavel, regime, tipo, base_provisao=bruto)
     simples = (regime or "").lower() in ("simples_nacional", "simples")
     if aprendiz:
         resultado["observacao"] += (
