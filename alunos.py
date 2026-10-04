@@ -104,6 +104,58 @@ def valor_mensalidade_liquido(valor, desconto_tipo=None, desconto_valor=0):
     return round(bruto, 2)
 
 
+STATUS_PARCELA_ABERTA = ("Pendente", "Atrasado")
+
+
+def migrar_desconto_percentual_fracao(cursor):
+    """Uma vez por escola: percentuais gravados como fração (0,10 pela máscara de moeda) viram 10% e as
+    parcelas em aberto do contrato passam ao valor com o desconto. Devolve os alunos corrigidos."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS migracoes_sistema (
+            nome VARCHAR(80) PRIMARY KEY,
+            aplicada_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
+        INSERT INTO migracoes_sistema (nome) VALUES ('desconto_percentual_fracao')
+        ON CONFLICT (nome) DO NOTHING
+        RETURNING nome
+        """
+    )
+    if not cursor.fetchone():
+        return []
+    cursor.execute(
+        """
+        UPDATE alunos
+        SET desconto_valor = ROUND(desconto_valor * 100, 2)
+        WHERE desconto_tipo::text IN ('percentual', 'porcentagem')
+          AND desconto_valor > 0 AND desconto_valor <= 1
+        RETURNING id, valor_mensalidade, desconto_tipo, desconto_valor
+        """
+    )
+    corrigidos = cursor.fetchall() or []
+    for aluno in corrigidos:
+        dados = aluno if isinstance(aluno, dict) else dict(zip(("id", "valor_mensalidade", "desconto_tipo", "desconto_valor"), aluno))
+        liquido = valor_mensalidade_liquido(dados["valor_mensalidade"], dados["desconto_tipo"], dados["desconto_valor"])
+        if liquido <= 0:
+            continue
+        cursor.execute(
+            """
+            UPDATE financeiro_mensalidades
+            SET valor = %s
+            WHERE aluno_id = %s
+              AND parcela_contrato IS NOT NULL
+              AND status = ANY(%s)
+              AND ABS(valor - %s) > 0.004
+            """,
+            (liquido, dados["id"], list(STATUS_PARCELA_ABERTA), liquido),
+        )
+    return corrigidos
+
+
 def _vazio_para_nulo(valor):
     texto = str(valor or "").strip()
     return texto or None

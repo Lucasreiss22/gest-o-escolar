@@ -28,7 +28,21 @@ from folha import (
     inss_empregado,
     irrf_mensal as calcular_irrf_mensal,
     irrf_progressivo,
+    redutor_irrf,
 )
+
+# Redutor da Lei 15.270/2025 no IRRF do 13º: a base do redutor fica a critério da escola/contabilidade.
+REDUTOR_13_OPCOES = (
+    ("bruto", "Redutor sobre o 13º bruto"),
+    ("liquido", "Redutor sobre o 13º menos o INSS"),
+    ("nao", "Sem redutor no 13º"),
+)
+
+
+def normalizar_redutor_13(valor):
+    valor = (valor or "").strip().lower()
+    return valor if valor in dict(REDUTOR_13_OPCOES) else "bruto"
+
 
 TIPOS_RESCISAO = (
     ("sem_justa_causa", "Demissão sem justa causa (empregador)"),
@@ -373,7 +387,13 @@ def calcular_rescisao(func, params):
     inss_mensal = inss_empregado(base_mensal, ano_ref, mes_ref)
     irrf_mensal = calcular_irrf_mensal(base_mensal, inss_mensal, ano_ref, mes_ref)["irrf"]
     inss_13 = inss_empregado(decimo_trabalhado, ano_ref, mes_ref)
-    irrf_13 = irrf_progressivo(max(decimo - inss_13, 0), ano_ref, mes_ref)
+    irrf_13_tabela = irrf_progressivo(max(decimo - inss_13, 0), ano_ref, mes_ref)
+    modo_redutor_13 = normalizar_redutor_13(params.get("irrf_13_redutor"))
+    irrf_13_redutor = 0.0
+    if modo_redutor_13 != "nao":
+        rendimento_redutor = decimo if modo_redutor_13 == "bruto" else max(decimo - inss_13, 0)
+        irrf_13_redutor = redutor_irrf(rendimento_redutor, irrf_13_tabela, ano_ref, mes_ref)
+    irrf_13 = _money(irrf_13_tabela - irrf_13_redutor)
     inss = _money(inss_mensal + inss_13)
     irrf = _money(irrf_mensal + irrf_13)
 
@@ -455,6 +475,10 @@ def calcular_rescisao(func, params):
         "irrf_mensal": irrf_mensal,
         "inss_13": inss_13,
         "irrf_13": irrf_13,
+        "irrf_13_tabela": irrf_13_tabela,
+        "irrf_13_redutor": irrf_13_redutor,
+        "irrf_13_redutor_modo": modo_redutor_13,
+        "rotulo_redutor_13": dict(REDUTOR_13_OPCOES)[modo_redutor_13],
         "inss": inss,
         "irrf": irrf,
         "base_fgts_mes": base_fgts_mes,

@@ -107,9 +107,11 @@ ENDPOINTS = {
 
 
 def normalizar_papel(papel):
-    bruto = (papel or "admin").strip().lower()
+    """Papel vazio ou desconhecido cai no perfil mais restrito (funcionário), nunca em admin."""
+    bruto = (papel or "").strip().lower()
     mapa = {
         "administrador": "admin",
+        "plataforma": "admin",
         "administrativo": "financeiro",
         "supervisor": "supervisor",
         "supervisor administrativo": "supervisor",
@@ -124,7 +126,7 @@ def normalizar_papel(papel):
     }
     return mapa.get(bruto, bruto if bruto in {
         "admin", "financeiro", "secretaria", "professor", "funcionario", "direcao", "supervisor"
-    } else "admin")
+    } else "funcionario")
 
 
 AREAS_ACESSO = [

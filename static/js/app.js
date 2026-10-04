@@ -284,7 +284,7 @@
     }, true);
 
     var NOMES_MOEDA = {
-        salario: 1, valor: 1, valor_hora: 1, valor_mensalidade: 1, desconto_valor: 1,
+        salario: 1, valor: 1, valor_hora: 1, valor_mensalidade: 1,
         valor_custo: 1, valor_bruto_custo: 1, valor_hora_extra: 1
     };
 
@@ -339,6 +339,101 @@
     document.addEventListener("input", function (event) {
         var campo = event.target;
         if (campo && campo.hasAttribute("data-moeda")) aplicarMascaraMoeda(campo);
+    });
+
+    /* Desconto do aluno: percentual é número de 0 a 100 (10 = 10%); só o valor fixo usa a máscara de reais. */
+    function numeroBR(texto) {
+        var s = String(texto || "").replace(/R\$|\s/g, "");
+        if (s.indexOf(",") >= 0) s = s.replace(/\./g, "").replace(",", ".");
+        var n = parseFloat(s);
+        return isNaN(n) ? 0 : n;
+    }
+
+    function moedaBR(n) {
+        return "R$ " + n.toFixed(2).replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    }
+
+    function textoPercentual(texto) {
+        var n = numeroBR(texto);
+        if (!n) return "";
+        return String(Math.round(Math.min(n, 100) * 100) / 100).replace(".", ",");
+    }
+
+    function previaDesconto(form) {
+        var tipo = form.querySelector("select[name='desconto_tipo']");
+        var campo = form.querySelector("input[name='desconto_valor']");
+        var dica = form.querySelector("[data-desconto-dica]");
+        var base = form.querySelector("input[name='valor_mensalidade']");
+        if (!tipo || !campo || !dica) return;
+        var bruto = base ? numeroBR(base.value) : 0;
+        var desconto = numeroBR(campo.value);
+        var t = tipo.value;
+        var liquido = bruto;
+        var aviso = "";
+        if (t === "percentual") {
+            liquido = bruto * (1 - Math.min(desconto, 100) / 100);
+            if (desconto > 0 && desconto <= 1) aviso = " Atenção: isso é " + textoPercentual(campo.value) + "% (menos de 1%). Para 10%, digite 10.";
+        } else if (t === "valor_fixo") {
+            liquido = Math.max(bruto - desconto, 0);
+        } else if (t === "bolsa") {
+            liquido = 0;
+        }
+        var texto = t === "percentual" ? "Digite o percentual de 0 a 100 (10 = 10%)." : (t === "valor_fixo" ? "Valor em reais descontado por mês." : "");
+        if (bruto > 0 && t !== "nenhum") texto += " Mensalidade: " + moedaBR(bruto) + " → " + moedaBR(Math.round(liquido * 100) / 100) + ".";
+        dica.textContent = (texto + aviso).trim();
+        dica.classList.toggle("text-danger", !!aviso);
+        dica.classList.toggle("text-muted", !aviso);
+    }
+
+    function ajustarCampoDesconto(form) {
+        if (!form) return;
+        var tipo = form.querySelector("select[name='desconto_tipo']");
+        var campo = form.querySelector("input[name='desconto_valor']");
+        if (!tipo || !campo) return;
+        var t = tipo.value;
+        if (t === "valor_fixo") {
+            if (!campo.hasAttribute("data-moeda")) {
+                var v = String(campo.value || "").trim();
+                if (v && v.indexOf(",") < 0) campo.value = v + ",00";
+                campo.setAttribute("data-moeda", "");
+                aplicarMascaraMoeda(campo);
+            }
+            campo.setAttribute("inputmode", "numeric");
+            campo.placeholder = "R$ por mês";
+        } else {
+            if (campo.hasAttribute("data-moeda")) {
+                campo.removeAttribute("data-moeda");
+                campo.value = textoPercentual(campo.value);
+            }
+            campo.setAttribute("inputmode", "decimal");
+            campo.placeholder = t === "percentual" ? "Ex.: 10 (= 10%)" : "";
+        }
+        campo.readOnly = t === "nenhum" || t === "bolsa";
+        if (campo.readOnly) campo.value = "";
+        previaDesconto(form);
+    }
+
+    function ligarCamposDesconto() {
+        document.querySelectorAll("select[name='desconto_tipo']").forEach(function (sel) {
+            ajustarCampoDesconto(sel.form);
+        });
+    }
+
+    document.addEventListener("change", function (event) {
+        if (event.target && event.target.name === "desconto_tipo") ajustarCampoDesconto(event.target.form);
+    });
+
+    document.addEventListener("input", function (event) {
+        var campo = event.target;
+        if (!campo || !campo.form || !campo.form.querySelector("select[name='desconto_tipo']")) return;
+        if (campo.name === "desconto_valor" && !campo.hasAttribute("data-moeda")) {
+            var limpo = campo.value.replace(/[^\d,\.]/g, "").replace(".", ",");
+            var partes = limpo.split(",");
+            if (partes.length > 2) limpo = partes[0] + "," + partes.slice(1).join("");
+            if (numeroBR(limpo) > 100) limpo = "100";
+            if (limpo !== campo.value) campo.value = limpo;
+        }
+        if (campo.name === "desconto_valor" || campo.name === "valor_mensalidade") previaDesconto(campo.form);
     });
 
     function ligarHoraPickers() {
@@ -650,6 +745,7 @@
             aplicarCamposCusto();
             ligarTodosCep();
             ligarCamposMoeda();
+            ligarCamposDesconto();
             ligarHoraPickers();
         });
     } else {
@@ -658,6 +754,7 @@
         aplicarCamposCusto();
         ligarTodosCep();
         ligarCamposMoeda();
+        ligarCamposDesconto();
         ligarHoraPickers();
     }
 })();

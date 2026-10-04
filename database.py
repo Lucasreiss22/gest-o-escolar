@@ -1172,6 +1172,7 @@ def garantir_tabelas_folha():
                 ("configuracoes", "ponto_responsavel_nome", "VARCHAR(150)"),
                 ("configuracoes", "ponto_responsavel_cargo", "VARCHAR(100)"),
                 ("configuracoes", "ponto_he_folha", "BOOLEAN DEFAULT TRUE"),
+                ("configuracoes", "irrf_13_redutor", "VARCHAR(20) DEFAULT 'bruto'"),
                 ("funcionarios", "ponto_minutos_cafe", "INT"),
                 ("funcionarios", "ponto_minutos_almoco", "INT"),
                 ("funcionarios", "ponto_jornada_minutos", "INT"),
@@ -1218,6 +1219,17 @@ def garantir_tabelas_folha():
             garantir_tabela_escola(cursor)
             from rescisao import garantir_tabelas_rescisao
             garantir_tabelas_rescisao(cursor)
+            if "alunos" in mapa:
+                cursor.execute("SAVEPOINT migrar_desconto")
+                try:
+                    from alunos import migrar_desconto_percentual_fracao
+                    corrigidos = migrar_desconto_percentual_fracao(cursor)
+                    cursor.execute("RELEASE SAVEPOINT migrar_desconto")
+                    if corrigidos:
+                        _log_db(f"{schema}: desconto percentual corrigido de fração para % em {len(corrigidos)} aluno(s)")
+                except Exception as e:
+                    cursor.execute("ROLLBACK TO SAVEPOINT migrar_desconto")
+                    _log_db(f"{schema}: migração do desconto percentual: {e}")
             conexao.commit()
             _tabelas_ok.add(chave)
     except Exception as e:

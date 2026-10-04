@@ -390,7 +390,10 @@
                 <div class="linha"><span>INSS sobre saldo/salário (R$ {{ calculo.base_inss_mensal|moeda }})</span><strong>− R$ {{ calculo.inss_mensal|moeda }}</strong></div>
                 <div class="linha"><span>INSS sobre 13º (calculado à parte)</span><strong>− R$ {{ calculo.inss_13|moeda }}</strong></div>
                 <div class="linha"><span>IRRF sobre saldo/salário</span><strong>− R$ {{ calculo.irrf_mensal|moeda }}</strong></div>
-                <div class="linha"><span>IRRF sobre 13º (tributação exclusiva)</span><strong>− R$ {{ calculo.irrf_13|moeda }}</strong></div>
+                <div class="linha"><span>IRRF sobre 13º (tributação exclusiva){% if calculo.irrf_13_redutor %} · tabela R$ {{ calculo.irrf_13_tabela|moeda }} − redutor R$ {{ calculo.irrf_13_redutor|moeda }}{% endif %}</span><strong>− R$ {{ calculo.irrf_13|moeda }}</strong></div>
+                {% if calculo.rotulo_redutor_13 %}
+                <div class="linha" style="font-size:0.82rem;color:#64748b;"><span>{{ calculo.rotulo_redutor_13 }} (Lei 15.270/2025) — altere em Configurações › Folha de pagamento</span><strong></strong></div>
+                {% endif %}
                 {% if calculo.outros_descontos %}
                 <div class="linha"><span>Outros descontos</span><strong>− R$ {{ calculo.outros_descontos|moeda }}</strong></div>
                 {% endif %}

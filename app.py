@@ -143,6 +143,8 @@ from folha import (
 from rescisao import (
     TIPOS_RESCISAO,
     AVISO_MODALIDADES,
+    REDUTOR_13_OPCOES,
+    normalizar_redutor_13,
     alerta_readmissao,
     calcular_rescisao,
     dias_aviso_proporcional,
@@ -3261,7 +3263,11 @@ def _aplicar_permanecer_logado(manter=None):
 def _iniciar_sessao(usuario, email):
     session["usuario_id"] = usuario["id"]
     session["usuario_nome"] = usuario.get("nome") or usuario.get("nome_completo") or email
-    session["usuario_papel"] = normalizar_papel(usuario.get("papel") or usuario.get("cargo") or "admin")
+    papel_bruto = usuario.get("papel") or usuario.get("cargo")
+    email_dono = normalizar_email(session.get("escola_email"))
+    if not papel_bruto and email_dono and normalizar_email(email) == email_dono:
+        papel_bruto = "admin"
+    session["usuario_papel"] = normalizar_papel(papel_bruto)
     session["usuario_email"] = email
     session["permissoes"] = permissoes_efetivas(session["usuario_papel"], usuario.get("permissoes"))
     session["funcionario_id"] = _id_funcionario_da_sessao(email)
@@ -5117,8 +5123,10 @@ def pagina_rescisao():
                     flash("Sem permissão para calcular rescisão.", "danger")
                     return redirect(url_for("pagina_rescisao", fid=fid, modo=modo))
                 params = _params_rescisao_do_form(request.form)
-                cursor.execute("SELECT regime_tributario FROM configuracoes WHERE id = 1")
-                params["regime_tributario"] = ((cursor.fetchone() or {}).get("regime_tributario") or "simples_nacional")
+                cursor.execute("SELECT * FROM configuracoes WHERE id = 1")
+                cfg_rescisao = cursor.fetchone() or {}
+                params["regime_tributario"] = cfg_rescisao.get("regime_tributario") or "simples_nacional"
+                params["irrf_13_redutor"] = cfg_rescisao.get("irrf_13_redutor")
                 calculo = calcular_rescisao(dict(selecionado), params)
                 # Espelha avos/dias calculados nos campos ajustáveis
                 params["dias_aviso"] = str(calculo.get("dias_aviso_informado", calculo.get("dias_aviso")) or "")
@@ -8144,6 +8152,8 @@ def relatorio_pdf_periodo(tipo):
     if "usuario_id" not in session:
         return redirect(url_for("login"))
     tipo = (tipo or "").strip().lower()
+    if tipo == "calendario":
+        tipo = "completo"
     if tipo not in ("chamada", "eventos", "rotina", "completo"):
         flash("❌ Tipo de relatório inválido.", "danger")
         return redirect(url_for("calendario_escolar"))
@@ -15470,6 +15480,30 @@ def pagina_configuracoes():
                     conexao.close()
             return redirect(url_for("pagina_configuracoes") + "#ponto-tempos")
 
+        if acao == "salvar_folha_cfg":
+            modo_13 = normalizar_redutor_13(request.form.get("irrf_13_redutor"))
+            if conexao:
+                try:
+                    with conexao.cursor() as cursor:
+                        cursor.execute(
+                            "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS irrf_13_redutor VARCHAR(20) DEFAULT 'bruto'"
+                        )
+                        cursor.execute(
+                            """
+                            INSERT INTO configuracoes (id, irrf_13_redutor) VALUES (1, %s)
+                            ON CONFLICT (id) DO UPDATE SET irrf_13_redutor = EXCLUDED.irrf_13_redutor
+                            """,
+                            (modo_13,),
+                        )
+                    conexao.commit()
+                    flash("Configuração da folha salva.", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"Não foi possível salvar a configuração da folha: {e}", "danger")
+                finally:
+                    conexao.close()
+            return redirect(url_for("pagina_configuracoes") + "#folha-pagamento")
+
         return redirect(url_for("pagina_configuracoes"))
 
     config = {}
@@ -15529,6 +15563,8 @@ def pagina_configuracoes():
     return render_template(
         "configuracoes.html",
         config=config,
+        opcoes_redutor_13=REDUTOR_13_OPCOES,
+        redutor_13_atual=normalizar_redutor_13(config.get("irrf_13_redutor")),
         equipe_acesso=equipe_acesso,
         acesso=acesso,
         areas_acesso=[

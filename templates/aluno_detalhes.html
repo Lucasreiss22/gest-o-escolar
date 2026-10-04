@@ -1356,9 +1356,9 @@
                                 </select>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label small fw-bold">Valor do desconto</label>
-                                <input type="text" name="desconto_valor" class="form-control" data-moeda inputmode="numeric" value="{{ (aluno.desconto_valor or 0)|moeda_campo }}">
-                                <small class="text-muted">Percentual: 10,00 = 10%.</small>
+                                <label class="form-label small fw-bold">Valor do desconto (% de 0 a 100 ou R$)</label>
+                                <input type="text" name="desconto_valor" class="form-control" inputmode="decimal" value="{% if desc_edit == 'percentual' %}{{ ('%g'|format((aluno.desconto_valor or 0)|float))|replace('.', ',') }}{% else %}{{ (aluno.desconto_valor or 0)|moeda_campo }}{% endif %}">
+                                <small class="text-muted" data-desconto-dica>Percentual: digite 10 para 10%.</small>
                             </div>
                         </div>
                     </div>

@@ -2498,6 +2498,11 @@ def _linha_rescisao_calc(pdf, calculo):
         pdf.linha("INSS sobre 13º (à parte)", f"- {_brl(c.get('inss_13'))}")
         pdf.linha("IRRF sobre saldo", f"- {_brl(c.get('irrf_mensal'))}")
         pdf.linha("IRRF sobre 13º (exclusivo)", f"- {_brl(c.get('irrf_13'))}")
+        if float(c.get("irrf_13_redutor") or 0) > 0:
+            pdf.linha(
+                f"  Tabela {_brl(c.get('irrf_13_tabela'))}; {c.get('rotulo_redutor_13') or 'redutor'} (Lei 15.270)",
+                f"já abatido {_brl(c.get('irrf_13_redutor'))}",
+            )
     else:
         pdf.linha("INSS (estimativa)", f"- {_brl(c.get('inss'))}")
         pdf.linha("IRRF (estimativa)", f"- {_brl(c.get('irrf'))}")

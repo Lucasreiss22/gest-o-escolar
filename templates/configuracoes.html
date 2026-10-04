@@ -174,6 +174,32 @@
             </form>
         </div>
 
+        <div class="card-box" id="folha-pagamento">
+            <h3 class="card-title">Folha de pagamento — IRRF do 13º</h3>
+            <p style="color:#64748b;font-size:0.9rem;line-height:1.45;">
+                Desde jan/2026 a Lei 15.270/2025 reduz o IRRF de quem ganha até R$ 7.350 (zera até R$ 5.000).
+                No salário do mês o redutor usa o rendimento bruto. Para o 13º da rescisão, escolha com a contabilidade sobre qual valor ele é calculado.
+            </p>
+            <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
+                <input type="hidden" name="acao" value="salvar_folha_cfg">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Redutor no IRRF do 13º (rescisão)</label>
+                        <select name="irrf_13_redutor">
+                            {% for codigo, rotulo in opcoes_redutor_13 %}
+                            <option value="{{ codigo }}" {% if redutor_13_atual == codigo %}selected{% endif %}>{{ rotulo }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <p style="color:#64748b;font-size:0.85rem;line-height:1.45;margin-top:0;">
+                    Exemplo com 13º de R$ 6.750,00 e INSS de R$ 746,51: tabela R$ 742,23; com redutor sobre o bruto R$ 662,34;
+                    sobre o 13º menos o INSS R$ 562,94; sem redutor R$ 742,23. Vale para os cálculos novos — rescisões já confirmadas não mudam.
+                </p>
+                <button type="submit" class="btn btn-primary">Salvar configuração da folha</button>
+            </form>
+        </div>
+
         {% if nfse_liberada %}
         <div class="card-box">
             <h3 class="card-title">Nota fiscal de serviço (NFS-e)</h3>

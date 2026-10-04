@@ -552,7 +552,7 @@
                             </div>
                             <div class="form-group campo-desc-valor">
                                 <label>Desconto (R$)</label>
-                                <input name="desconto_valor" inputmode="decimal" placeholder="0,00" value="{% if c and c.desconto_valor %}{{ c.desconto_valor|moeda_campo }}{% endif %}">
+                                <input name="desconto_valor" data-moeda inputmode="decimal" placeholder="0,00" value="{% if c and c.desconto_valor %}{{ c.desconto_valor|moeda_campo }}{% endif %}">
                             </div>
                         </div>
                         <p class="plano-resultado">
