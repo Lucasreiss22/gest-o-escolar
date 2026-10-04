@@ -2166,6 +2166,24 @@ def pdf_regime_detalhado(
     return _saida(pdf)
 
 
+def pdf_dre(escola, mes_label, titulos_colunas, linhas, notas=None, consolidada=False):
+    """`linhas`: [{"rotulo", "valores": [um por coluna]}]; a última coluna pode ser o consolidado."""
+    pdf = RelatorioPDF("DRE consolidada (matriz e filiais)" if consolidada else "Demonstração do resultado (DRE)")
+    pdf.add_page()
+    pdf.paragrafo(f"{escola} · {mes_label}")
+    n = max(len(titulos_colunas), 1)
+    largura_rotulo = 64 if n > 1 else 120
+    larguras = [largura_rotulo] + [(pdf.epw - largura_rotulo) / n] * n
+    pdf.tabela(
+        ["Linha"] + list(titulos_colunas),
+        [[l["rotulo"]] + [_brl(v) for v in l["valores"]] for l in linhas],
+        larguras,
+    )
+    for nota in notas or []:
+        pdf.paragrafo(nota, tamanho=9)
+    return _saida(pdf)
+
+
 def pdf_contracheque(escola, mes_label, item):
     pdf = RelatorioPDF("Contra-cheque")
     pdf.add_page()

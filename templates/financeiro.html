@@ -242,6 +242,7 @@
                 <button type="submit" class="btn btn-primary">Ver mês</button>
             </form>
             <div class="fin-reports">
+                <a href="{{ url_for('relatorio_dre', mes=mes_atual) }}" class="btn btn-primary">DRE do mês</a>
                 <a href="{{ url_for('relatorio_tributario', mes=mes_atual) }}" class="btn btn-success">PDF tributos</a>
                 <a href="{{ url_for('relatorio_pdf_folha', mes=mes_atual) }}" class="btn btn-success">PDF folha</a>
                 <a href="{{ url_for('relatorio_pdf_custos', mes=mes_atual) }}" class="btn btn-success">PDF custos</a>
@@ -596,7 +597,7 @@
                 <button class="btn btn-success" type="submit">Importar competências</button>
             </form>
             <p class="simples-hint">Aceita CSV/Excel com colunas competência e receita (e folha, se houver). No extrato PGDAS o sistema procura o mês e o valor de receita bruta em cada linha.</p>
-            <p class="simples-hint">O botão Gerar extrato PGDAS mostra o DAS que será pago, com tipo de receita, RBT12, folha e encargos e o regime de apuração. O PDF tributos, no topo, é a memória de cálculo mais o demonstrativo, no lugar da DRE.</p>
+            <p class="simples-hint">O botão Gerar extrato PGDAS mostra o DAS que será pago, com tipo de receita, RBT12, folha e encargos e o regime de apuração. O PDF tributos, no topo, é a memória de cálculo mais o demonstrativo. A DRE completa (e a consolidada, na matriz) fica no botão DRE do mês.</p>
 
             <form method="POST" action="{{ url_for('pagina_financeiro') }}">
                 <input type="hidden" name="acao" value="simples_salvar_quadro">

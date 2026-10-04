@@ -101,6 +101,7 @@ from relatorios_pdf import (
     pdf_boletim,
     pdf_ficha_pedagogica,
     pdf_contracheque,
+    pdf_dre,
     pdf_historico_periodo,
     pdf_folha_pagamento,
     pdf_custos,
@@ -259,7 +260,8 @@ from empresa import (
     salvar_empresa,
     tem_dados_empresa,
 )
-from unidades import TIPOS_UNIDADE, resumo_unidade
+from unidades import TIPOS_UNIDADE, resumo_unidade, unidades_da_rede
+from dre import aliquota_simples_rede, calcular_dre, consolidar_dre, das_pela_rede, linhas_para_tela
 from parcelas import juntar_planos, plano_parcelas, texto_puladas, travas_da_escola
 from feriados import feriados_nacionais_mes
 from fechamento import (
@@ -1619,7 +1621,7 @@ _AUDITORIA_IGNORAR = {
     None, "login", "logout", "static", "ping", "login_google", "login_google_callback",
     "login_codigo", "login_senha", "login_adm", "ativar_escola", "login_conectar_gmail", "login_esqueci_senha",
     "pagina_auditoria", "relatorio_tributario", "relatorio_pdf_folha", "relatorio_pdf_custos",
-    "relatorio_cartao_financeiro",
+    "relatorio_cartao_financeiro", "relatorio_dre",
     "cobranca_pdf", "cobranca_email", "memoria_simples_pdf", "extrato_pgdas_pdf", "boletim_pdf", "pdf_contracheque_rota",
     "ficha_pedagogica_pdf",
     "modelo_alunos_csv", "modelo_custos_csv", "modelo_simples_csv", "modelo_alunos_financeiro_csv",
@@ -13391,6 +13393,204 @@ def relatorio_pdf_custos():
         mimetype="application/pdf",
         as_attachment=True,
         download_name=f"custos_{mes_filtro}.pdf",
+    )
+
+
+def _base_dre_escola(cursor, mes_filtro):
+    """Linhas de base da DRE da escola do schema atual, com os mesmos cálculos do Financeiro."""
+    cursor.execute("SELECT nome_escola, regime_tributario, regime_apuracao FROM configuracoes WHERE id = 1")
+    cfg = cursor.fetchone() or {}
+    regime = cfg.get("regime_tributario") or "lucro_presumido"
+    regime_ap = normalizar_regime_apuracao(cfg.get("regime_apuracao"))
+    mora = acrescimos_mora_mes(cursor, mes_filtro)
+    _itens, folha = _folha_competencia(cursor, regime, mes_filtro)
+    custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
+    base = {
+        "receitas_financeiras": mora["total"],
+        "folha": folha.get("custo_escola") or 0,
+        "rescisoes": custos.get("rescisoes") or 0,
+        "compras": custos.get("compras") or 0,
+        "servicos": custos.get("servicos") or 0,
+    }
+    info = {
+        "nome_escola": cfg.get("nome_escola"),
+        "regime": regime,
+        "regime_apuracao": regime_ap,
+        "folha_fechada": bool(info_fechamento(cursor, mes_filtro)),
+        "simples": None,
+        "avisos": [],
+    }
+    if regime == "simples_nacional":
+        apuracao, _colabs = calcular_apuracao_simples(cursor, mes_filtro)
+        base["receita_bruta"] = apuracao["receita_mes"]
+        base["deducoes"] = apuracao["das"]
+        info["simples"] = {
+            "rbt12": apuracao["rbt12"],
+            "fs12": apuracao["fs12"],
+            "receita_mes": apuracao["receita_mes"],
+            "aliquota_efetiva": apuracao["aliquota_efetiva"],
+            "anexo": apuracao["anexo"],
+            "atividade": apuracao["atividade"],
+            "das": apuracao["das"],
+        }
+    elif regime == "lucro_real":
+        receita = receita_do_mes(cursor, mes_filtro, regime_ap)
+        base["receita_bruta"] = receita
+        base["deducoes"] = apurar_pis_cofins(receita, "lucro_real", mora["total"])["total"]
+        info["avisos"].append("Lucro Real: IRPJ e CSLL dependem do lucro contábil e não entram nesta DRE.")
+    else:
+        receita = receita_do_mes(cursor, mes_filtro, regime_ap)
+        receita_tri = sum(receita_sistema_mes(cursor, comp, regime_ap) for comp in meses_do_trimestre(mes_filtro))
+        presumido = apurar_lucro_presumido(
+            receita, [], receita_tri,
+            acrescimos_mora=mora["total"],
+            acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
+        )
+        base["receita_bruta"] = receita
+        base["deducoes"] = presumido["pis"] + presumido["cofins"] + presumido["iss"]
+        base["irpj_csll"] = presumido["irpj"] + presumido["csll"] + presumido["irpj_adicional"]
+    return base, info
+
+
+def _base_dre_unidade(unidade, mes_filtro):
+    """Troca para o schema da unidade só durante a leitura."""
+    schema = unidade.get("db_nome")
+    if not schema:
+        raise ValueError("unidade sem banco definido")
+    token = definir_banco_escola(schema)
+    try:
+        garantir_tabelas_folha()
+        conexao = obter_conexao()
+        if not conexao:
+            raise RuntimeError("sem conexão com o banco")
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                return _base_dre_escola(cursor, mes_filtro)
+        finally:
+            conexao.close()
+    finally:
+        limpar_banco_escola(token)
+
+
+def _montar_dre_rede(rede, mes_filtro):
+    """DRE de cada unidade da rede; no Simples, o DAS usa a alíquota da RBT12 somada da rede."""
+    colunas = []
+    for unidade in rede:
+        coluna = {"id": unidade.get("id"), "nome": unidade.get("nome") or f"Unidade #{unidade.get('id')}",
+                  "tipo": unidade.get("tipo_unidade") or "independente", "erro": None}
+        try:
+            coluna["base"], coluna["info"] = _base_dre_unidade(unidade, mes_filtro)
+        except Exception as e:
+            coluna["base"], coluna["info"] = {}, {"avisos": [], "simples": None}
+            coluna["erro"] = f"Não foi possível ler os dados desta unidade: {e}"
+        colunas.append(coluna)
+    simples = [c for c in colunas if (c["info"] or {}).get("simples")]
+    apuracao_rede = None
+    if len(rede) > 1 and simples:
+        apuracao_rede = aliquota_simples_rede(
+            [c["info"]["simples"] for c in simples], atividade=simples[0]["info"]["simples"]["atividade"]
+        )
+        for c in simples:
+            c["das_individual"] = c["base"].get("deducoes")
+            c["base"]["deducoes"] = das_pela_rede(c["info"]["simples"]["receita_mes"], apuracao_rede)
+    for c in colunas:
+        c["dre"] = calcular_dre(c["base"])
+    return colunas, apuracao_rede
+
+
+@app.route("/financeiro/dre")
+def relatorio_dre():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    papel = session.get("usuario_papel")
+    mes_filtro = _mes_contracheque(request.args.get("mes"))
+    if not pode_acao(papel, "financeiro", "ver", session.get("permissoes")):
+        flash("Sem permissão para ver a DRE.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_filtro))
+    escola_id = session.get("escola_id")
+    try:
+        escolas = [dict(e) for e in (listar_escolas() or [])]
+    except Exception:
+        escolas = []
+    escola = next((e for e in escolas if str(e.get("id")) == str(escola_id)), None) or {
+        "id": escola_id, "nome": session.get("escola_nome"), "db_nome": session.get("escola_db"),
+        "tipo_unidade": "independente",
+    }
+    if not escola.get("db_nome"):
+        escola["db_nome"] = session.get("escola_db")
+    rede = unidades_da_rede(escola, escolas)
+    eh_matriz = len(rede) > 1 and str(rede[0].get("id")) == str(escola.get("id"))
+    visao = request.args.get("visao") or ("consolidada" if eh_matriz else "individual")
+    if visao != "individual" and not eh_matriz:
+        visao = "individual"
+
+    colunas, apuracao_rede = _montar_dre_rede(rede, mes_filtro)
+    if visao == "individual":
+        exibidas = [c for c in colunas if str(c["id"]) == str(escola.get("id"))] or colunas[:1]
+        consolidado = None
+    else:
+        exibidas = colunas
+        consolidado = consolidar_dre([c["dre"] for c in colunas if not c["erro"]])
+    linhas = linhas_para_tela(exibidas, consolidado)
+
+    notas = []
+    if apuracao_rede:
+        notas.append(
+            f"Simples Nacional da rede: matriz e filiais são a mesma empresa, então a alíquota sai da RBT12 somada "
+            f"das {len(rede)} unidades (R$ {br_money(apuracao_rede['rbt12'])}): Anexo {apuracao_rede['anexo']}, "
+            f"faixa {apuracao_rede['faixa']}, alíquota efetiva {apuracao_rede['aliquota_efetiva_pct']:.4f}%. "
+            "Cada unidade paga essa alíquota sobre a própria receita."
+        )
+        for c in exibidas:
+            if c.get("das_individual") is not None and abs((c.get("das_individual") or 0) - c["base"]["deducoes"]) >= 0.01:
+                notas.append(
+                    f"{c['nome']}: DAS pela alíquota da rede R$ {br_money(c['base']['deducoes'])}; "
+                    f"pela RBT12 só da unidade seria R$ {br_money(c['das_individual'])} (valor mostrado hoje no Financeiro da unidade)."
+                )
+    for c in exibidas:
+        info = c.get("info") or {}
+        for aviso in info.get("avisos") or []:
+            notas.append(f"{c['nome']}: {aviso}" if len(exibidas) > 1 else aviso)
+        if info.get("folha_fechada"):
+            notas.append(f"{c['nome']}: folha do mês fechada; usa os valores gravados no fechamento." if len(exibidas) > 1
+                         else "Folha do mês fechada: usa os valores gravados no fechamento.")
+        if c.get("erro"):
+            notas.append(f"{c['nome']}: {c['erro']}")
+    regimes = {(c.get("info") or {}).get("regime_apuracao") for c in exibidas if not c.get("erro")}
+    if "caixa" in regimes and "competencia" in regimes:
+        notas.append("Atenção: há unidades no regime de caixa e outras no de competência; a receita consolidada mistura os dois critérios.")
+    notas.append(
+        "Receita bruta: mensalidades do mês pelo regime de apuração da unidade (competência = vencimento; caixa = pagamento). "
+        "Juros e multa ficam fora da receita bruta (receita financeira)."
+    )
+
+    if request.args.get("pdf"):
+        titulos = [c["nome"] for c in exibidas] + (["Consolidado"] if consolidado else [])
+        linhas_pdf = [
+            {"rotulo": l["rotulo"], "valores": l["valores"] + ([l["consolidado"]] if consolidado else [])}
+            for l in linhas
+        ]
+        buffer = pdf_dre(
+            escola.get("nome") or session.get("escola_nome") or "Gestão Escolar",
+            nome_mes_extenso(mes_filtro), titulos, linhas_pdf, notas, consolidada=bool(consolidado),
+        )
+        return send_file(
+            buffer, mimetype="application/pdf", as_attachment=True,
+            download_name=f"dre_{'consolidada_' if consolidado else ''}{mes_filtro}.pdf",
+        )
+
+    return render_template(
+        "dre.html",
+        mes_atual=mes_filtro,
+        mes_label=nome_mes_extenso(mes_filtro),
+        visao=visao,
+        eh_matriz=eh_matriz,
+        rede=rede,
+        colunas=exibidas,
+        linhas=linhas,
+        consolidado=consolidado,
+        notas=notas,
+        escola_nome=escola.get("nome") or session.get("escola_nome"),
     )
 
 

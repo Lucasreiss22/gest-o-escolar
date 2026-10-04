@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>DRE</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        .card-box { background:#fff; border-radius:12px; padding:20px; box-shadow:0 8px 24px rgba(15,23,42,.08); margin-bottom:16px; }
+        .topo-dre { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px; }
+        .btn { padding:9px 16px; border:none; border-radius:8px; background:#1e3a5f; color:#fff; text-decoration:none; display:inline-block; font-weight:700; cursor:pointer; }
+        .btn-claro { background:#e2e8f0; color:#0f172a; }
+        .abas-dre { display:flex; gap:6px; }
+        .abas-dre a { padding:8px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:600; font-size:.9rem; }
+        .abas-dre a.ativa { background:#1e3a5f; color:#fff; }
+        .tabela-dre { overflow-x:auto; }
+        table.dre { width:100%; border-collapse:collapse; font-size:.9rem; min-width:520px; }
+        table.dre th, table.dre td { padding:9px 12px; border-bottom:1px solid #e2e8f0; text-align:right; white-space:nowrap; }
+        table.dre th:first-child, table.dre td:first-child { text-align:left; white-space:normal; }
+        table.dre thead th { background:#1e3a5f; color:#fff; font-weight:700; }
+        table.dre tr.total td { font-weight:800; background:#f8fafc; }
+        table.dre tr.custo td:first-child, table.dre tr.deducao td:first-child { padding-left:24px; color:#475569; }
+        table.dre td.consolidado, table.dre th.consolidado { background:#ecfdf3; font-weight:700; }
+        table.dre thead th.consolidado { background:#15803d; }
+        .negativo { color:#b91c1c; }
+        .hint { color:#64748b; font-size:.85rem; }
+        .selo { display:inline-block; font-size:.72rem; font-weight:700; border-radius:999px; padding:1px 8px; background:#e0e7ff; color:#3730a3; margin-left:4px; }
+        ul.notas { margin:0; padding-left:18px; }
+        ul.notas li { margin-bottom:6px; color:#334155; font-size:.88rem; }
+    </style>
+</head>
+<body>
+    {% set nav_active = 'financeiro' %}
+    {% include '_nav.html' %}
+    <div class="content">
+        <h2>Demonstração do resultado (DRE)</h2>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}<p class="hint">{{ message }}</p>{% endfor %}
+        {% endwith %}
+        <div class="topo-dre">
+            <form method="GET">
+                <label class="hint" for="mes">Mês</label><br>
+                <input type="month" id="mes" name="mes" value="{{ mes_atual }}" onchange="this.form.submit()">
+                <input type="hidden" name="visao" value="{{ visao }}">
+            </form>
+            {% if eh_matriz %}
+            <div class="abas-dre">
+                <a href="{{ url_for('relatorio_dre', mes=mes_atual, visao='consolidada') }}" class="{% if visao == 'consolidada' %}ativa{% endif %}">Consolidada (matriz + filiais)</a>
+                <a href="{{ url_for('relatorio_dre', mes=mes_atual, visao='individual') }}" class="{% if visao == 'individual' %}ativa{% endif %}">Só esta unidade</a>
+            </div>
+            {% endif %}
+            <a class="btn" href="{{ url_for('relatorio_dre', mes=mes_atual, visao=visao, pdf=1) }}">Baixar PDF</a>
+            <a class="btn btn-claro" href="{{ url_for('pagina_financeiro', mes=mes_atual) }}">Voltar ao Financeiro</a>
+        </div>
+
+        <div class="card-box">
+            <p><strong>{{ escola_nome }}</strong> · {{ mes_label }}
+                {% if visao == 'consolidada' %}· {{ rede|length }} unidades{% endif %}</p>
+            <div class="tabela-dre">
+                <table class="dre">
+                    <thead>
+                        <tr>
+                            <th>Linha</th>
+                            {% for c in colunas %}
+                            <th>{{ c.nome }}{% if c.tipo == 'matriz' %}<span class="selo">Matriz</span>{% elif c.tipo == 'filial' %}<span class="selo">Filial</span>{% endif %}</th>
+                            {% endfor %}
+                            {% if consolidado %}<th class="consolidado">Consolidado</th>{% else %}<th>% da receita</th>{% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for l in linhas %}
+                        <tr class="{{ l.tipo }}">
+                            <td>{{ l.rotulo }}</td>
+                            {% for v in l.valores %}
+                            <td class="{% if v < 0 %}negativo{% endif %}">R$ {{ v|moeda }}</td>
+                            {% endfor %}
+                            {% if consolidado %}
+                            <td class="consolidado {% if l.consolidado < 0 %}negativo{% endif %}">R$ {{ l.consolidado|moeda }}</td>
+                            {% else %}
+                            {% set receita = colunas[0].dre.receita_bruta if colunas else 0 %}
+                            <td class="hint">{% if receita %}{{ "%.1f"|format(l.valores[0] / receita * 100) }}%{% else %}—{% endif %}</td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                        <tr>
+                            <td class="hint">Margem líquida</td>
+                            {% for c in colunas %}<td class="hint">{{ "%.1f"|format(c.dre.margem_pct) }}%</td>{% endfor %}
+                            {% if consolidado %}<td class="consolidado">{{ "%.1f"|format(consolidado.margem_pct) }}%</td>{% else %}<td></td>{% endif %}
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% if notas %}
+        <div class="card-box">
+            <h3 style="margin-top:0;font-size:1rem;">Como os valores foram calculados</h3>
+            <ul class="notas">
+                {% for n in notas %}<li>{{ n }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

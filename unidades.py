@@ -75,6 +75,22 @@ def validar_unidade(escola, tipo, matriz_id, escolas):
     return tipo, matriz_id
 
 
+def unidades_da_rede(escola, escolas):
+    """Matriz primeiro, depois as filiais por nome. Escola independente (ou sem vínculo válido) fica sozinha."""
+    escola = escola or {}
+    tipo = normalizar_tipo_unidade(escola.get("tipo_unidade"))
+    if tipo == "filial":
+        matriz = next((e for e in escolas or [] if _id(e.get("id")) == _id(escola.get("matriz_id"))), None)
+    elif tipo == "matriz":
+        matriz = escola
+    else:
+        matriz = None
+    if not matriz or normalizar_tipo_unidade(matriz.get("tipo_unidade")) != "matriz":
+        return [escola]
+    filiais = sorted(filiais_da(matriz.get("id"), escolas), key=lambda e: (e.get("nome") or "").lower())
+    return [matriz] + filiais
+
+
 def resumo_unidade(escola, escolas):
     """Dados para a tela: classificação atual, matriz, filiais e opções de matriz."""
     escola = escola or {}

@@ -51,6 +51,7 @@ ENDPOINTS = {
     "pagina_financeiro": "financeiro",
     "excluir_financeiro": "financeiro",
     "relatorio_tributario": "financeiro",
+    "relatorio_dre": "financeiro",
     "relatorio_cartao_financeiro": "financeiro",
     "relatorio_pdf_folha": "financeiro",
     "relatorio_pdf_custos": "financeiro",
