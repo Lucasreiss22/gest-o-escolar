@@ -87,6 +87,10 @@
         .fin-bloco summary:after { content: "▸"; color: #3b82f6; }
         .fin-bloco[open] summary:after { content: "▾"; }
         .fin-bloco .fin-bloco-body { padding: 0 16px 16px; }
+        .empresa-box { border: 1px solid #e2e8f0; border-radius: 10px; margin-top: 12px; background: #f8fafc; }
+        .empresa-box summary { cursor: pointer; padding: 10px 14px; font-weight: 700; color: #1e3a5f; }
+        .empresa-box .empresa-body { padding: 0 14px 14px; }
+        .empresa-falta { color: #b45309; font-weight: 600; font-size: .85rem; margin-left: 6px; }
         .fin-linha { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eef2f7; font-size: 0.9rem; }
         .fin-chart { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 8px 24px rgba(15,23,42,.08); height: 260px; }
         .filtro-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
@@ -445,6 +449,13 @@
                         <input type="email" name="email_admin" required placeholder="escola@gmail.com">
                     </div>
                 </div>
+                <details class="empresa-box">
+                    <summary>Dados da empresa (CNPJ, inscrições, endereço fiscal, responsável, contador)</summary>
+                    <div class="empresa-body">
+                        <p class="hint">Opcional agora: a escola completa depois em Configurações. CNPJ, inscrição municipal e código IBGE já servem para a NFS-e e o cabeçalho dos PDFs.</p>
+                        {% with emp={} %}{% include '_campos_empresa.html' %}{% endwith %}
+                    </div>
+                </details>
                 <label class="check">
                     <input type="checkbox" name="recadastrar" value="1">
                     <span>Recadastrar: apagar a escola já existente neste e-mail (banco e dados) e criar de novo.</span>
@@ -615,6 +626,16 @@
                     </select>
                     <button class="btn-sm btn-cinza" type="submit">Salvar NFS-e</button>
                 </form>
+                <details class="empresa-box">
+                    <summary>Dados da empresa{% if e.emp and e.emp.cnpj %} · CNPJ {{ e.emp.cnpj }}{% endif %}{% if e.empresa_faltando %}<span class="empresa-falta">falta: {{ e.empresa_faltando|join(', ') }}</span>{% endif %}</summary>
+                    <form method="POST" class="empresa-body">
+                        <input type="hidden" name="acao" value="salvar_empresa_escola">
+                        <input type="hidden" name="aba" value="escolas">
+                        <input type="hidden" name="escola_id" value="{{ e.id }}">
+                        {% with emp=e.emp %}{% include '_campos_empresa.html' %}{% endwith %}
+                        <p style="margin-top:10px;"><button class="btn-sm btn-azul" type="submit">Salvar dados da empresa</button></p>
+                    </form>
+                </details>
                 {% if not e.senha_definida and e.convite_token and e.ativo %}
                 <form method="POST" class="acoes">
                     <input type="hidden" name="acao" value="alterar_email">

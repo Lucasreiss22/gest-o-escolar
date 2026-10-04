@@ -1,0 +1,114 @@
+{# Campos do cadastro da escola como empresa. Espera `emp` (dict do empresa.dados_empresa_tela) e `portes_empresa`. #}
+{% set emp = emp or {} %}
+<div class="form-grid">
+    <div class="form-group" style="grid-column: span 2;">
+        <label>Razão social</label>
+        <input type="text" name="razao_social" maxlength="180" value="{{ emp.razao_social }}" placeholder="Como está no cartão CNPJ">
+    </div>
+    <div class="form-group">
+        <label>Nome fantasia</label>
+        <input type="text" name="nome_fantasia" maxlength="180" value="{{ emp.nome_fantasia }}">
+    </div>
+    <div class="form-group">
+        <label>CNPJ</label>
+        <input type="text" name="cnpj" maxlength="18" inputmode="numeric" value="{{ emp.cnpj }}" placeholder="00.000.000/0000-00">
+    </div>
+    <div class="form-group">
+        <label>Inscrição estadual</label>
+        <input type="text" name="inscricao_estadual" maxlength="30" value="{{ emp.inscricao_estadual }}" placeholder="Números ou ISENTO">
+    </div>
+    <div class="form-group">
+        <label>Inscrição municipal</label>
+        <input type="text" name="inscricao_municipal" maxlength="40" value="{{ emp.inscricao_municipal }}">
+    </div>
+    <div class="form-group">
+        <label>CNAE principal</label>
+        <input type="text" name="cnae_principal" maxlength="12" value="{{ emp.cnae_principal }}" placeholder="Ex.: 8513-9/00">
+    </div>
+    <div class="form-group">
+        <label>Código INEP (Censo Escolar)</label>
+        <input type="text" name="codigo_inep" maxlength="12" inputmode="numeric" value="{{ emp.codigo_inep }}" placeholder="8 números">
+    </div>
+    <div class="form-group">
+        <label>Data de abertura</label>
+        <input type="date" name="data_abertura" value="{{ emp.data_abertura }}">
+    </div>
+    <div class="form-group">
+        <label>Porte</label>
+        <select name="porte">
+            {% for codigo, rotulo in portes_empresa %}
+            <option value="{{ codigo }}" {% if emp.porte == codigo %}selected{% endif %}>{{ rotulo }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label>Telefone da escola</label>
+        <input type="text" name="telefone_empresa" maxlength="30" value="{{ emp.telefone_empresa }}">
+    </div>
+</div>
+<h4 style="margin:6px 0 10px;font-size:0.95rem;">Endereço fiscal</h4>
+<div class="form-grid">
+    <div class="form-group">
+        <label>CEP</label>
+        <input type="text" name="cep" maxlength="9" inputmode="numeric" value="{{ emp.cep }}" placeholder="Preenche o endereço">
+    </div>
+    <div class="form-group" style="grid-column: span 2;">
+        <label>Logradouro</label>
+        <input type="text" name="logradouro" maxlength="150" value="{{ emp.logradouro }}">
+    </div>
+    <div class="form-group">
+        <label>Número</label>
+        <input type="text" name="numero" maxlength="20" value="{{ emp.numero }}">
+    </div>
+    <div class="form-group">
+        <label>Complemento</label>
+        <input type="text" name="complemento" maxlength="80" value="{{ emp.complemento }}">
+    </div>
+    <div class="form-group">
+        <label>Bairro</label>
+        <input type="text" name="bairro" maxlength="100" value="{{ emp.bairro }}">
+    </div>
+    <div class="form-group">
+        <label>Cidade</label>
+        <input type="text" name="cidade" maxlength="100" value="{{ emp.cidade }}">
+    </div>
+    <div class="form-group">
+        <label>UF</label>
+        <input type="text" name="estado" maxlength="2" value="{{ emp.estado }}" style="text-transform:uppercase;">
+    </div>
+    <div class="form-group">
+        <label>Código IBGE do município</label>
+        <input type="text" name="codigo_municipio" maxlength="10" inputmode="numeric" value="{{ emp.codigo_municipio }}" placeholder="7 números (vem do CEP)">
+    </div>
+</div>
+<h4 style="margin:6px 0 10px;font-size:0.95rem;">Responsável legal e contabilidade</h4>
+<div class="form-grid">
+    <div class="form-group">
+        <label>Responsável legal</label>
+        <input type="text" name="responsavel_nome" maxlength="150" value="{{ emp.responsavel_nome }}">
+    </div>
+    <div class="form-group">
+        <label>CPF do responsável</label>
+        <input type="text" name="responsavel_cpf" maxlength="14" inputmode="numeric" value="{{ emp.responsavel_cpf }}" placeholder="000.000.000-00">
+    </div>
+    <div class="form-group">
+        <label>Cargo do responsável</label>
+        <input type="text" name="responsavel_cargo" maxlength="80" value="{{ emp.responsavel_cargo }}" placeholder="Ex.: Sócio-administrador, Diretor(a)">
+    </div>
+    <div class="form-group">
+        <label>Contador / escritório</label>
+        <input type="text" name="contador_nome" maxlength="150" value="{{ emp.contador_nome }}">
+    </div>
+    <div class="form-group">
+        <label>CRC do contador</label>
+        <input type="text" name="contador_crc" maxlength="30" value="{{ emp.contador_crc }}" placeholder="Ex.: SP-123456/O-7">
+    </div>
+    <div class="form-group">
+        <label>E-mail do contador</label>
+        <input type="email" name="contador_email" maxlength="150" value="{{ emp.contador_email }}">
+    </div>
+    <div class="form-group">
+        <label>Telefone do contador</label>
+        <input type="text" name="contador_telefone" maxlength="30" value="{{ emp.contador_telefone }}">
+    </div>
+</div>

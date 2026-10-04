@@ -2569,10 +2569,12 @@ def _linha_rescisao_calc(pdf, calculo):
     )
 
 
-def pdf_rescisao(escola, pessoa, calculo, rescisao_id=None):
+def pdf_rescisao(escola, pessoa, calculo, rescisao_id=None, aviso_regras=None):
     pdf = RelatorioPDF("Rescisão contratual — memória de cálculo")
     pdf.add_page()
     pdf.paragrafo(escola or "Gestão Escolar")
+    if aviso_regras:
+        pdf.paragrafo(aviso_regras, tamanho=9)
     if rescisao_id:
         pdf.linha("Rescisão nº", str(rescisao_id))
     pdf.linha("Colaborador", (pessoa or {}).get("nome_completo") or "-")

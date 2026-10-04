@@ -290,7 +290,6 @@
         var base = {};
         if (anterior) {
             base.materia = anterior.querySelector("select[name='materia_questao']").value;
-            base.tipo = anterior.querySelector("select[name='tipo_questao']").value;
             base.com_linhas = anterior.querySelector("select[name='pauta_resposta']").value !== "sem";
             base.linhas = parseInt(anterior.querySelector("input[name='linhas_resposta']").value, 10) || LINHAS_PADRAO;
         }

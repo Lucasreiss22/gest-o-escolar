@@ -111,6 +111,7 @@
         setar(["cidade"], dados.localidade);
         setar(["estado", "estado_uf"], dados.uf);
         if (dados.complemento) setar(["complemento"], dados.complemento);
+        setar(["codigo_municipio"], dados.ibge);
         var numEl = campoForm(form, ["numero"]);
         var completo = campoForm(form, ["endereco"]);
         if (completo) completo.value = montarEnderecoTexto(dados, numEl ? numEl.value : "");

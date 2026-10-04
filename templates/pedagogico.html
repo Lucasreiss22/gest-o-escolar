@@ -634,6 +634,15 @@
             </div>
         </details>
 
+        {% if turmas_duplicadas %}
+        <div class="alert alert-warning">
+            <strong>Turmas repetidas no mesmo ano:</strong>
+            {% for grupo in turmas_duplicadas %}
+            {{ grupo[0].nome }} ({{ grupo[0].ano_letivo }}, {{ grupo|length }} cadastros){{ '; ' if not loop.last else '.' }}
+            {% endfor %}
+            Passe os alunos para uma delas e exclua as outras: enquanto houver repetição, o banco não consegue travar novos cadastros duplicados.
+        </div>
+        {% endif %}
         <h3 class="fs-6 text-secondary fw-bold mb-2">Escolha a turma</h3>
         {% if turmas %}
         <div class="turma-grid mb-4">

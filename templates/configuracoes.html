@@ -125,6 +125,25 @@
             </form>
         </div>
 
+        <div class="card-box" id="dados-empresa">
+            <h3 class="card-title">Dados da empresa (cadastro fiscal)</h3>
+            <p style="color:#64748b;font-size:0.9rem;line-height:1.45;">
+                Razão social, CNPJ, inscrições, endereço fiscal, responsável legal e contador. O CNPJ sai no cabeçalho dos PDFs;
+                CNPJ, inscrição municipal e código IBGE valem para a NFS-e quando os campos da nota estiverem em branco.
+                A plataforma recebe uma cópia para emitir a nota da licença.
+            </p>
+            {% if empresa_faltando %}
+            <p style="margin:0 0 14px;padding:10px 12px;background:#fef3c7;color:#92400e;border-radius:8px;font-weight:600;">
+                Falta preencher: {{ empresa_faltando|join(', ') }}.
+            </p>
+            {% endif %}
+            <form action="{{ url_for('pagina_configuracoes') }}" method="POST">
+                <input type="hidden" name="acao" value="salvar_empresa">
+                {% include '_campos_empresa.html' %}
+                <button type="submit" class="btn btn-primary">Salvar dados da empresa</button>
+            </form>
+        </div>
+
         <div class="card-box" id="ponto-tempos">
             <h3 class="card-title">Ponto eletrônico — tempos, assinatura e horas extras</h3>
             <p style="color:#64748b;font-size:0.9rem;line-height:1.45;">
@@ -223,15 +242,15 @@
                     </div>
                     <div class="form-group">
                         <label>CNPJ do prestador</label>
-                        <input type="text" name="nfse_cnpj" value="{{ config.nfse_cnpj or '' }}" placeholder="Somente números">
+                        <input type="text" name="nfse_cnpj" value="{{ config.nfse_cnpj or '' }}" placeholder="{% if config.cnpj %}Em branco usa {{ emp.cnpj }} (dados da empresa){% else %}Somente números{% endif %}">
                     </div>
                     <div class="form-group">
                         <label>Inscrição municipal</label>
-                        <input type="text" name="nfse_inscricao_municipal" value="{{ config.nfse_inscricao_municipal or '' }}">
+                        <input type="text" name="nfse_inscricao_municipal" value="{{ config.nfse_inscricao_municipal or '' }}" placeholder="{% if config.inscricao_municipal %}Em branco usa {{ config.inscricao_municipal }}{% endif %}">
                     </div>
                     <div class="form-group">
                         <label>Código IBGE do município</label>
-                        <input type="text" name="nfse_codigo_municipio" value="{{ config.nfse_codigo_municipio or '' }}" placeholder="Ex.: 3305802">
+                        <input type="text" name="nfse_codigo_municipio" value="{{ config.nfse_codigo_municipio or '' }}" placeholder="{% if config.codigo_municipio %}Em branco usa {{ config.codigo_municipio }}{% else %}Ex.: 3305802{% endif %}">
                     </div>
                     <div class="form-group">
                         <label>Item da lista de serviço</label>

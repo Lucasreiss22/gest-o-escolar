@@ -44,6 +44,141 @@ def normalizar_redutor_13(valor):
     return valor if valor in dict(REDUTOR_13_OPCOES) else "bruto"
 
 
+# Muda quando uma regra do cálculo muda; rescisões gravadas com outra versão ganham aviso e podem ser recalculadas.
+VERSAO_REGRAS_RESCISAO = "2026-10-03"
+DESCRICAO_REGRAS_RESCISAO = (
+    "aviso do pedido de demissão limitado a 30 dias (Lei 12.506/2011) e redutor da Lei 15.270/2025 no IRRF do 13º"
+)
+CAMPOS_PARAMETROS_RESCISAO = (
+    "tipo_rescisao", "aviso_modalidade", "data_desligamento", "data_aviso", "data_pagamento",
+    "dias_trabalhados_mes", "dias_aviso", "ferias_vencidas_simples", "ferias_vencidas_dobro",
+    "avos_ferias_proporcionais", "avos_13", "decimo_ja_pago", "saldo_fgts_depositos",
+    "outros_proventos", "outros_descontos", "ind_aviso_manual",
+)
+# Verbas comparadas na tela de recálculo: (chave do cálculo, rótulo)
+VERBAS_COMPARACAO = (
+    ("dias_aviso", "Dias de aviso"),
+    ("saldo_salario", "Saldo de salário"),
+    ("aviso_indenizado", "Aviso prévio indenizado"),
+    ("aviso_desconto", "Desconto do aviso"),
+    ("decimo_terceiro", "13º proporcional"),
+    ("ferias_vencidas", "Férias vencidas"),
+    ("ferias_proporcionais", "Férias proporcionais"),
+    ("inss", "INSS"),
+    ("irrf_13", "IRRF do 13º"),
+    ("irrf", "IRRF total"),
+    ("fgts_mes", "FGTS do mês"),
+    ("multa_fgts", "Multa do FGTS"),
+    ("proventos", "Proventos"),
+    ("descontos", "Descontos"),
+    ("total_liquido", "Líquido ao trabalhador"),
+    ("custo_empregador", "Custo da escola"),
+)
+
+
+def detalhes_rescisao_para_gravar(calculo, params):
+    """Cálculo + versão das regras + parâmetros digitados (para recalcular depois sem adivinhar)."""
+    dados = dict(calculo)
+    dados["versao_regras"] = VERSAO_REGRAS_RESCISAO
+    dados["parametros"] = {
+        campo: params.get(campo) for campo in CAMPOS_PARAMETROS_RESCISAO if params.get(campo) not in (None, "")
+    }
+    return dados
+
+
+def regras_desatualizadas(detalhes):
+    return (detalhes or {}).get("versao_regras") != VERSAO_REGRAS_RESCISAO
+
+
+def parametros_da_rescisao(row, detalhes):
+    """Parâmetros usados na rescisão gravada. As antigas não guardavam: reconstrói pelo próprio cálculo."""
+    d = detalhes or {}
+    row = row or {}
+    if d.get("parametros"):
+        params = dict(d["parametros"])
+    else:
+        params = {
+            "tipo_rescisao": d.get("tipo_rescisao") or row.get("tipo"),
+            "aviso_modalidade": d.get("aviso_modalidade") or row.get("aviso_modalidade"),
+            "data_desligamento": d.get("data_desligamento") or row.get("data_desligamento"),
+            "dias_trabalhados_mes": d.get("dias_trabalhados_mes"),
+            "dias_aviso": d.get("dias_aviso_informado", d.get("dias_aviso")),
+            "ferias_vencidas_simples": d.get("ferias_vencidas_simples") or 0,
+            "ferias_vencidas_dobro": d.get("ferias_vencidas_dobro") or 0,
+            "avos_ferias_proporcionais": d.get("avos_ferias_proporcionais"),
+            "avos_13": d.get("avos_13"),
+            "saldo_fgts_depositos": d.get("saldo_fgts_depositos") or 0,
+            "outros_proventos": d.get("outros_proventos") or 0,
+            "outros_descontos": d.get("outros_descontos") or 0,
+        }
+        if (d.get("direitos") or {}).get("decimo_terceiro") and d.get("avos_13") not in (None, ""):
+            bruto = _money(
+                _num(d.get("salario_mensal")) * (int(d.get("avos_13")) / 12.0) * float(d.get("fator_proporcionais") or 1.0)
+            )
+            ja_pago = _money(bruto - _num(d.get("decimo_terceiro")))
+            if ja_pago > 0.01:
+                params["decimo_ja_pago"] = ja_pago
+    for campo in ("data_aviso", "data_pagamento"):
+        if params.get(campo) in (None, "") and row.get(campo):
+            params[campo] = _as_date(row.get(campo)).isoformat()
+    return {k: v for k, v in params.items() if v not in (None, "")}
+
+
+def contrato_da_rescisao(vinculo, detalhes, funcionario=None):
+    """Contrato da época: salário de referência gravado no cálculo e admissão do vínculo encerrado."""
+    d = detalhes or {}
+    base = dict(funcionario or {})
+    base.update({k: v for k, v in dict(vinculo or {}).items() if k in ("tipo_contrato", "salario", "valor_hora", "horas_mes")})
+    tipo = base.get("tipo_contrato") or "clt_mensalista"
+    if _num(d.get("salario_mensal")) > 0:
+        base["salario"] = _num(d.get("salario_mensal"))
+        base["tipo_contrato"] = tipo if _eh_aprendiz(tipo) else "clt_mensalista"
+    base["data_inicio_contrato"] = d.get("data_admissao") or (vinculo or {}).get("data_inicio") or base.get("data_inicio_contrato")
+    return base
+
+
+def comparar_rescisao(antigo, novo):
+    linhas = []
+    for chave, rotulo in VERBAS_COMPARACAO:
+        a, n = _num((antigo or {}).get(chave)), _num((novo or {}).get(chave))
+        linhas.append({"chave": chave, "rotulo": rotulo, "antes": a, "depois": n, "diferenca": round(n - a, 2)})
+    return linhas
+
+
+def aplicar_recalculo_rescisao(cursor, rescisao_id, calculo, params, usuario_id=None, anterior=None):
+    """Regrava a rescisão com o cálculo novo, guardando os valores anteriores no histórico do registro."""
+    detalhes = detalhes_rescisao_para_gravar(calculo, params)
+    ant = anterior or {}
+    historico = list(ant.get("recalculos") or [])
+    historico.append({
+        "em": datetime.now().isoformat(timespec="seconds"),
+        "por": usuario_id,
+        "versao_anterior": ant.get("versao_regras"),
+        "valores_anteriores": {chave: ant.get(chave) for chave, _r in VERBAS_COMPARACAO},
+    })
+    detalhes["recalculos"] = historico
+    terco = _money(_num(calculo.get("terco_ferias_vencidas")) + _num(calculo.get("terco_ferias_proporcionais")))
+    cursor.execute(
+        """
+        UPDATE rescisoes SET
+            aviso_modalidade = %s, saldo_salario = %s, aviso_indenizado = %s, aviso_desconto = %s,
+            decimo_terceiro = %s, ferias_vencidas = %s, ferias_proporcionais = %s, terco_ferias = %s,
+            fgts_mes = %s, multa_fgts = %s, inss = %s, irrf = %s, outros_proventos = %s, outros_descontos = %s,
+            total_proventos = %s, total_descontos = %s, total_liquido = %s, detalhes = %s::jsonb
+        WHERE id = %s
+        """,
+        (
+            calculo["aviso_modalidade"], calculo["saldo_salario"], calculo["aviso_indenizado"], calculo["aviso_desconto"],
+            calculo["decimo_terceiro"], calculo["ferias_vencidas"], calculo["ferias_proporcionais"], terco,
+            calculo["fgts_mes"], calculo["multa_fgts"], calculo["inss"], calculo["irrf"],
+            calculo["outros_proventos"], calculo["outros_descontos"],
+            calculo["proventos"], calculo["descontos"], calculo["total_liquido"],
+            json.dumps(detalhes, ensure_ascii=False, default=str),
+            rescisao_id,
+        ),
+    )
+
+
 TIPOS_RESCISAO = (
     ("sem_justa_causa", "Demissão sem justa causa (empregador)"),
     ("pedido_demissao", "Pedido de demissão (empregado)"),
@@ -717,7 +852,7 @@ def encerrar_vinculo_e_salvar_rescisao(cursor, funcionario_id, calculo, params, 
     terco = _money(
         _num(calculo.get("terco_ferias_vencidas")) + _num(calculo.get("terco_ferias_proporcionais"))
     )
-    detalhes = json.dumps(calculo, ensure_ascii=False, default=str)
+    detalhes = json.dumps(detalhes_rescisao_para_gravar(calculo, params), ensure_ascii=False, default=str)
     cursor.execute(
         """
         INSERT INTO rescisoes (
@@ -883,7 +1018,8 @@ def recontratar_funcionario(cursor, funcionario_id, novo_contrato):
 def listar_historico_vinculos(cursor, funcionario_id):
     cursor.execute(
         """
-        SELECT v.*, r.id AS rescisao_id, r.tipo AS rescisao_tipo, r.total_liquido, r.data_desligamento AS rescisao_data
+        SELECT v.*, r.id AS rescisao_id, r.tipo AS rescisao_tipo, r.total_liquido, r.data_desligamento AS rescisao_data,
+               r.detalhes->>'versao_regras' AS rescisao_versao_regras
         FROM funcionario_vinculos v
         LEFT JOIN rescisoes r ON r.vinculo_id = v.id
         WHERE v.funcionario_id = %s

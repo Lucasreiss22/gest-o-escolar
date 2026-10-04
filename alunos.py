@@ -212,7 +212,7 @@ def _mapa_turmas(cursor):
     cursor.execute("SELECT id, nome FROM turmas")
     mapa = {}
     for row in cursor.fetchall() or []:
-        nome = str((row["nome"] if isinstance(row, dict) else row[1]) or "").strip().lower()
+        nome = " ".join(str((row["nome"] if isinstance(row, dict) else row[1]) or "").split()).lower()
         tid = row["id"] if isinstance(row, dict) else row[0]
         if nome:
             mapa[nome] = tid
@@ -224,7 +224,7 @@ def _ids_turmas(texto, mapa):
     achados = []
     faltando = []
     for parte in re.split(r"[,;/|]+", str(texto or "")):
-        chave = parte.strip().lower()
+        chave = " ".join(parte.split()).lower()
         if not chave:
             continue
         candidatos = [chave, chave.lstrip("0") or "0", chave.zfill(2)]
@@ -759,7 +759,7 @@ def atualizar_responsavel(resp_id, dados):
 
 
 def _turma_simples(cursor, nome, mapa):
-    nome = (nome or "").strip()
+    nome = " ".join((nome or "").split())
     if not nome:
         raise ValueError("Informe a turma.")
     chave = nome.lower()

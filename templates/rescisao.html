@@ -139,6 +139,8 @@
                                     {% if v.rescisao_id %}
                                     {{ v.rescisao_tipo }} · R$ {{ v.total_liquido|moeda }}
                                     <a class="btn btn-secondary btn-sm" style="margin-left:6px;padding:4px 8px;" href="{{ url_for('rescisao_pdf', rescisao_id=v.rescisao_id) }}">PDF</a>
+                                    <a class="btn btn-sm {% if v.rescisao_versao_regras != versao_regras_rescisao %}btn-primary{% else %}btn-secondary{% endif %}" style="margin-left:6px;padding:4px 8px;" href="{{ url_for('rescisao_recalcular', rescisao_id=v.rescisao_id) }}">Recalcular com regras atuais</a>
+                                    {% if v.rescisao_versao_regras != versao_regras_rescisao %}<div class="hint" style="color:#9a3412;margin-top:4px;">Gravada com regras anteriores.</div>{% endif %}
                                     {% else %}—{% endif %}
                                 </td>
                             </tr>

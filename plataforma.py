@@ -17,6 +17,7 @@ from database import (
     obter_conexao_nova,
 )
 from email_envio import enviar_email, exigencia_email, normalizar_email, smtp_configurado
+from empresa import copia_para_plataforma, salvar_empresa
 from permissoes import PACOTES_INICIAIS, TELAS_PLANO
 from senhas import conferir_senha, gerar_hash
 
@@ -208,6 +209,7 @@ def garantir_plataforma():
                 ("nfse_cep", "VARCHAR(9)"),
                 ("telas_escola", "JSONB"),
                 ("nfse_habilitada", "BOOLEAN"),
+                ("dados_empresa", "JSONB"),
             ):
                 cursor.execute(
                     f"ALTER TABLE plataforma_escolas ADD COLUMN IF NOT EXISTS {coluna} {spec}"
@@ -1822,7 +1824,56 @@ def bootstrap_banco_escola(nome_escola, email_admin):
         conexao.close()
 
 
-def cadastrar_escola(nome, email_admin):
+def sincronizar_empresa_plataforma(escola_id, dados):
+    """Copia CNPJ/endereço para plataforma_escolas (tomador da nota da licença) e guarda o cadastro completo."""
+    garantir_plataforma()
+    copia = copia_para_plataforma(dados)
+    conexao = obter_conexao(master=True)
+    if not conexao:
+        raise RuntimeError("Sem conexão com o banco da plataforma.")
+    try:
+        with conexao.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE plataforma_escolas SET
+                    cnpj = %s, nfse_logradouro = %s, nfse_numero = %s, nfse_bairro = %s,
+                    nfse_codigo_municipio = %s, nfse_uf = %s, nfse_cep = %s, dados_empresa = %s::jsonb
+                WHERE id = %s
+                """,
+                (
+                    copia["cnpj"], copia["nfse_logradouro"], copia["nfse_numero"], copia["nfse_bairro"],
+                    copia["nfse_codigo_municipio"], copia["nfse_uf"], copia["nfse_cep"], copia["dados_empresa"],
+                    escola_id,
+                ),
+            )
+        conexao.commit()
+    finally:
+        conexao.close()
+
+
+def salvar_empresa_da_escola(escola_id, dados):
+    """Plataforma editando o cadastro: grava no espaço da escola e na cópia da plataforma."""
+    escola = buscar_escola_por_id(escola_id)
+    if not escola:
+        raise ValueError("Escola não encontrada.")
+    token = definir_banco_escola(escola["db_nome"])
+    try:
+        conexao = obter_conexao()
+        if not conexao:
+            raise RuntimeError("Não conectou no espaço da escola.")
+        try:
+            with conexao.cursor() as cursor:
+                salvar_empresa(cursor, dados)
+            conexao.commit()
+        finally:
+            conexao.close()
+    finally:
+        limpar_banco_escola(token)
+    sincronizar_empresa_plataforma(escola_id, dados)
+    return escola
+
+
+def cadastrar_escola(nome, email_admin, empresa=None):
     garantir_plataforma()
     nome = (nome or "").strip()
     email_admin = exigencia_email(email_admin, "E-mail da escola")
@@ -1847,6 +1898,14 @@ def cadastrar_escola(nome, email_admin):
     token = definir_banco_escola(db_nome)
     try:
         bootstrap_banco_escola(nome, email_admin)
+        if empresa:
+            conexao = obter_conexao()
+            try:
+                with conexao.cursor() as cursor:
+                    salvar_empresa(cursor, empresa)
+                conexao.commit()
+            finally:
+                conexao.close()
     finally:
         limpar_banco_escola(token)
     convite_token = secrets.token_urlsafe(24)
@@ -1866,9 +1925,12 @@ def cadastrar_escola(nome, email_admin):
             )
             escola = cursor.fetchone()
         conexao.commit()
-        return escola
     finally:
         conexao.close()
+    if empresa:
+        sincronizar_empresa_plataforma(escola["id"], empresa)
+        escola = buscar_escola_por_id(escola["id"]) or escola
+    return escola
 
 
 def atualizar_email_admin_escola(token, email_admin):

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Recalcular rescisão</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <style>
+        h2 { font-weight: 600; color: #2c3e50; margin: 0 0 4px; }
+        .sub { color: #64748b; font-size: 0.9rem; margin-bottom: 18px; }
+        .card-box { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #f8fafc; }
+        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        tr.mudou td { background: #fffbeb; }
+        tr.total td { font-weight: 700; }
+        .mais { color: #166534; }
+        .menos { color: #b91c1c; }
+        .alerta { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; padding: 12px 14px; border-radius: 8px; font-size: 0.88rem; margin: 12px 0; }
+        .alerta.ok { background: #f0fdf4; border-color: #86efac; color: #166534; }
+        .btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; font-size: 0.85rem; }
+        .btn-primary { background: #3498db; color: #fff; }
+        .btn-secondary { background: #7f8c8d; color: #fff; }
+        .acoes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+        .hint { font-size: 0.82rem; color: #64748b; line-height: 1.4; }
+    </style>
+</head>
+<body>
+{% set nav_active = 'rescisao' %}
+{% include '_nav.html' %}
+
+<div class="content">
+    <h2>Recalcular rescisão nº {{ rescisao_id }}</h2>
+    <p class="sub">{{ pessoa.nome_completo }} · {{ novo.rotulo_tipo }} · desligamento em {{ novo.data_desligamento }}</p>
+
+    <div class="card-box">
+        {% if desatualizada %}
+        <div class="alerta">Esta rescisão foi gravada antes das regras atuais: {{ descricao_regras }}.</div>
+        {% endif %}
+        {% if not mudou %}
+        <div class="alerta ok">Com as regras atuais os valores são os mesmos. Aplicar só marca o registro como atualizado.</div>
+        {% endif %}
+        <p class="hint">Mesmos dados digitados na época (dias trabalhados, férias vencidas, saldo do FGTS, outros proventos e descontos) e o salário de referência gravado. Só mudam as regras de cálculo. O IRRF do 13º usa a opção atual de Configurações → Folha de pagamento ({{ novo.rotulo_redutor_13 }}).</p>
+        <table>
+            <thead><tr><th>Verba</th><th class="num">Gravado</th><th class="num">Regras atuais</th><th class="num">Diferença</th></tr></thead>
+            <tbody>
+            {% for linha in comparacao %}
+                <tr class="{% if linha.diferenca|abs >= 0.01 %}mudou{% endif %} {% if linha.chave in ('total_liquido', 'custo_empregador') %}total{% endif %}">
+                    <td>{{ linha.rotulo }}</td>
+                    {% if linha.chave == 'dias_aviso' %}
+                    <td class="num">{{ linha.antes|int }}</td>
+                    <td class="num">{{ linha.depois|int }}</td>
+                    <td class="num {% if linha.diferenca > 0 %}mais{% elif linha.diferenca < 0 %}menos{% endif %}">{{ '%+d'|format(linha.diferenca|int) if linha.diferenca else '—' }}</td>
+                    {% else %}
+                    <td class="num">R$ {{ linha.antes|moeda }}</td>
+                    <td class="num">R$ {{ linha.depois|moeda }}</td>
+                    <td class="num {% if linha.diferenca > 0 %}mais{% elif linha.diferenca < 0 %}menos{% endif %}">{% if linha.diferenca %}{{ '+' if linha.diferenca > 0 else '−' }} R$ {{ linha.diferenca|abs|moeda }}{% else %}—{% endif %}</td>
+                    {% endif %}
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:12px;">Ao aplicar, a memória de cálculo e o PDF passam a mostrar os valores novos; os anteriores ficam guardados no registro e na auditoria. O custo lançado no Financeiro para esta rescisão é atualizado. Se o TRCT já foi homologado ou enviado ao eSocial, faça a retificação e acerte a diferença com o colaborador.</p>
+        <div class="acoes">
+            {% if pode_aplicar %}
+            <form method="POST" onsubmit="return confirm('Regravar a rescisão nº {{ rescisao_id }} com as regras atuais?');">
+                <button type="submit" class="btn btn-primary">Aplicar recálculo</button>
+            </form>
+            {% endif %}
+            <a class="btn btn-secondary" href="{{ url_for('pagina_rescisao', fid=pessoa.id, modo='rescindidos') }}">Voltar</a>
+        </div>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

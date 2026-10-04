@@ -144,9 +144,16 @@ from rescisao import (
     TIPOS_RESCISAO,
     AVISO_MODALIDADES,
     REDUTOR_13_OPCOES,
+    DESCRICAO_REGRAS_RESCISAO,
+    VERSAO_REGRAS_RESCISAO,
     normalizar_redutor_13,
     alerta_readmissao,
+    aplicar_recalculo_rescisao,
     calcular_rescisao,
+    comparar_rescisao,
+    contrato_da_rescisao,
+    parametros_da_rescisao,
+    regras_desatualizadas,
     dias_aviso_proporcional,
     encerrar_vinculo_e_salvar_rescisao,
     listar_historico_vinculos,
@@ -201,6 +208,8 @@ from plataforma import (
     buscar_escola_por_id,
     definir_pacote_escola,
     definir_nfse_escola,
+    salvar_empresa_da_escola,
+    sincronizar_empresa_plataforma,
     preparar_cobranca_escolas,
     salvar_regra_cobranca_escola,
     listar_pacotes,
@@ -236,6 +245,16 @@ from plataforma import (
     ativar_escola as concluir_ativacao_escola,
 )
 from senhas import gerar_hash
+from empresa import (
+    PORTES as PORTES_EMPRESA,
+    UFS as UFS_EMPRESA,
+    dados_empresa_do_form,
+    dados_empresa_tela,
+    empresa_incompleta,
+    garantir_colunas_empresa,
+    salvar_empresa,
+    tem_dados_empresa,
+)
 import calendar as calendario_lib
 from datetime import datetime, date, timedelta
 import json
@@ -329,7 +348,7 @@ def _identidade_escola_pdf():
             )
             cfg = cur.fetchone() or {}
             dados["nome"] = (cfg.get("nome_escola") or "").strip()
-            dados["cnpj"] = _formatar_cnpj(cfg.get("nfse_cnpj"))
+            dados["cnpj"] = _formatar_cnpj(cfg.get("cnpj") or cfg.get("nfse_cnpj"))
             caminho = cfg.get("logo_escola") or ""
             if caminho.startswith("midia/") and caminho.split("/")[-1].isdigit():
                 cur.execute(
@@ -4058,10 +4077,16 @@ def plataforma_escolas():
                 conexao = None
             try:
                 email_novo = request.form.get("email_admin")
+                empresa_nova = None
+                if tem_dados_empresa(request.form):
+                    empresa_nova, erros_empresa = dados_empresa_do_form(request.form)
+                    if erros_empresa:
+                        raise ValueError(" ".join(erros_empresa))
+                    empresa_nova["nome_fantasia"] = empresa_nova.get("nome_fantasia") or (request.form.get("nome") or "").strip() or None
                 if request.form.get("recadastrar") and buscar_escola_por_email(email_novo):
                     antiga = buscar_escola_por_email(email_novo)
                     excluir_escola(antiga["id"])
-                escola = cadastrar_escola(request.form.get("nome"), email_novo)
+                escola = cadastrar_escola(request.form.get("nome"), email_novo, empresa_nova)
                 if request.form.get("enviar_convite") == "1":
                     ok, erro, _link = _enviar_convite_escola(escola)
                     _avisar_envio(escola, ok, erro, acao="cadastro")
@@ -4175,6 +4200,15 @@ def plataforma_escolas():
                     )
             except Exception as e:
                 flash(f"Não foi possível aplicar o pacote: {e}", "danger")
+        elif acao == "salvar_empresa_escola":
+            try:
+                dados_emp, erros_empresa = dados_empresa_do_form(request.form)
+                if erros_empresa:
+                    raise ValueError(" ".join(erros_empresa))
+                escola = salvar_empresa_da_escola(request.form.get("escola_id", type=int), dados_emp)
+                flash(f"Dados da empresa de {escola.get('nome')} salvos.", "success")
+            except Exception as e:
+                flash(f"Não foi possível salvar os dados da empresa: {e}", "danger")
         elif acao == "definir_nfse_escola":
             try:
                 escola = definir_nfse_escola(request.form.get("escola_id"), request.form.get("nfse_escola"))
@@ -4357,7 +4391,18 @@ def plataforma_escolas():
                     smtp = cursor.fetchone() or {}
             finally:
                 conexao.close()
-        escolas = listar_escolas() or []
+        escolas = [dict(item) for item in (listar_escolas() or [])]
+        for esc in escolas:
+            bruto = esc.get("dados_empresa") or {}
+            if isinstance(bruto, str):
+                try:
+                    bruto = json.loads(bruto)
+                except ValueError:
+                    bruto = {}
+            if not bruto.get("cnpj") and esc.get("cnpj"):
+                bruto["cnpj"] = esc.get("cnpj")
+            esc["emp"] = dados_empresa_tela(bruto)
+            esc["empresa_faltando"] = empresa_incompleta(bruto)
     except Exception as e:
         flash(f"Não foi possível carregar as escolas: {e}", "danger")
     try:
@@ -4472,6 +4517,7 @@ def plataforma_escolas():
     return render_template(
         "plataforma_escolas.html",
         escolas=escolas,
+        portes_empresa=PORTES_EMPRESA,
         pacotes=pacotes,
         telas_plano=TELAS_PLANO,
         aba=aba,
@@ -5218,6 +5264,7 @@ def pagina_rescisao():
         tipos_rescisao=TIPOS_RESCISAO,
         aviso_modalidades=AVISO_MODALIDADES,
         rotulo_contrato=rotulo_contrato,
+        versao_regras_rescisao=VERSAO_REGRAS_RESCISAO,
     )
 
 
@@ -5402,7 +5449,13 @@ def rescisao_pdf(rescisao_id):
                 "cpf": row.get("cpf"),
                 "cargo": row.get("cargo"),
             }
-            buffer = pdf_rescisao(escola, pessoa, detalhes or {}, rescisao_id=rescisao_id)
+            aviso_regras = None
+            if regras_desatualizadas(detalhes):
+                aviso_regras = (
+                    f"Atenção: rescisão calculada antes das regras de {datetime.strptime(VERSAO_REGRAS_RESCISAO, '%Y-%m-%d').strftime('%d/%m/%Y')} "
+                    f"({DESCRICAO_REGRAS_RESCISAO}). Use \"Recalcular com regras atuais\" na tela de rescisão antes de reemitir."
+                )
+            buffer = pdf_rescisao(escola, pessoa, detalhes or {}, rescisao_id=rescisao_id, aviso_regras=aviso_regras)
     finally:
         conexao.close()
     return send_file(
@@ -5410,6 +5463,105 @@ def rescisao_pdf(rescisao_id):
         mimetype="application/pdf",
         as_attachment=True,
         download_name=f"rescisao_{rescisao_id}.pdf",
+    )
+
+
+@app.route("/rescisao/<int:rescisao_id>/recalcular", methods=["GET", "POST"])
+def rescisao_recalcular(rescisao_id):
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    papel = session.get("usuario_papel")
+    perms = session.get("permissoes")
+    if not pode_acao(papel, "rescisao", "ver", perms) and not pode_acao(papel, "rescisao", "alterar", perms):
+        flash("Sem permissão para recalcular rescisão.", "danger")
+        return redirect(url_for("pagina_rescisao", modo="rescindidos"))
+    garantir_tabelas_folha()
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("pagina_rescisao", modo="rescindidos"))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM rescisoes WHERE id = %s", (rescisao_id,))
+            row = cursor.fetchone()
+            if not row:
+                flash("Rescisão não encontrada.", "danger")
+                return redirect(url_for("pagina_rescisao", modo="rescindidos"))
+            fid = row["funcionario_id"]
+            detalhes = row.get("detalhes") or {}
+            if isinstance(detalhes, str):
+                try:
+                    detalhes = json.loads(detalhes)
+                except ValueError:
+                    detalhes = {}
+            cursor.execute("SELECT * FROM funcionario_vinculos WHERE id = %s", (row["vinculo_id"],))
+            vinculo = cursor.fetchone() or {}
+            cursor.execute("SELECT * FROM funcionarios WHERE id = %s", (fid,))
+            pessoa = cursor.fetchone() or {}
+            cursor.execute("SELECT * FROM configuracoes WHERE id = 1")
+            cfg = cursor.fetchone() or {}
+            params = parametros_da_rescisao(row, detalhes)
+            params["regime_tributario"] = detalhes.get("regime_tributario") or cfg.get("regime_tributario") or "simples_nacional"
+            params["irrf_13_redutor"] = cfg.get("irrf_13_redutor")
+            novo = calcular_rescisao(contrato_da_rescisao(vinculo, detalhes, pessoa), params)
+            comparacao = comparar_rescisao(detalhes, novo)
+            mudou = any(abs(linha["diferenca"]) >= 0.01 for linha in comparacao)
+
+            if request.method == "POST":
+                if not pode_acao(papel, "rescisao", "alterar", perms):
+                    flash("Sem permissão para alterar rescisão.", "danger")
+                    return redirect(url_for("rescisao_recalcular", rescisao_id=rescisao_id))
+                aplicar_recalculo_rescisao(
+                    cursor, rescisao_id, novo, params, usuario_id=session.get("usuario_id"), anterior=detalhes
+                )
+                custo_novo = float(novo.get("custo_empregador") or 0)
+                cursor.execute(
+                    """
+                    UPDATE financeiro_custos
+                    SET valor = %s, valor_unitario = %s, valor_bruto = %s
+                    WHERE categoria = 'rescisao' AND descricao LIKE %s
+                    """,
+                    (custo_novo, custo_novo, custo_novo, f"Rescisão #{rescisao_id} —%"),
+                )
+                custo_ajustado = cursor.rowcount
+                conexao.commit()
+                try:
+                    registrar_auditoria(
+                        session.get("escola_id"),
+                        session.get("escola_nome") or session.get("escola_slug") or "",
+                        session.get("usuario_nome") or "",
+                        session.get("usuario_email") or "",
+                        "alteracao",
+                        "rescisao",
+                        f"Recálculo da rescisão #{rescisao_id} de {pessoa.get('nome_completo')}",
+                        f"líquido R$ {detalhes.get('total_liquido')} → R$ {novo.get('total_liquido')}; "
+                        f"custo R$ {detalhes.get('custo_empregador')} → R$ {custo_novo}",
+                        usuario_login=session.get("usuario_email"),
+                    )
+                except Exception:
+                    pass
+                msg = "Rescisão recalculada com as regras atuais."
+                msg += " Custo no Financeiro atualizado." if custo_ajustado else " Nenhum custo no Financeiro para ajustar."
+                flash(msg + " Se o TRCT já foi homologado/enviado ao eSocial, faça a retificação.", "success")
+                return redirect(url_for("pagina_rescisao", fid=fid, modo="rescindidos"))
+    except Exception as e:
+        conexao.rollback()
+        flash(f"Não foi possível recalcular a rescisão: {e}", "danger")
+        return redirect(url_for("pagina_rescisao", modo="rescindidos"))
+    finally:
+        conexao.close()
+
+    return render_template(
+        "rescisao_recalculo.html",
+        rescisao_id=rescisao_id,
+        pessoa=pessoa,
+        antigo=detalhes,
+        novo=novo,
+        comparacao=comparacao,
+        mudou=mudou,
+        desatualizada=regras_desatualizadas(detalhes),
+        descricao_regras=DESCRICAO_REGRAS_RESCISAO,
+        pode_aplicar=pode_acao(papel, "rescisao", "alterar", perms),
     )
 
 
@@ -11531,10 +11683,16 @@ def pagina_pedagogico():
             conexao.close()
 
     materia_editar = next((d for d in disciplinas if d.get("id") == materia_editar_id), None) if materia_editar_id else None
+    grupos_turma = {}
+    for t in turmas or []:
+        chave = (" ".join(str(t.get("nome") or "").split()).lower(), t.get("ano_letivo"))
+        grupos_turma.setdefault(chave, []).append(t)
+    turmas_duplicadas = [grupo for grupo in grupos_turma.values() if len(grupo) > 1]
 
     return render_template(
         "pedagogico.html",
         turmas=turmas,
+        turmas_duplicadas=turmas_duplicadas,
         professores=professores,
         alunos_cadastrados=alunos_cadastrados,
         alunos_por_turma=alunos_por_turma,
@@ -15535,6 +15693,34 @@ def pagina_configuracoes():
                     conexao.close()
             return redirect(url_for("pagina_configuracoes") + "#folha-pagamento")
 
+        if acao == "salvar_empresa":
+            dados_emp, erros_empresa = dados_empresa_do_form(request.form)
+            if erros_empresa:
+                if conexao:
+                    conexao.close()
+                for erro in erros_empresa:
+                    flash(erro, "danger")
+                return redirect(url_for("pagina_configuracoes") + "#dados-empresa")
+            if conexao:
+                try:
+                    with conexao.cursor() as cursor:
+                        salvar_empresa(cursor, dados_emp)
+                    conexao.commit()
+                    _invalidar_identidade_pdf()
+                    flash("Dados da empresa salvos.", "success")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"Não foi possível salvar os dados da empresa: {e}", "danger")
+                    dados_emp = None
+                finally:
+                    conexao.close()
+                if dados_emp and session.get("escola_id"):
+                    try:
+                        sincronizar_empresa_plataforma(session["escola_id"], dados_emp)
+                    except Exception as e:
+                        _log(f"[empresa] cópia para a plataforma falhou: {e}")
+            return redirect(url_for("pagina_configuracoes") + "#dados-empresa")
+
         return redirect(url_for("pagina_configuracoes"))
 
     config = {}
@@ -15551,6 +15737,7 @@ def pagina_configuracoes():
                     cursor.execute(
                         "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS mensagem_prova TEXT"
                     )
+                    garantir_colunas_empresa(cursor)
                     cursor.execute("SELECT * FROM configuracoes WHERE id = 1;")
                     config = preparar_config_tela(cursor.fetchone() or {})
                 except Exception:
@@ -15596,6 +15783,10 @@ def pagina_configuracoes():
         config=config,
         opcoes_redutor_13=REDUTOR_13_OPCOES,
         redutor_13_atual=normalizar_redutor_13(config.get("irrf_13_redutor")),
+        emp=dados_empresa_tela(config),
+        empresa_faltando=empresa_incompleta(config),
+        portes_empresa=PORTES_EMPRESA,
+        ufs_empresa=UFS_EMPRESA,
         equipe_acesso=equipe_acesso,
         acesso=acesso,
         areas_acesso=[

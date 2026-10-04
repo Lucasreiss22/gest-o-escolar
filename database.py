@@ -666,6 +666,40 @@ def _ajustar_unicidade_frequencia(cursor):
     )
 
 
+TURMA_NOME_NORMALIZADO = "LOWER(REGEXP_REPLACE(TRIM(nome), '\\s+', ' ', 'g'))"
+
+
+def turmas_repetidas(cursor):
+    """Grupos de turmas com o mesmo nome (sem diferenciar maiúsculas/espaços) no mesmo ano."""
+    cursor.execute(
+        f"""
+        SELECT MIN(TRIM(nome)) AS nome, ano_letivo, COUNT(*) AS total, ARRAY_AGG(id ORDER BY id) AS ids
+        FROM turmas
+        GROUP BY {TURMA_NOME_NORMALIZADO}, ano_letivo
+        HAVING COUNT(*) > 1
+        ORDER BY ano_letivo DESC, 1
+        """
+    )
+    return cursor.fetchall() or []
+
+
+def _garantir_turma_unica_idx(cursor):
+    """Índice único (nome normalizado, ano). Se já houver repetidas, espera a escola unir ou renomear."""
+    cursor.execute("SAVEPOINT sp_turmas_nome_idx")
+    try:
+        repetidas = turmas_repetidas(cursor)
+        if repetidas:
+            _log_db(f"Turmas repetidas no mesmo ano ({len(repetidas)} grupo(s)): índice único aguardando correção")
+        else:
+            cursor.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS turmas_nome_ano_uidx ON turmas ({TURMA_NOME_NORMALIZADO}, ano_letivo)"
+            )
+        cursor.execute("RELEASE SAVEPOINT sp_turmas_nome_idx")
+    except Exception as e:
+        cursor.execute("ROLLBACK TO SAVEPOINT sp_turmas_nome_idx")
+        _log_db(f"Índice único de turmas não criado: {e}")
+
+
 def garantir_tabelas_pedagogicas():
     """Cria tabelas de frequência, boletins anexos e vínculos de disciplina."""
     schema = _nome_banco_atual(master=False)
@@ -880,6 +914,7 @@ def garantir_tabelas_pedagogicas():
                 cursor.execute("RELEASE SAVEPOINT sp_provas_notas_idx")
             except Exception:
                 cursor.execute("ROLLBACK TO SAVEPOINT sp_provas_notas_idx")
+            _garantir_turma_unica_idx(cursor)
             cursor.execute(
                 """
                 UPDATE disciplinas
