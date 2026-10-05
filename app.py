@@ -3632,6 +3632,25 @@ def _bloqueio_parcelas(cursor, operacao, ids=(), depois=None, hoje=None):
     return mensagem_competencia_apurada(regime, travadas) if travadas else None
 
 
+MSG_PGDAS_DA_MATRIZ = "Na rede, o PGDAS-D é da matriz: faça isso na matriz."
+_ACOES_PGDAS_DA_MATRIZ = {"simples_carregar_sistema", "simples_carregar_folha", "simples_importar"}
+
+
+def _unidade_eh_filial(cursor=None):
+    if cursor is not None:
+        return _contexto_tributario(cursor)["papel"] == "filial"
+    conexao = obter_conexao()
+    if not conexao:
+        return False
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cur:
+            return _contexto_tributario(cur)["papel"] == "filial"
+    except Exception:
+        return False
+    finally:
+        conexao.close()
+
+
 def _competencias_congeladas_da_receita(cursor, a_partir):
     """Competências a partir de `a_partir` em que mudar o valor de parcela aberta altera receita já apurada.
     Só na competência (no caixa, parcela aberta não é receita); antes do mês atual o limite já cobre."""
@@ -12683,6 +12702,8 @@ def pagina_financeiro():
         if conexao:
             try:
                 with conexao.cursor() as cursor:
+                    if acao in _ACOES_PGDAS_DA_MATRIZ and _unidade_eh_filial(cursor):
+                        raise ValueError(MSG_PGDAS_DA_MATRIZ)
                     if acao == "cadastrar_aluno_simples":
                         aba_redir = "receitas"
                         if not cadastro_simples:
@@ -13811,6 +13832,9 @@ def enviar_memoria_simples():
     for bruto in (escolhido, manual):
         if email_valido(bruto) and bruto.lower() not in {item.lower() for item in destinos}:
             destinos.append(bruto)
+    if _unidade_eh_filial():
+        flash(MSG_PGDAS_DA_MATRIZ, "danger")
+        return redirect(destino)
     if not destinos:
         flash("Escolha um e-mail cadastrado ou digite um e-mail válido.", "danger")
         return redirect(destino)
