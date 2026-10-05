@@ -5,11 +5,34 @@ from dre import (
     LINHAS_DRE,
     calcular_dre,
     consolidar_dre,
+    juntar_avisos,
     linhas_para_tela,
 )
 from relatorios_pdf import pdf_dre
 from tributos_rede import apurar_simples_empresa
 from unidades import unidades_da_rede
+
+
+class JuntarAvisosTest(unittest.TestCase):
+    def test_b9_aviso_da_unidade_leva_o_nome_e_o_da_empresa_aparece_uma_vez(self):
+        divergente = "Configuração desta unidade diferente da matriz (Regime tributário)."
+        empresa = "Lucro Real exige regime de competência."
+        colunas = [
+            {"nome": "Semente", "info": {"avisos": [empresa]}},
+            {"nome": "Semente 2 Filial", "info": {"avisos": [empresa, divergente]}},
+        ]
+        self.assertEqual(juntar_avisos(colunas), [empresa, f"Semente 2 Filial: {divergente}"])
+
+    def test_aviso_igual_so_em_parte_das_unidades_nao_e_da_empresa(self):
+        colunas = [
+            {"nome": "A", "info": {"avisos": ["x"]}},
+            {"nome": "B", "info": {"avisos": ["x"]}},
+            {"nome": "C", "info": {"avisos": []}},
+        ]
+        self.assertEqual(juntar_avisos(colunas), ["A: x", "B: x"])
+
+    def test_individual_sem_prefixo(self):
+        self.assertEqual(juntar_avisos([{"nome": "A", "info": {"avisos": ["x", "x"]}}]), ["x"])
 
 
 class CalcularDreTest(unittest.TestCase):

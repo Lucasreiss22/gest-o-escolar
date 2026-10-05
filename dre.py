@@ -57,3 +57,23 @@ def linhas_para_tela(colunas, consolidado=None):
             "consolidado": _n((consolidado or {}).get(campo)) if consolidado else None,
         })
     return linhas
+
+
+def juntar_avisos(colunas):
+    """Avisos da DRE. O que aparece igual em todas as unidades é da empresa (uma vez, sem prefixo);
+    o resto é da unidade e leva o nome dela."""
+    listas = [
+        (c.get("nome"), list(dict.fromkeys((c.get("info") or {}).get("avisos") or [])))
+        for c in colunas if not c.get("erro")
+    ]
+    if len(listas) <= 1:
+        return [aviso for _nome, lista in listas for aviso in lista]
+    comuns = set(listas[0][1]).intersection(*(set(lista) for _nome, lista in listas[1:]))
+    saida = []
+    for nome, lista in listas:
+        for aviso in lista:
+            if aviso not in comuns:
+                saida.append(f"{nome}: {aviso}")
+            elif aviso not in saida:
+                saida.append(aviso)
+    return saida

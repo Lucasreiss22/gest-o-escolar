@@ -76,6 +76,22 @@ class LucroRealTest(unittest.TestCase):
         self.assertEqual(regime_apuracao_efetivo("lucro_presumido", None), ("competencia", None))
 
 
+class ReversaoDeProvisaoTest(unittest.TestCase):
+    def test_b6_mes_negativo_e_reversao_e_o_trimestre_fecha(self):
+        prov = provisao_lucro_real([90_000, -60_000])
+        jan, fev = prov["meses"]
+        self.assertFalse(jan["reversao"])
+        self.assertTrue(fev["reversao"])
+        self.assertLess(fev["irpj"], 0)
+        trimestre = apurar_lucro_real_periodo(30_000, meses_periodo=2)
+        for chave in ("irpj", "adicional", "csll"):
+            self.assertAlmostEqual(jan[chave] + fev[chave], trimestre[chave], places=2)
+
+    def test_balancete_nunca_marca_reversao(self):
+        prov = provisao_lucro_real([90_000, -60_000], modo="balancete")
+        self.assertFalse(any(m["reversao"] for m in prov["meses"]))
+
+
 class SaldoEncadeadoTest(unittest.TestCase):
     def test_l1_prejuizo_do_3o_tri_compensado_no_4o(self):
         cadeia = encadear_saldos({}, [

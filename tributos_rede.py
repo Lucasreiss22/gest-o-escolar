@@ -476,11 +476,12 @@ def provisao_lucro_real(lairs_mes, ajustes=None, prejuizo_acumulado=0, base_nega
             pago[chave] += valor
         mes["lair"] = arred(lair)
         mes["total"] = arred(sum(_d(mes[k]) for k in ("irpj", "adicional", "csll")))
+        mes["reversao"] = mes["total"] < 0
         meses.append(mes)
     if acumulado is None:
         acumulado = apurar_lucro_real_periodo(0, prejuizo_acumulado=prejuizo_acumulado,
                                               base_negativa_acumulada=base_negativa_acumulada, meses_periodo=1)
-    return {"meses": meses, "mes": meses[-1] if meses else {"irpj": 0.0, "adicional": 0.0, "csll": 0.0, "total": 0.0, "lair": 0.0},
+    return {"meses": meses, "mes": meses[-1] if meses else {"irpj": 0.0, "adicional": 0.0, "csll": 0.0, "total": 0.0, "lair": 0.0, "reversao": False},
             "periodo": acumulado}
 
 

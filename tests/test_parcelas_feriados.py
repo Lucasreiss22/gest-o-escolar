@@ -6,7 +6,14 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from feriados import feriados_nacionais, feriados_nacionais_mes, pascoa
-from parcelas import TravaCompetencias, limite_apurado, plano_parcelas, texto_puladas, travas_da_escola
+from parcelas import (
+    TravaCompetencias,
+    limite_apurado,
+    plano_parcelas,
+    texto_puladas,
+    travas_da_escola,
+    vencimento_trimestre,
+)
 
 HOJE = date(2026, 10, 4)
 
@@ -38,6 +45,24 @@ class TestFeriadosNacionais(unittest.TestCase):
     def test_mes(self):
         self.assertEqual(list(feriados_nacionais_mes(2026, 9)), [date(2026, 9, 7)])
         self.assertEqual(feriados_nacionais_mes(2026, 8), {})
+
+
+class TestVencimentoDarf(unittest.TestCase):
+    def test_b12_quarto_trimestre_2026_continua_29_01_2027(self):
+        self.assertEqual(vencimento_trimestre("2026-11"), date(2027, 1, 29))
+
+    def test_b12_feriado_no_ultimo_dia_util_recua(self):
+        self.assertEqual(vencimento_trimestre("2026-11", feriados={date(2027, 1, 29)}), date(2027, 1, 28))
+        self.assertEqual(vencimento_trimestre("2026-11", feriados={date(2027, 1, 29), date(2027, 1, 28)}), date(2027, 1, 27))
+
+    def test_b12_usa_os_feriados_nacionais_sem_ponto_facultativo(self):
+        from unittest import mock
+
+        import parcelas
+
+        with mock.patch.object(parcelas, "feriados_nacionais", return_value={date(2026, 7, 31): "teste"}) as fn:
+            self.assertEqual(vencimento_trimestre("2026-05"), date(2026, 7, 30))
+        fn.assert_called_once_with(2026)
 
 
 class TestPlanoParcelas(unittest.TestCase):

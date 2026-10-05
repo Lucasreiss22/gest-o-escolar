@@ -10,6 +10,7 @@ import calendar
 import re
 from datetime import date, datetime, timedelta
 
+from feriados import feriados_nacionais
 from simples_nacional import _ORIGENS_CONGELADAS
 
 DIA_LIMITE_PGDAS = 20
@@ -33,19 +34,23 @@ def _comp_menos(hoje, meses):
     return f"{total // 12:04d}-{total % 12 + 1:02d}"
 
 
-def _ultimo_dia_util(ano, mes):
+def _ultimo_dia_util(ano, mes, feriados=None):
+    """Último dia do mês que não é sábado, domingo nem feriado nacional (Carnaval e Corpus Christi são
+    ponto facultativo e não contam). `feriados`: conjunto de datas para testes."""
+    if feriados is None:
+        feriados = set(feriados_nacionais(ano))
     dia = date(ano, mes, calendar.monthrange(ano, mes)[1])
-    while dia.weekday() >= 5:
+    while dia.weekday() >= 5 or dia in feriados:
         dia -= timedelta(days=1)
     return dia
 
 
-def vencimento_trimestre(comp):
+def vencimento_trimestre(comp, feriados=None):
     """DARF trimestral de IRPJ/CSLL da competência: último dia útil do mês seguinte ao fim do trimestre."""
     ano, mes = int(comp[:4]), int(comp[5:7])
     fim = ((mes - 1) // 3 + 1) * 3
     ano_v, mes_v = (ano + 1, 1) if fim == 12 else (ano, fim + 1)
-    return _ultimo_dia_util(ano_v, mes_v)
+    return _ultimo_dia_util(ano_v, mes_v, feriados)
 
 
 def limite_apurado(hoje, regime_tributario):
