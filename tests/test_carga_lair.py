@@ -7,6 +7,7 @@ from carga_tributos import (
     folha_por_competencia,
     lair_do_mes,
     meses_do_custo,
+    receita_prevista_resto_trimestre,
     resumir_custos,
 )
 
@@ -86,6 +87,48 @@ class _CursorFolhaUnidade:
 
     def fetchone(self):
         return self._resultado[0] if self._resultado else None
+
+
+class _CursorMensalidades:
+    def __init__(self, linhas):
+        self.description = None
+        self.linhas = linhas
+        self.params = None
+        self._resultado = []
+
+    def execute(self, sql, params=None):
+        if "financeiro_mensalidades" in sql:
+            self.params = params
+            self._resultado = list(self.linhas)
+        else:
+            self._resultado = []
+
+    def fetchall(self):
+        return list(self._resultado)
+
+    def fetchone(self):
+        return self._resultado[0] if self._resultado else None
+
+
+class ReceitaPrevistaDoTrimestreTest(unittest.TestCase):
+    """B7: parcelas já geradas nos meses seguintes do trimestre, sem consulta extra."""
+
+    def test_outubro_le_novembro_e_dezembro(self):
+        cur = _CursorMensalidades([
+            {"tipo": "v", "comp": "2026-10", "receita": 100, "juros": 0, "multa": 0, "qtd": 0},
+            {"tipo": "vf", "comp": "2026-11", "receita": 120, "juros": 0, "multa": 0, "qtd": 0},
+            {"tipo": "vf", "comp": "2026-12", "receita": 130, "juros": 0, "multa": 0, "qtd": 0},
+        ])
+        dados = carregar_unidade(cur, None, "2026-10")
+        self.assertEqual(cur.params[-2:], ("2026-11-01", "2027-01-01"))
+        self.assertEqual(dados["venc"], {"2026-10": 100.0})
+        self.assertEqual(receita_prevista_resto_trimestre(dados), 250.0)
+
+    def test_ultimo_mes_do_trimestre_nao_tem_previsto(self):
+        cur = _CursorMensalidades([])
+        dados = carregar_unidade(cur, None, "2026-12")
+        self.assertEqual(cur.params[-2:], ("2027-01-01", "2027-01-01"))
+        self.assertEqual(receita_prevista_resto_trimestre(dados), 0)
 
 
 class FolhaFechadaNoFs12Test(unittest.TestCase):

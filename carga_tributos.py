@@ -150,10 +150,12 @@ def carregar_unidade(cursor, schema, mes_apuracao, meses_antes=12):
     """
     inicio = competencia_add(mes_apuracao, -meses_antes)
     fim_exclusivo = competencia_add(mes_apuracao, 1)
+    mes_num = int(mes_apuracao[5:7])
+    fim_trimestre_exclusivo = competencia_add(mes_apuracao, ((mes_num - 1) // 3 + 1) * 3 - mes_num + 1)
     t_mens = tabela(schema, "financeiro_mensalidades")
     dados = {
         "schema": schema, "mes": mes_apuracao, "inicio": inicio,
-        "venc": {}, "pago": {}, "juros": {}, "multa": {}, "qtd_mora": {},
+        "venc": {}, "pago": {}, "juros": {}, "multa": {}, "qtd_mora": {}, "venc_futuro": {},
         "primeira_venc": None, "primeira_pago": None, "gravados": {}, "folha": {},
     }
 
@@ -182,8 +184,15 @@ def carregar_unidade(cursor, schema, mes_apuracao, meses_antes=12):
             SELECT 'ip', MIN(TO_CHAR(data_pagamento, 'YYYY-MM')), 0, 0, 0, 0
             FROM {t_mens}
             WHERE LOWER(COALESCE(status, '')) = 'pago' AND data_pagamento IS NOT NULL
+            UNION ALL
+            SELECT 'vf', TO_CHAR(data_vencimento, 'YYYY-MM'), SUM(valor::numeric), 0, 0, 0
+            FROM {t_mens}
+            WHERE data_vencimento >= %s::date AND data_vencimento < %s::date
+              AND LOWER(COALESCE(status, '')) IN ('pago', 'pendente', 'atrasado')
+            GROUP BY 2
             """,
-            (f"{inicio}-01", f"{fim_exclusivo}-01", f"{inicio}-01", f"{fim_exclusivo}-01"),
+            (f"{inicio}-01", f"{fim_exclusivo}-01", f"{inicio}-01", f"{fim_exclusivo}-01",
+             f"{fim_exclusivo}-01", f"{fim_trimestre_exclusivo}-01"),
         )
         return _linhas(cursor)
 
@@ -200,6 +209,8 @@ def carregar_unidade(cursor, schema, mes_apuracao, meses_antes=12):
             dados["primeira_venc"] = comp
         elif tipo == "ip":
             dados["primeira_pago"] = comp
+        elif tipo == "vf" and comp:
+            dados["venc_futuro"][comp] = _f(linha["receita"])
 
     def _gravados():
         cursor.execute(
@@ -697,6 +708,11 @@ def mora_do_mes(dados, comp):
     juros = dados["juros"].get(comp, 0.0)
     multa = dados["multa"].get(comp, 0.0)
     return {"juros": juros, "multa": multa, "total": round(juros + multa, 2), "qtd": dados["qtd_mora"].get(comp, 0)}
+
+
+def receita_prevista_resto_trimestre(dados):
+    """Parcelas já geradas que vencem nos meses seguintes do trimestre (depois do mês apurado)."""
+    return round(sum((dados.get("venc_futuro") or {}).values()), 2)
 
 
 def receita_regime(dados, comp, regime):
