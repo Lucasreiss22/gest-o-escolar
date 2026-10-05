@@ -262,7 +262,7 @@ from empresa import (
     tem_dados_empresa,
 )
 from unidades import TIPOS_UNIDADE, resumo_unidade, unidades_da_rede
-from dre import calcular_dre, consolidar_dre, linhas_para_tela
+from dre import calcular_dre, consolidar_dre, juntar_avisos, linhas_para_tela
 from parcelas import (
     REGIMES_TRIMESTRAIS,
     competencias_afetadas,
@@ -301,6 +301,7 @@ from carga_tributos import (
     ler_escolas_plataforma,
     mora_do_mes,
     quadro_da_unidade,
+    receita_prevista_resto_trimestre,
     receita_regime,
     receitas_do_ano,
     saldo_prejuizo_anterior,
@@ -3860,8 +3861,23 @@ def _presumido_empresa(cursor, mes_filtro, ctx):
     iss_pct = float(ef.get("iss_aliquota_pct") or 0)
     iss_u = arred(receita_u * iss_pct / 100)
     tributos_u = arred(sum(parte.values()) + iss_u)
+    tributos_empresa = None
+    if len(ordem) > 1:
+        nomes_schema = {u["id"]: u.get("db_nome") or "" for u in ctx["rede"]}
+        tributos_empresa = 0.0
+        for uid in ordem:
+            if uid == atual_id:
+                tributos_empresa += tributos_u
+                continue
+            cfg_u = _cfg_da_unidade(cursor, ctx, nomes_schema[uid])
+            pct_u = cfg_u.get("iss_aliquota_pct")
+            pct_u = PADROES_TRIBUTARIOS["iss_aliquota_pct"] if pct_u is None else float(pct_u)
+            receita_mes_u = por_unidade[uid].get(mes_filtro, {}).get("receita", 0.0)
+            tributos_empresa += arred(sum((partes.get(uid) or {}).values()) + arred(receita_mes_u * pct_u / 100))
+        tributos_empresa = arred(tributos_empresa)
     p_irpj = empresa["presuncao_irpj_pct"] / 100
     tri = empresa["trimestre"]
+    futuro = round(sum(receita_prevista_resto_trimestre(dados[u]) for u in ordem), 2)
     nomes = {u["id"]: u for u in ctx["rede"]}
     return {
         "receita_mes": receita_u,
@@ -3878,9 +3894,11 @@ def _presumido_empresa(cursor, mes_filtro, ctx):
         "irpj_adicional": parte["adicional"],
         "aplica_adicional_irpj": tri["adicional"] > 0,
         "receita_trimestre": tri["receita"],
+        "receita_trimestre_prevista": arred(tri["receita"] + futuro) if futuro > 0 else None,
         "base_presumida_trimestre": tri["base_irpj"],
         "irpj_adicional_trimestre": tri["adicional"],
         "tributos": tributos_u,
+        "tributos_empresa": tributos_empresa,
         "deducoes": arred(parte["pis"] + parte["cofins"] + iss_u),
         "irpj_csll": arred(parte["irpj"] + parte["adicional"] + parte["csll"]),
         "empresa": empresa,
@@ -4180,7 +4198,19 @@ def _lucro_real_unidade(cursor, mes_filtro, ctx, dados, real_rede):
         detalhe = None
         avisos.append("IRPJ e CSLL do Lucro Real não foram calculados nesta tela; veja o Financeiro ou a DRE.")
     irpj_total = arred(irpj.get("irpj", 0) + irpj.get("adicional", 0) + irpj.get("csll", 0))
+    tributos_empresa = None
+    if real_rede and len(real_rede.get("unidades") or []) > 1:
+        tributos_empresa = 0.0
+        for u in real_rede["unidades"]:
+            if u["id"] == atual_id:
+                tributos_empresa += pis_cofins["total"] + iss
+            else:
+                mes_u = (real_rede.get("meses_unidades", {}).get(u["id"]) or {}).get(mes_filtro) or {}
+                tributos_empresa += float(mes_u.get("pis_cofins") or 0) + float(mes_u.get("iss") or 0)
+            tributos_empresa += float((real_rede["rateio"].get(u["id"]) or {}).get("total") or 0)
+        tributos_empresa = arred(tributos_empresa)
     return {
+        "tributos_empresa": tributos_empresa,
         "pis_cofins": pis_cofins,
         "iss": iss,
         "iss_pct": float(ef.get("iss_aliquota_pct") or 0),
@@ -4217,6 +4247,7 @@ def _tributos_do_mes(cursor, mes_filtro, real_rede=None, colaboradores=False):
         "simples": None,
         "presumido": None,
         "real": None,
+        "tributos_empresa": None,
         "colaboradores": [],
         "avisos": [aviso_real] if aviso_real else [],
         "ctx": ctx,
@@ -4230,15 +4261,18 @@ def _tributos_do_mes(cursor, mes_filtro, real_rede=None, colaboradores=False):
     if regime == "simples_nacional":
         ap, colabs = calcular_apuracao_simples(cursor, mes_filtro, colaboradores=colaboradores)
         saida.update(simples=ap, colaboradores=colabs, receita=ap["receita_unidade"],
-                     deducoes=ap["das_unidade"], tributos=ap["das_unidade"])
+                     deducoes=ap["das_unidade"], tributos=ap["das_unidade"],
+                     tributos_empresa=ap.get("das_total") if ap.get("rede") else None)
         saida["avisos"] += ap.get("avisos") or []
     elif regime == "lucro_presumido":
         p = _presumido_empresa(cursor, mes_filtro, ctx)
-        saida.update(presumido=p, deducoes=p["deducoes"], irpj_csll=p["irpj_csll"], tributos=p["tributos"])
+        saida.update(presumido=p, deducoes=p["deducoes"], irpj_csll=p["irpj_csll"], tributos=p["tributos"],
+                     tributos_empresa=p.get("tributos_empresa"))
         saida["avisos"] += p.get("avisos") or []
     elif regime == "lucro_real":
         r = _lucro_real_unidade(cursor, mes_filtro, ctx, dados, real_rede)
-        saida.update(real=r, deducoes=r["deducoes"], irpj_csll=r["irpj_csll"], tributos=r["tributos"])
+        saida.update(real=r, deducoes=r["deducoes"], irpj_csll=r["irpj_csll"], tributos=r["tributos"],
+                     tributos_empresa=r.get("tributos_empresa"))
         saida["avisos"] += r.get("avisos") or []
     else:
         saida["avisos"].append("Regime tributário não informado em Configurações: nenhum tributo foi calculado.")
@@ -13739,6 +13773,7 @@ def pagina_financeiro():
                 if apuracao_simples:
                     quadro_simples = apuracao_simples.get("quadro")
                 totais["tributos"] = tributos_mes["tributos"]
+                totais["tributos_empresa"] = tributos_mes.get("tributos_empresa")
                 totais["receita_bruta_mes"] = tributos_mes["receita"]
                 totais["liquido"] = totais["recebido"] + totais["juros_multa_mes"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
                 avisos_tributos += tributos_mes["avisos"]
@@ -14395,6 +14430,12 @@ def _notas_tributos_dre(colunas, consolidado):
             "exclusões e compensação de prejuízo limitada a 30%; rateados pelo resultado positivo de cada unidade. "
             f"PIS/COFINS {'não cumulativo' if (r.get('pis_cofins') or {}).get('modo') == 'nao_cumulativo' else 'cumulativo (ensino, Lei 10.833/2003, art. 10, XIV)'}."
         )
+        mes_prov = (detalhe.get("provisao") or {}).get("mes") or {}
+        if mes_prov.get("reversao"):
+            notas.append(
+                f"Reversão de provisão (o lucro do trimestre caiu): −{br_money(-float(mes_prov.get('total') or 0))}. "
+                "As provisões do trimestre somadas continuam iguais à apuração do trimestre."
+            )
         if detalhe.get("saldo_anterior"):
             s = detalhe["saldo_anterior"]
             notas.append(
@@ -14444,14 +14485,9 @@ def relatorio_dre():
     linhas = linhas_para_tela(exibidas, consolidado)
 
     notas = _notas_tributos_dre(exibidas, consolidado)
-    vistos = set()
+    notas += juntar_avisos(exibidas)
     for c in exibidas:
         info = c.get("info") or {}
-        for aviso in info.get("avisos") or []:
-            if aviso in vistos:
-                continue
-            vistos.add(aviso)
-            notas.append(aviso)
         if info.get("folha_fechada"):
             notas.append(f"{c['nome']}: folha do mês fechada; usa os valores gravados no fechamento." if len(exibidas) > 1
                          else "Folha do mês fechada: usa os valores gravados no fechamento.")

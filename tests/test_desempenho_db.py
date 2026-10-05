@@ -186,6 +186,20 @@ class ConsultasDaApuracaoTest(unittest.TestCase):
         self.assertGreater(tributos["tributos"], 0)
         self.assertEqual(tributos["irpj_csll"], tributos["presumido"]["irpj_csll"])
 
+    def test_b8_tributos_da_empresa_somam_as_unidades(self):
+        import carga_tributos
+
+        matriz, _c = self._apurar("esc_matriz", "lucro_presumido")
+        carga_tributos._CACHE.clear()
+        filial, _c = self._apurar("esc_filial", "lucro_presumido")
+        empresa = round(matriz["tributos"] + filial["tributos"], 2)
+        self.assertEqual(matriz["tributos_empresa"], empresa)
+        self.assertEqual(filial["tributos_empresa"], empresa)
+
+    def test_b8_simples_mostra_o_das_da_empresa(self):
+        tributos, _c = self._apurar("esc_filial")
+        self.assertEqual(tributos["tributos_empresa"], 22_045.51)
+
     def test_regime_vazio_nao_calcula(self):
         tributos, _consultas = self._apurar("esc_matriz", None)
         self.assertEqual(tributos["regime"], "nao_informado")
