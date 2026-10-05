@@ -143,6 +143,37 @@ class TestAppParcelasFeriados(unittest.TestCase):
         self.assertEqual(self.app._eventos_feriados_nacionais(cadastrado, dias, cfg), [])
         self.assertEqual(self.app._eventos_feriados_nacionais([], dias, dict(cfg, auto=False)), [])
 
+    def _bloqueio(self, regime_apuracao, linhas, **kwargs):
+        from unittest import mock
+
+        class Cur:
+            def execute(self, sql, params=None):
+                pass
+
+            def fetchall(self):
+                return linhas
+
+        ctx = {"efetiva": {"regime_tributario": "lucro_presumido", "regime_apuracao": regime_apuracao}}
+        with mock.patch.object(self.app, "_contexto_tributario", return_value=ctx), \
+                mock.patch.object(self.app, "_travas_rede", return_value=TravaCompetencias("2026-06")):
+            return self.app._bloqueio_parcelas(Cur(), **kwargs)
+
+    def test_baixa_no_caixa_em_trimestre_travado(self):
+        aberta = [{"data_vencimento": date(2026, 5, 10), "data_pagamento": None, "mora": 0}]
+        self.assertIsNotNone(self._bloqueio("caixa", aberta, ids=[1], pagamentos=[date(2026, 6, 15)], vencimento_dos_ids=False))
+        self.assertIsNone(self._bloqueio("caixa", aberta, ids=[1], pagamentos=[date(2026, 10, 4)], vencimento_dos_ids=False))
+
+    def test_tirar_baixa_paga_em_trimestre_travado(self):
+        paga = [{"data_vencimento": date(2026, 9, 10), "data_pagamento": date(2026, 6, 20), "mora": 0}]
+        self.assertIsNotNone(self._bloqueio("caixa", paga, ids=[1], vencimento_dos_ids=False))
+        self.assertIsNone(self._bloqueio("competencia", paga, ids=[1], vencimento_dos_ids=False))
+
+    def test_baixa_na_competencia_so_trava_com_juros(self):
+        aberta = [{"data_vencimento": date(2026, 5, 10), "data_pagamento": None, "mora": 0}]
+        kwargs = {"ids": [1], "pagamentos": [date(2026, 6, 15)], "vencimento_dos_ids": False}
+        self.assertIsNone(self._bloqueio("competencia", aberta, **kwargs))
+        self.assertIsNotNone(self._bloqueio("competencia", aberta, mora_nova=True, **kwargs))
+
     def test_feriados_do_mes_junta_nacionais(self):
         class Cur:
             def execute(self, sql, params=None):

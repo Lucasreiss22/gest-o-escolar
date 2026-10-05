@@ -3586,9 +3586,12 @@ def _travas_rede(cursor):
     return travas_da_escola(cursor, regime=ctx["efetiva"].get("regime_tributario") or "", schemas=schemas)
 
 
-def _bloqueio_parcelas(cursor, ids=(), vencimentos=(), pagamentos=()):
-    """Mensagem se a edição/exclusão mexe em trimestre já vencido (Presumido/Real); None se pode.
-    Competência olha o vencimento; caixa olha o pagamento."""
+def _bloqueio_parcelas(cursor, ids=(), vencimentos=(), pagamentos=(), vencimento_dos_ids=True, mora_nova=False):
+    """Mensagem se a operação mexe em trimestre já vencido (Presumido/Real); None se pode.
+
+    Caixa: a receita é do mês do pagamento. Competência: a receita é do mês do vencimento, mas juros e
+    multa entram no mês do pagamento. `vencimento_dos_ids=False` nas baixas, que não mudam a receita
+    por vencimento; `mora_nova` quando a operação grava juros/multa."""
     ctx = _contexto_tributario(cursor)
     regime = ctx["efetiva"].get("regime_tributario")
     if regime not in REGIMES_TRIMESTRAIS:
@@ -3597,25 +3600,37 @@ def _bloqueio_parcelas(cursor, ids=(), vencimentos=(), pagamentos=()):
     if not travas:
         return None
     caixa = regime_apuracao_efetivo(regime, ctx["efetiva"].get("regime_apuracao"))[0] == "caixa"
-    comps = {d.strftime("%Y-%m") for d in (pagamentos if caixa else vencimentos) if hasattr(d, "strftime")}
+    novos_pag = {d.strftime("%Y-%m") for d in pagamentos if hasattr(d, "strftime")}
+    comps = set(novos_pag) if caixa else {d.strftime("%Y-%m") for d in vencimentos if hasattr(d, "strftime")}
+    tem_mora = bool(mora_nova)
     ids = [int(i) for i in ids if str(i).isdigit()]
     if ids:
         cursor.execute(
-            "SELECT data_vencimento, data_pagamento FROM financeiro_mensalidades WHERE id = ANY(%s)", (ids,)
+            "SELECT data_vencimento, data_pagamento, "
+            "COALESCE(juros_valor, 0) + COALESCE(multa_valor, 0) AS mora "
+            "FROM financeiro_mensalidades WHERE id = ANY(%s)",
+            (ids,),
         )
         for row in cursor.fetchall() or []:
-            venc, pag = (row["data_vencimento"], row["data_pagamento"]) if isinstance(row, dict) else (row[0], row[1])
-            if caixa:
-                if pag:
-                    comps.add(pag.strftime("%Y-%m"))
-            elif venc:
+            if isinstance(row, dict):
+                venc, pag, mora = row["data_vencimento"], row["data_pagamento"], row["mora"]
+            else:
+                venc, pag, mora = row[0], row[1], row[2]
+            com_mora = float(mora or 0) > 0
+            if pag and (caixa or com_mora):
+                comps.add(pag.strftime("%Y-%m"))
+            if not caixa and venc and vencimento_dos_ids:
                 comps.add(venc.strftime("%Y-%m"))
+            tem_mora = tem_mora or com_mora
+    if not caixa and tem_mora:
+        comps |= novos_pag
     travadas = sorted(c for c in comps if c in travas)
     if not travadas:
         return None
     rotulos = ", ".join(f"{c[5:7]}/{c[:4]}" for c in travadas)
     return (f"Competência já apurada ({rotulos}): o trimestre encerrou e a DARF venceu. "
-            "A parcela não pode ser criada, alterada nem excluída: mudaria a receita e os tributos já declarados.")
+            "A parcela não pode ser criada, alterada, baixada nem excluída nesse período: "
+            "mudaria a receita e os tributos já declarados.")
 
 
 def _presumido_empresa(cursor, mes_filtro, ctx):
@@ -12904,6 +12919,15 @@ def pagina_financeiro():
                         if not data_pag:
                             flash("Informe a data de pagamento.", "danger")
                         else:
+                            try:
+                                nova_pag = datetime.strptime(data_pag[:10], "%Y-%m-%d").date()
+                            except ValueError:
+                                raise ValueError("Data de pagamento inválida.")
+                            bloqueio = _bloqueio_parcelas(
+                                cursor, [request.form.get("cobranca_id")], pagamentos=[nova_pag], vencimento_dos_ids=False
+                            )
+                            if bloqueio:
+                                raise ValueError(bloqueio)
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
@@ -12934,6 +12958,12 @@ def pagina_financeiro():
                             flash("Informe a data da baixa. No regime de caixa, essa data define o mês do imposto.", "danger")
                         else:
                             juros_percentual, multa_valor = _acrescimos_form()
+                            bloqueio = _bloqueio_parcelas(
+                                cursor, [request.form.get("cobranca_id")], pagamentos=[data_baixa],
+                                vencimento_dos_ids=False, mora_nova=bool(juros_percentual or multa_valor),
+                            )
+                            if bloqueio:
+                                raise ValueError(bloqueio)
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
@@ -12984,6 +13014,12 @@ def pagina_financeiro():
                             flash("Informe a data da baixa. No regime de caixa, essa data define o mês do imposto.", "danger")
                         else:
                             juros_percentual, multa_valor = _acrescimos_form()
+                            bloqueio = _bloqueio_parcelas(
+                                cursor, ids, pagamentos=[data_baixa],
+                                vencimento_dos_ids=False, mora_nova=bool(juros_percentual or multa_valor),
+                            )
+                            if bloqueio:
+                                raise ValueError(bloqueio)
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
@@ -13024,7 +13060,7 @@ def pagina_financeiro():
                         if not ids:
                             flash("Selecione ao menos uma mensalidade para tirar a baixa.", "danger")
                         else:
-                            bloqueio = _bloqueio_parcelas(cursor, ids)
+                            bloqueio = _bloqueio_parcelas(cursor, ids, vencimento_dos_ids=False)
                             if bloqueio:
                                 raise ValueError(bloqueio)
                             cursor.execute(
