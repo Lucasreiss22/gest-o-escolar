@@ -637,6 +637,31 @@ def _secao_rede_simples(pdf, ap):
     pdf.linha("Parte desta unidade", _brl(ap.get("das_unidade")), negrito=True)
 
 
+def _eh_filial_simples(ap):
+    return ((ap or {}).get("rede") or {}).get("papel") == "filial"
+
+
+def _destaque_das(pdf, ap):
+    """Topo do PDF: na filial, a parte dela; o DAS da empresa fica em texto menor, como referência."""
+    if not _eh_filial_simples(ap):
+        pdf.linha("DAS a pagar neste mês", _brl(ap.get("das")), negrito=True)
+        return
+    rede = ap.get("rede") or {}
+    pdf.linha("Parte desta unidade no DAS da empresa", _brl(ap.get("das_unidade")), negrito=True)
+    pdf.paragrafo(
+        f"DAS da empresa (pago pela matriz {rede.get('matriz_nome') or ''}, CNPJ {rede.get('matriz_cnpj') or '-'}): "
+        f"{_brl(ap.get('das_total', ap.get('das')))}. Esta unidade não entrega PGDAS-D nem paga DAS próprio.",
+        tamanho=8,
+    )
+
+
+def _linha_final_das(pdf, ap, rotulo="DAS a pagar neste mês"):
+    if _eh_filial_simples(ap):
+        pdf.linha("Parte desta unidade", _brl(ap.get("das_unidade")), negrito=True)
+    else:
+        pdf.linha(rotulo, _brl(ap.get("das")), negrito=True)
+
+
 def pdf_calculo_rbt12(escola, mes_label, apuracao, regime_apuracao="competencia"):
     ap = apuracao or {}
     caixa = (regime_apuracao or ap.get("regime_apuracao") or "") == "caixa"
@@ -889,10 +914,15 @@ def pdf_extrato_pgdas(
             "O que não foi pago entra na base do DAS."
         )
     pdf.linha("Tipo de receita", f"Serviços de educação — Anexo {anexo}", negrito=True)
-    pdf.linha("DAS a pagar neste mês", _brl(ap.get("das")), negrito=True)
+    _destaque_das(pdf, ap)
+    filial = _eh_filial_simples(ap)
 
     pdf.secao("Base do DAS neste mês")
-    pdf.linha("Receita do mês de apuração", _brl(receita), negrito=True)
+    if filial:
+        pdf.linha("Receita desta unidade no mês de apuração", _brl(ap.get("receita_unidade")), negrito=True)
+        pdf.linha("Receita da empresa no mês (base do DAS)", _brl(receita), tamanho=9)
+    else:
+        pdf.linha("Receita do mês de apuração", _brl(receita), negrito=True)
     pdf.paragrafo("Este valor calcula o DAS e não entra na RBT12.")
     apuracao_mes = quadro.get("linha_apuracao") or {}
     if apuracao_mes:
@@ -953,8 +983,11 @@ def pdf_extrato_pgdas(
     pdf.paragrafo(
         f"Alíquota efetiva = (({_brl(rbt)} × {aliq_nom:.2f}%) − {_brl(deducao)}) ÷ {_brl(rbt)} = {aliq_ef:.4f}%."
     )
-    pdf.paragrafo(f"DAS = {_brl(receita)} × {aliq_ef:.4f}% = {_brl(ap.get('das'))}.")
-    pdf.linha("DAS a pagar neste mês", _brl(ap.get("das")), negrito=True)
+    if filial:
+        pdf.paragrafo(f"DAS da empresa = {_brl(receita)} × {aliq_ef:.4f}% = {_brl(ap.get('das'))}.")
+    else:
+        pdf.paragrafo(f"DAS = {_brl(receita)} × {aliq_ef:.4f}% = {_brl(ap.get('das'))}.")
+    _linha_final_das(pdf, ap)
 
     if caixa:
         nao_pagos, anteriores = _separar_nao_pagos(pendentes, atrasados, mes_filtro)
@@ -979,6 +1012,9 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
         "O mês vigente não entra nessa soma: ele é a base do DAS. "
         "Mês anterior ao primeiro lançamento do sistema fica de fora quando sai da janela."
     )
+    filial = _eh_filial_simples(ap)
+    if filial:
+        _destaque_das(pdf, ap)
 
     _secao_rede_simples(pdf, ap)
     pdf.secao("RBT12 — receita dos 12 meses anteriores")
@@ -1018,14 +1054,20 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
 
     pdf.secao("DAS do mês")
     aliq_nom = float(ap.get("aliquota_nominal") or 0) * 100
-    pdf.linha("Receita bruta do mês de apuração", _brl(ap.get("receita_mes")))
+    if filial:
+        pdf.linha("Receita desta unidade no mês de apuração", _brl(ap.get("receita_unidade")))
+        pdf.linha("Receita bruta da empresa no mês (base do DAS)", _brl(ap.get("receita_mes")), tamanho=9)
+    else:
+        pdf.linha("Receita bruta do mês de apuração", _brl(ap.get("receita_mes")))
     pdf.linha("Faixa", ap.get("faixa") or "-")
     pdf.linha("Alíquota nominal", f"{aliq_nom:.2f}%")
     pdf.linha("Parcela a deduzir", _brl(ap.get("parcela_deduzir")))
     pdf.paragrafo("Alíquota efetiva = ((RBT12 × alíquota nominal) − parcela a deduzir) ÷ RBT12")
     pdf.linha("Alíquota efetiva", f"{float(ap.get('aliquota_efetiva_pct') or 0):.4f}%")
     pdf.paragrafo("DAS = receita bruta do mês × alíquota efetiva")
-    pdf.linha("DAS", _brl(ap.get("das")), negrito=True)
+    if filial:
+        pdf.linha("DAS da empresa", _brl(ap.get("das")))
+    _linha_final_das(pdf, ap, "DAS")
     mora = ap.get("mora") or {}
     mora_total = float(mora.get("total") or ap.get("acrescimos_mora") or 0)
     pdf.secao("Juros e multa por atraso recebidos no mês")

@@ -580,6 +580,12 @@
             </script>
             {% endif %}
 
+            {% if rede_tributos and rede_tributos.papel == 'filial' %}
+            <p class="simples-hint" style="color: #e67e22;"><strong>O PGDAS-D é entregue pela matriz ({{ rede_tributos.matriz_nome }}, CNPJ {{ rede_tributos.matriz_cnpj }}).</strong> Esta unidade não carrega receitas, não importa planilha nem envia a memória: isso é feito na matriz.</p>
+            <div class="simples-acoes">
+                <a class="btn btn-primary" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}">Ver a parte desta unidade (PDF)</a>
+            </div>
+            {% else %}
             <div class="simples-acoes">
                 <a class="btn btn-primary" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}">Gerar extrato PGDAS</a>
                 <form method="POST" action="{{ url_for('pagina_financeiro') }}">
@@ -616,6 +622,7 @@
             </form>
             <p class="simples-hint">Aceita CSV/Excel com colunas competência e receita (e folha, se houver). No extrato PGDAS o sistema procura o mês e o valor de receita bruta em cada linha.</p>
             <p class="simples-hint">O botão Gerar extrato PGDAS mostra o DAS que será pago, com tipo de receita, RBT12, folha e encargos e o regime de apuração. O PDF tributos, no topo, é a memória de cálculo mais o demonstrativo. A DRE completa (e a consolidada, na matriz) fica no botão DRE do mês.</p>
+            {% endif %}
 
             <form method="POST" action="{{ url_for('pagina_financeiro') }}">
                 <input type="hidden" name="acao" value="simples_salvar_quadro">

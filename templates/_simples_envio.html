@@ -12,6 +12,9 @@
     {% elif campo == 'fator' %}
     <a class="btn btn-success" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual, campo='fator') }}" style="margin: 6px 8px 8px 0;">PDF do cálculo do Fator R</a>
     {% endif %}
+    {% if rede_tributos and rede_tributos.papel == 'filial' %}
+    <a class="btn btn-primary" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Ver a parte desta unidade (PDF)</a>
+    {% else %}
     <a class="btn btn-primary" href="{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}" style="margin: 6px 8px 8px 0;">Extrato PGDAS da DAS</a>
     <form method="POST" action="{{ url_for('enviar_memoria_simples') }}" class="calc-envio">
         <input type="hidden" name="mes" value="{{ mes_atual }}">
@@ -30,4 +33,5 @@
         </div>
         <button class="btn btn-primary" type="submit">Enviar PDF</button>
     </form>
+    {% endif %}
 </div>
