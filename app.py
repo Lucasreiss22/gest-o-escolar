@@ -276,7 +276,9 @@ from parcelas import (
 from carga_tributos import (
     PADROES_TRIBUTARIOS,
     ROTULOS_HERDADOS,
+    _linha,
     _linhas,
+    _savepoint,
     ajustes_lucro_real,
     cache_buscar,
     cache_guardar,
@@ -324,6 +326,7 @@ from fechamento import (
     reabrir_competencia,
 )
 import calendar as calendario_lib
+import copy
 from datetime import datetime, date, timedelta
 import json
 import hashlib
@@ -2636,16 +2639,14 @@ def _descontos_ponto_folha(cursor, funcionario_id, competencia, func=None):
         """,
         (funcionario_id, ano, mes),
     )
-    datas = []
-    for row in cursor.fetchall() or []:
-        d = row.get("data_ref") if isinstance(row, dict) else row[0]
-        if hasattr(d, "isoformat"):
-            datas.append(d)
-        elif d:
-            try:
-                datas.append(datetime.strptime(str(d)[:10], "%Y-%m-%d").date())
-            except ValueError:
-                pass
+    return _descontos_faltas(
+        [row.get("data_ref") if isinstance(row, dict) else row[0] for row in cursor.fetchall() or []], func
+    )
+
+
+def _descontos_faltas(datas_brutas, func=None):
+    """Desconto do dia e do DSR da semana pelas faltas não justificadas confirmadas do mês."""
+    datas = [d for d in (_como_data(v) for v in datas_brutas or []) if d]
     if not datas:
         return {
             "desconto_faltas": 0.0,
@@ -2821,13 +2822,25 @@ def _horas_extras_ponto(cursor, funcionario_id, competencia):
     registros = cursor.fetchall() or []
     if not registros:
         return resultado
-    jornada = _ler_jornada_ponto(cursor, funcionario_id)
-    feriados = _feriados_do_mes(cursor, ano, mes)
-    agora = _agora_ponto_br()
-    for row in registros:
-        dref = row["data_ref"]
-        if not hasattr(dref, "weekday"):
-            dref = datetime.strptime(str(dref)[:10], "%Y-%m-%d").date()
+    return _horas_extras_registros(
+        registros, _ler_jornada_ponto(cursor, funcionario_id), _feriados_do_mes(cursor, ano, mes), _agora_ponto_br()
+    )
+
+
+def _horas_extras_registros(registros, jornada, feriados, agora):
+    """Horas extras do mês a partir das batidas já lidas (mesma regra de `_horas_extras_ponto`)."""
+    resultado = {
+        "horas_extras_ponto": 0.0,
+        "horas_extras_100_ponto": 0.0,
+        "positivo_min": 0,
+        "negativo_min": 0,
+        "domingo_feriado_min": 0,
+        "dias_com_extra": 0,
+    }
+    for row in registros or []:
+        dref = _como_data(row["data_ref"])
+        if dref is None:
+            continue
         descanso = _dia_descanso_ponto(dref, feriados)
         calc = _saldo_dia_ponto(_mapa_registro_ponto(row), jornada, dref, agora, descanso=descanso)
         if calc["incompleto"]:
@@ -2873,6 +2886,10 @@ def _aplicar_he_ponto(cursor, dados, competencia):
         cursor.execute("ROLLBACK TO SAVEPOINT he_ponto")
         print(f"[folha] horas extras do ponto ({dados.get('id')}): {erro}")
         return dados
+    return _somar_he_ponto(dados, info)
+
+
+def _somar_he_ponto(dados, info):
     ponto_50 = info["horas_extras_ponto"]
     ponto_100 = info["horas_extras_100_ponto"]
     if not ponto_50 and not ponto_100:
@@ -2906,18 +2923,129 @@ def _feriados_competencia(cursor, competencia):
     return list(memo[chave])
 
 
-def _func_com_ajuste(cursor, func, competencia):
-    dados = dict(func or {})
-    dados = aplicar_ajuste_competencia(dados, _ajuste_folha(cursor, dados.get("id"), competencia))
+_SQL_FUNCIONARIOS_FOLHA = """
+    SELECT *
+    FROM funcionarios
+    WHERE COALESCE(ativo, TRUE) = TRUE OR data_fim_contrato IS NOT NULL
+    ORDER BY nome_completo
+"""
+
+
+def _carregar_folha_mes(cursor, competencia, funcionarios=None):
+    """Tudo que a folha do mês usa, em consultas que não crescem com o número de funcionários:
+    funcionários, ajustes, configuração, feriados do calendário, faltas e batidas do ponto."""
+    if funcionarios is None:
+        cursor.execute(_SQL_FUNCIONARIOS_FOLHA)
+        funcionarios = _linhas(cursor)
+    mes_dados = {
+        "funcionarios": [dict(f) for f in funcionarios or []],
+        "ajustes": {}, "feriados": [], "faltas": {}, "ponto": {}, "he_ponto": True, "jornada": 480,
+    }
+    if not competencia:
+        return mes_dados
     try:
-        info = _descontos_ponto_folha(cursor, dados.get("id"), competencia, dados)
-        if info:
-            dados.update(info)
+        ano, mes = parse_mes(str(competencia)[:7])
+    except Exception:
+        return mes_dados
+    mes_dados["ajustes"] = _mapa_ajustes_folha(cursor, competencia)
+    cursor.execute("SELECT * FROM configuracoes WHERE id = 1")
+    cfg = _linha(cursor) or {}
+    mes_dados["he_ponto"] = cfg.get("ponto_he_folha") is not False
+    try:
+        mes_dados["jornada"] = int(cfg.get("ponto_jornada_minutos") or 480)
+    except (TypeError, ValueError):
+        mes_dados["jornada"] = 480
+    cfg_feriados = {
+        "auto": cfg.get("feriados_nacionais_auto") is not False,
+        "carnaval": bool(cfg.get("feriado_carnaval")),
+        "corpus_christi": bool(cfg.get("feriado_corpus_christi")),
+    }
+    nacionais = set()
+    if cfg_feriados["auto"]:
+        nacionais = set(feriados_nacionais_mes(
+            ano, mes, carnaval=cfg_feriados["carnaval"], corpus_christi=cfg_feriados["corpus_christi"]
+        ))
+    feriados = set(nacionais)
+    inicio = date(ano, mes, 1)
+    fim = date(ano + 1, 1, 1) if mes == 12 else date(ano, mes + 1, 1)
+    ids = [f.get("id") for f in mes_dados["funcionarios"] if f.get("id")]
+    try:
+        _garantir_ponto()
     except Exception:
         pass
-    if competencia:
-        dados["feriados_competencia"] = _feriados_competencia(cursor, competencia)
-    return _aplicar_he_ponto(cursor, dados, competencia)
+
+    def ler_calendario():
+        cursor.execute(
+            "SELECT data_evento FROM calendario_eventos "
+            "WHERE tipo = 'feriado' AND turma_id IS NULL AND aluno_id IS NULL "
+            "AND data_evento >= %s AND data_evento < %s",
+            (inicio, fim),
+        )
+        feriados.update(d for d in (_como_data(r.get("data_evento")) for r in _linhas(cursor)) if d)
+
+    def ler_faltas():
+        cursor.execute(
+            "SELECT funcionario_id, data_ref FROM ponto_faltas "
+            "WHERE tipo = 'nao_justificada' AND status = 'confirmada' AND COALESCE(descontar, TRUE) = TRUE "
+            "AND data_ref >= %s AND data_ref < %s AND funcionario_id = ANY(%s) ORDER BY data_ref",
+            (inicio, fim, ids),
+        )
+        for r in _linhas(cursor):
+            mes_dados["faltas"].setdefault(r.get("funcionario_id"), []).append(r.get("data_ref"))
+
+    def ler_ponto():
+        cursor.execute(
+            "SELECT funcionario_id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida "
+            "FROM ponto_registros WHERE data_ref >= %s AND data_ref < %s AND funcionario_id = ANY(%s)",
+            (inicio, fim, ids),
+        )
+        for r in _linhas(cursor):
+            mes_dados["ponto"].setdefault(r.get("funcionario_id"), []).append(r)
+
+    leituras = [ler_calendario] + ([ler_faltas, ler_ponto] if ids else [])
+    try:
+        _savepoint(cursor, "folha_mes", lambda: [ler() for ler in leituras])
+    except Exception:
+        mes_dados["faltas"], mes_dados["ponto"] = {}, {}
+        feriados.clear()
+        feriados.update(nacionais)
+        for ler in leituras:
+            try:
+                _savepoint(cursor, "folha_mes_item", ler)
+            except Exception as erro:
+                print(f"[folha] {ler.__name__} ({competencia}): {erro}")
+    mes_dados["feriados"] = sorted(feriados)
+    try:
+        g.setdefault("_feriados_mes", {})[(_nome_banco_atual(master=False), ano, mes)] = mes_dados["feriados"]
+    except RuntimeError:
+        pass
+    return mes_dados
+
+
+def _dados_folha_pessoa(func, mes_dados, competencia, agora=None):
+    """Dados de uma pessoa prontos para `calcular_folha_pessoa`, só com o que já foi carregado do mês."""
+    dados = aplicar_ajuste_competencia(dict(func or {}), mes_dados["ajustes"].get((func or {}).get("id")))
+    if not competencia:
+        dados["feriados_competencia"] = []
+        return dados
+    fid = dados.get("id")
+    if fid:
+        dados.update(_descontos_faltas(mes_dados["faltas"].get(fid), dados))
+    dados["feriados_competencia"] = list(mes_dados["feriados"])
+    registros = mes_dados["ponto"].get(fid)
+    if registros and mes_dados["he_ponto"] and _contrato_clt(dados.get("tipo_contrato")):
+        jornada = dados.get("ponto_jornada_minutos")
+        try:
+            jornada = int(jornada) if jornada is not None else mes_dados["jornada"]
+        except (TypeError, ValueError):
+            jornada = mes_dados["jornada"]
+        info = _horas_extras_registros(registros, max(60, jornada), set(mes_dados["feriados"]), agora or _agora_ponto_br())
+        dados = _somar_he_ponto(dados, info)
+    return dados
+
+
+def _func_com_ajuste(cursor, func, competencia):
+    return _dados_folha_pessoa(func, _carregar_folha_mes(cursor, competencia, [func]), competencia)
 
 
 def montar_folha_contratos(cursor, regime, mes_filtro=None):
@@ -2928,17 +3056,8 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
             ano, mes = parse_mes(mes_filtro)
         except Exception:
             ano = mes = None
-    cursor.execute(
-        """
-        SELECT *
-        FROM funcionarios
-        WHERE COALESCE(ativo, TRUE) = TRUE OR data_fim_contrato IS NOT NULL
-        ORDER BY nome_completo
-        """
-    )
-    funcionarios = list(cursor.fetchall() or [])
-    ajustes = _mapa_ajustes_folha(cursor, mes_filtro)
-    feriados = _feriados_competencia(cursor, mes_filtro) if mes_filtro else []
+    mes_dados = _carregar_folha_mes(cursor, mes_filtro if ano else None)
+    agora = _agora_ponto_br()
     itens = []
     totais = {
         "bruto": 0.0,
@@ -2949,18 +3068,10 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
         "fgts": 0.0,
         "reducao_fgts_aprendiz": 0.0,
     }
-    for row in funcionarios:
-        dados = aplicar_ajuste_competencia(dict(row), ajustes.get(row.get("id")))
+    for row in mes_dados["funcionarios"]:
+        dados = _dados_folha_pessoa(row, mes_dados, mes_filtro if ano else None, agora)
         if situacao_folha_mes(dados, ano, mes) != "folha":
             continue
-        try:
-            info = _descontos_ponto_folha(cursor, dados.get("id"), mes_filtro, dados)
-            if info:
-                dados.update(info)
-        except Exception:
-            pass
-        dados["feriados_competencia"] = feriados
-        dados = _aplicar_he_ponto(cursor, dados, mes_filtro)
         calc = calcular_folha_pessoa(dados, regime, ano, mes)
         calc["rotulo_contrato"] = rotulo_contrato(calc["tipo_contrato"])
         try:
@@ -2989,13 +3100,23 @@ def montar_folha_contratos(cursor, regime, mes_filtro=None):
 
 
 def _folha_competencia(cursor, regime, mes_filtro=None):
-    """Folha do mês: snapshot se a competência estiver fechada, cálculo ao vivo se aberta."""
+    """Folha do mês: snapshot se a competência estiver fechada, cálculo ao vivo se aberta.
+    Guardada por 60 s por escola; qualquer POST da escola descarta."""
+    schema = _nome_banco_atual() or ""
+    chave = ("folha", regime or "", str(mes_filtro or "")[:7])
+    if schema and mes_filtro:
+        guardada = cache_buscar(schema, *chave)
+        if guardada is not None:
+            return copy.deepcopy(guardada)
+    resultado = None
     if mes_filtro:
         garantir_tabelas_folha()
-        fechada = folha_fechada(cursor, str(mes_filtro)[:7])
-        if fechada is not None:
-            return fechada
-    return montar_folha_contratos(cursor, regime, mes_filtro)
+        resultado = folha_fechada(cursor, str(mes_filtro)[:7])
+    if resultado is None:
+        resultado = montar_folha_contratos(cursor, regime, mes_filtro)
+    if schema and mes_filtro:
+        cache_guardar(schema, copy.deepcopy(resultado), *chave)
+    return resultado
 
 
 def _item_contracheque(cursor, func, regime, mes_filtro):

@@ -141,14 +141,23 @@ def reabrir_competencia(cursor, competencia, motivo, usuario_id=None, usuario_no
 
 
 def folha_fechada(cursor, competencia):
-    """(itens, totais) gravados no fechamento, ou None se a competência estiver aberta."""
-    info = info_fechamento(cursor, competencia)
-    if not info:
+    """(itens, totais) gravados no fechamento, ou None se a competência estiver aberta. Uma consulta."""
+    if not competencia:
         return None
-    cursor.execute("SELECT item FROM folha_snapshot WHERE competencia = %s", (competencia,))
-    itens = [_carregar(linha["item"] if isinstance(linha, dict) else linha[0]) for linha in cursor.fetchall() or []]
+    cursor.execute(
+        "SELECT c.totais, s.item FROM competencias_fechadas c "
+        "LEFT JOIN folha_snapshot s ON s.competencia = c.competencia WHERE c.competencia = %s",
+        (competencia,),
+    )
+    linhas = [
+        (linha["totais"], linha["item"]) if isinstance(linha, dict) else (linha[0], linha[1])
+        for linha in cursor.fetchall() or []
+    ]
+    if not linhas:
+        return None
+    itens = [_carregar(item) for _totais, item in linhas if item is not None]
     itens.sort(key=lambda i: (i.get("nome_completo") or "").lower())
-    return itens, _carregar(info.get("totais"))
+    return itens, _carregar(linhas[0][0])
 
 
 def item_fechado(cursor, competencia, funcionario_id):

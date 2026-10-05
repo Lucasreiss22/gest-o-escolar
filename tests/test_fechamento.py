@@ -61,6 +61,11 @@ class CursorFechamento:
         elif s.startswith("SELECT competencia, fechada_em"):
             linha = self.fechadas.get(params[0])
             self._resultado = [dict(linha)] if linha else []
+        elif s.startswith("SELECT c.totais, s.item FROM competencias_fechadas"):
+            linha = self.fechadas.get(params[0])
+            if linha:
+                itens = [v for (c, _f), v in self.snapshot.items() if c == params[0]] or [None]
+                self._resultado = [{"totais": linha["totais"], "item": item} for item in itens]
         elif s.startswith("SELECT competencia FROM competencias_fechadas"):
             self._resultado = [{"competencia": c} for c in self.fechadas]
         elif s.startswith("SELECT item FROM folha_snapshot WHERE competencia = %s AND funcionario_id"):
