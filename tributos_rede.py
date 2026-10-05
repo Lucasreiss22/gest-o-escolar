@@ -375,6 +375,73 @@ def apurar_lucro_real_periodo(
     }
 
 
+def encadear_saldos(saldo_inicial, periodos):
+    """Saldo de prejuízo fiscal e base negativa da CSLL período a período.
+
+    `saldo_inicial`: {"prejuizo_fiscal", "base_negativa_csll"}.
+    `periodos`: [{"periodo", "lair", "ajustes": {adicoes_irpj, exclusoes_irpj, adicoes_csll, exclusoes_csll},
+    "meses", "fechado": {"prejuizo_fiscal", "base_negativa_csll"} ou None}], em ordem. Período fechado usa o
+    saldo gravado no fechamento como saldo depois dele.
+    """
+    saldo_inicial = saldo_inicial or {}
+    prejuizo = max(float(saldo_inicial.get("prejuizo_fiscal") or 0), 0.0)
+    base_negativa = max(float(saldo_inicial.get("base_negativa_csll") or 0), 0.0)
+    saida = {}
+    for p in periodos or []:
+        aj = p.get("ajustes") or {}
+        ap = apurar_lucro_real_periodo(
+            p.get("lair") or 0, aj.get("adicoes_irpj") or 0, aj.get("exclusoes_irpj") or 0,
+            aj.get("adicoes_csll") or 0, aj.get("exclusoes_csll") or 0, prejuizo, base_negativa, p.get("meses") or 3,
+        )
+        item = {
+            "prejuizo_antes": arred(prejuizo),
+            "base_negativa_antes": arred(base_negativa),
+            "compensacao_irpj": ap["compensacao_irpj"],
+            "compensacao_csll": ap["compensacao_csll"],
+            "prejuizo_depois": ap["novo_prejuizo"],
+            "base_negativa_depois": ap["nova_base_negativa"],
+            "base_irpj": ap["base_irpj"],
+            "irpj": ap["irpj"],
+            "adicional": ap["adicional"],
+            "csll": ap["csll"],
+            "fechado": False,
+        }
+        fechado = p.get("fechado")
+        if fechado:
+            item["prejuizo_depois"] = arred(fechado.get("prejuizo_fiscal") or 0)
+            item["base_negativa_depois"] = arred(fechado.get("base_negativa_csll") or 0)
+            item["fechado"] = True
+        saida[p["periodo"]] = item
+        prejuizo, base_negativa = item["prejuizo_depois"], item["base_negativa_depois"]
+    return saida
+
+
+def saldo_antes_do_periodo(saldos_gravados, periodos_anteriores, inicio_periodo):
+    """Saldo antes do período que começa em `inicio_periodo`.
+
+    Parte do último saldo gravado antes do primeiro período encadeado (o saldo inicial `0000-00` se não
+    houver outro) e encadeia os períodos anteriores com `encadear_saldos`. `saldos_gravados`:
+    {periodo: {"prejuizo_fiscal", "base_negativa_csll", "fechado"}}; só os fechados valem dentro da cadeia.
+    """
+    saldos_gravados = saldos_gravados or {}
+    periodos_anteriores = [p for p in periodos_anteriores or [] if p["periodo"] < inicio_periodo]
+    corte = periodos_anteriores[0]["inicio"] if periodos_anteriores else inicio_periodo
+    base_chave = max((k for k in saldos_gravados if k < corte), default=None)
+    base = saldos_gravados.get(base_chave) or {}
+    cadeia = encadear_saldos(base, [
+        dict(p, fechado=saldos_gravados[p["periodo"]] if (saldos_gravados.get(p["periodo"]) or {}).get("fechado") else None)
+        for p in periodos_anteriores
+    ])
+    if periodos_anteriores:
+        ultimo = cadeia[periodos_anteriores[-1]["periodo"]]
+        saldo = {"prejuizo_fiscal": ultimo["prejuizo_depois"], "base_negativa_csll": ultimo["base_negativa_depois"]}
+    else:
+        saldo = {"prejuizo_fiscal": arred(base.get("prejuizo_fiscal") or 0),
+                 "base_negativa_csll": arred(base.get("base_negativa_csll") or 0)}
+    saldo.update(periodo=base_chave, cadeia=cadeia)
+    return saldo
+
+
 def provisao_lucro_real(lairs_mes, ajustes=None, prejuizo_acumulado=0, base_negativa_acumulada=0, modo="trimestral"):
     """Provisão mensal do Lucro Real a partir do LAIR de cada mês do período (trimestre ou ano).
 

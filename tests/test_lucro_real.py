@@ -4,9 +4,11 @@ from tributos_rede import (
     AVISO_REAL_CAIXA,
     apurar_lucro_real_periodo,
     apurar_pis_cofins_real,
+    encadear_saldos,
     provisao_lucro_real,
     ratear_por_lucro,
     regime_apuracao_efetivo,
+    saldo_antes_do_periodo,
 )
 
 
@@ -72,6 +74,61 @@ class LucroRealTest(unittest.TestCase):
         self.assertEqual(regime_apuracao_efetivo("lucro_real", "caixa"), ("competencia", AVISO_REAL_CAIXA))
         self.assertEqual(regime_apuracao_efetivo("simples_nacional", "caixa"), ("caixa", None))
         self.assertEqual(regime_apuracao_efetivo("lucro_presumido", None), ("competencia", None))
+
+
+class SaldoEncadeadoTest(unittest.TestCase):
+    def test_l1_prejuizo_do_3o_tri_compensado_no_4o(self):
+        cadeia = encadear_saldos({}, [
+            {"periodo": "2026-09", "lair": -30_000},
+            {"periodo": "2026-12", "lair": 100_000},
+        ])
+        self.assertEqual(cadeia["2026-09"]["prejuizo_depois"], 30_000.00)
+        q4 = cadeia["2026-12"]
+        self.assertEqual(q4["prejuizo_antes"], 30_000.00)
+        self.assertEqual(q4["compensacao_irpj"], 30_000.00)
+        self.assertEqual(q4["base_irpj"], 70_000.00)
+        self.assertEqual((q4["irpj"], q4["adicional"], q4["csll"]), (10_500.00, 1_000.00, 6_300.00))
+        self.assertEqual((q4["prejuizo_depois"], q4["base_negativa_depois"]), (0.0, 0.0))
+
+    def test_l3_saldo_inicial_com_adicoes_e_exclusoes(self):
+        ajustes = {"adicoes_irpj": 10_000, "exclusoes_irpj": 5_000, "adicoes_csll": 10_000, "exclusoes_csll": 5_000}
+        cadeia = encadear_saldos(
+            {"prejuizo_fiscal": 100_000, "base_negativa_csll": 100_000},
+            [{"periodo": "2026-03", "lair": 200_000, "ajustes": ajustes}],
+        )
+        p = cadeia["2026-03"]
+        self.assertEqual(p["compensacao_irpj"], 61_500.00)
+        self.assertEqual(p["base_irpj"], 143_500.00)
+        self.assertEqual((p["irpj"], p["adicional"], p["csll"]), (21_525.00, 8_350.00, 12_915.00))
+        self.assertEqual(p["prejuizo_depois"], 38_500.00)
+
+    def test_periodo_fechado_vale_o_saldo_gravado(self):
+        cadeia = encadear_saldos({}, [
+            {"periodo": "2026-06", "lair": -50_000, "fechado": {"prejuizo_fiscal": 40_000, "base_negativa_csll": 40_000}},
+            {"periodo": "2026-09", "lair": 0},
+        ])
+        self.assertTrue(cadeia["2026-06"]["fechado"])
+        self.assertEqual(cadeia["2026-09"]["prejuizo_antes"], 40_000.00)
+
+    def test_saldo_antes_parte_do_ultimo_gravado_antes_da_cadeia(self):
+        gravados = {
+            "0000-00": {"prejuizo_fiscal": 5_000, "base_negativa_csll": 5_000, "fechado": False},
+            "2025-12": {"prejuizo_fiscal": 12_000, "base_negativa_csll": 11_000, "fechado": True},
+            "2026-06": {"prejuizo_fiscal": 999_999, "base_negativa_csll": 999_999, "fechado": False},
+        }
+        anteriores = [
+            {"periodo": "2026-03", "inicio": "2026-01", "lair": -1_000},
+            {"periodo": "2026-06", "inicio": "2026-04", "lair": 0},
+            {"periodo": "2026-09", "inicio": "2026-07", "lair": 0},
+        ]
+        saldo = saldo_antes_do_periodo(gravados, anteriores, "2026-10")
+        self.assertEqual(saldo["periodo"], "2025-12")
+        self.assertEqual(saldo["prejuizo_fiscal"], 13_000.00)
+        self.assertEqual(saldo["base_negativa_csll"], 12_000.00)
+
+    def test_sem_periodos_anteriores_vale_o_saldo_inicial(self):
+        saldo = saldo_antes_do_periodo({"0000-00": {"prejuizo_fiscal": 7_000, "base_negativa_csll": 6_000}}, [], "2026-01")
+        self.assertEqual((saldo["prejuizo_fiscal"], saldo["base_negativa_csll"]), (7_000.00, 6_000.00))
 
 
 if __name__ == "__main__":
