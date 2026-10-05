@@ -686,7 +686,10 @@
                 <div class="fin-linha"><span>(+) Recebido nas mensalidades</span><strong>R$ {{ (totais.recebido)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(+) Juros e multa por atraso recebidos</span><strong>R$ {{ (totais.juros_multa_mes or 0)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(−) Folha e encargos (custo da escola)</span><strong>R$ {{ (totais.folha_pagamento)|moeda }}</strong></div>
-                <div class="fin-linha"><span>(−) Tributos da empresa</span><strong>R$ {{ (totais.tributos)|moeda }}</strong></div>
+                <div class="fin-linha"><span>(−) Tributos desta unidade</span><strong>R$ {{ (totais.tributos)|moeda }}</strong></div>
+                {% if rede_tributos and totais.get('tributos_empresa') is not none %}
+                <div class="fin-linha" style="font-size:0.85rem;color:#64748b;"><span>Tributos da empresa (todas as unidades)</span><span>R$ {{ (totais.tributos_empresa)|moeda }}</span></div>
+                {% endif %}
                 <div class="fin-linha"><span>(−) Compras e custos fixos (aluguel, energia, material)</span><strong>R$ {{ (totais.custos_compras or 0)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(−) Contratação de serviços (NFS-e)</span><strong>R$ {{ (totais.custos_servicos or 0)|moeda }}</strong></div>
                 <div class="fin-linha"><span>(−) Custo por rescisão</span><strong>R$ {{ (totais.custos_rescisoes or 0)|moeda }}</strong></div>

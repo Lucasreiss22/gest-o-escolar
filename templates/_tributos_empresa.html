@@ -53,7 +53,7 @@
     </p>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>Receita do trimestre</th><th>Base IRPJ</th><th>Base CSLL</th><th>IRPJ</th><th>Adicional</th><th>CSLL</th><th>DARF vence</th></tr></thead>
+            <thead><tr><th>Receita do trimestre até {{ mes_label }}</th><th>Base IRPJ</th><th>Base CSLL</th><th>IRPJ</th><th>Adicional</th><th>CSLL</th><th>DARF vence</th></tr></thead>
             <tbody>
                 <tr>
                     <td>R$ {{ tri.receita|moeda }}</td>
@@ -67,6 +67,9 @@
             </tbody>
         </table>
     </div>
+    {% if p.receita_trimestre_prevista %}
+    <p class="hint">Trimestre completo (previsto, com as parcelas já geradas nos meses seguintes): R$ {{ p.receita_trimestre_prevista|moeda }}</p>
+    {% endif %}
     <p class="hint">Provisão deste mês = acumulado do trimestre até {{ mes_label }} − meses anteriores. Adicional de 10% sobre a base acima de R$ 60.000 no trimestre{% if p.rede %}, um único limite para a empresa{% endif %}.</p>
     {% if p.rede %}
     <div class="table-wrap">
@@ -118,6 +121,9 @@
             </tbody>
         </table>
     </div>
+    {% if det.provisao and det.provisao.mes.reversao %}
+    <p style="color:#92400e;"><strong>Reversão de provisão (o lucro do trimestre caiu): −R$ {{ (0 - det.provisao.mes.total)|moeda }}</strong></p>
+    {% endif %}
     {% if det.provisao %}
     {% set per = det.provisao.periodo %}
     <p style="margin:10px 0 4px;"><strong>Período {{ det.competencias[0] }} a {{ det.competencias[-1] }} (empresa)</strong></p>
