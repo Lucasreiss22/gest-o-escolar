@@ -280,6 +280,8 @@ from carga_tributos import (
     _linhas,
     _savepoint,
     ajustes_lucro_real,
+    apagar_saldos_desde,
+    apagar_tributos_snapshot,
     cache_buscar,
     cache_guardar,
     carregar_custos_meses,
@@ -287,7 +289,9 @@ from carga_tributos import (
     config_efetiva,
     efeito_caixa_custo as _efeito_caixa_custo,
     gravar_saldo_periodo,
+    gravar_tributos_snapshot,
     lair_do_mes,
+    registrar_fechamento_lucro_real,
     ler_saldos_lucro_real,
     ler_tributos_snapshot,
     resumir_custos as resumir_custos_operacionais,
@@ -4095,8 +4099,9 @@ def _lucro_real_rede(mes_filtro, cursor=None):
     ajustes = {c: ajustes_todos.get(c) for c in comps}
     ordem = [u.get("id") for u in ctx["rede"] if u.get("id") in meses_lair]
     lair_por_comp = {c: arred(sum(float(meses_lair[u][c].get("lair") or 0) for u in ordem)) for c in todas}
+    saldos_gravados = ler_saldos_lucro_real(cursor, schema_matriz_q)
     saldo = saldo_antes_do_periodo(
-        ler_saldos_lucro_real(cursor, schema_matriz_q),
+        saldos_gravados,
         [
             {"periodo": p["periodo"], "inicio": p["competencias"][0], "meses": len(p["competencias"]),
              "lair": arred(sum(lair_por_comp[c] for c in p["competencias"])),
@@ -4125,6 +4130,8 @@ def _lucro_real_rede(mes_filtro, cursor=None):
         "competencias": comps,
         "meses_unidades": {u: {c: meses_lair[u][c] for c in comps} for u in ordem},
         "fim_periodo": _fim_periodo_lucro_real(mes_filtro, periodo),
+        "periodo_fechado": bool((saldos_gravados.get(_fim_periodo_lucro_real(mes_filtro, periodo)) or {}).get("fechado")),
+        "darf_vencimento": vencimento_trimestre(_fim_periodo_lucro_real(mes_filtro, periodo)) if periodo != "anual_estimativa" else None,
         "periodo_tipo": periodo,
         "lair_empresa": lair_empresa,
         "lair_unidades": {u: arred(v) for u, v in lair_unidades.items()},
@@ -13921,6 +13928,7 @@ def pagina_financeiro():
         colaborador_sel=colaborador_sel,
         nfse_aluno=nfse_aluno,
         mensalidades_nfse=mensalidades_nfse,
+        hoje_data=date.today(),
     )
 
 @app.route("/financeiro/excluir/<int:id>", methods=["POST"])
@@ -14574,6 +14582,131 @@ def lucro_real_ajuste_excluir(ajuste_id):
     finally:
         conexao.close()
     return redirect(url_for("pagina_financeiro", mes=mes_volta))
+
+
+MOTIVO_MINIMO_REABERTURA_REAL = 15
+
+
+def _periodo_real_da_matriz(cursor, mes):
+    """(ctx, fim do trimestre) ou mensagem de erro: fechar e reabrir o período do Lucro Real é da matriz,
+    só no trimestral e só para administrador."""
+    if normalizar_papel(session.get("usuario_papel")) != "admin":
+        return None, None, "Só o administrador fecha ou reabre o período do Lucro Real."
+    ctx = _contexto_tributario(cursor)
+    if ctx["papel"] == "filial":
+        return None, None, "O período do Lucro Real é da empresa: feche ou reabra na matriz."
+    ef = ctx["efetiva"]
+    if ef.get("regime_tributario") != "lucro_real":
+        return None, None, "A empresa não está no Lucro Real."
+    if (ef.get("lucro_real_periodo") or "trimestral") != "trimestral":
+        return None, None, "O fechamento explícito vale só para o Lucro Real trimestral."
+    return ctx, meses_do_trimestre(mes)[-1], None
+
+
+def _schema_consulta(ctx, unidade):
+    schema_u = unidade.get("db_nome") or ""
+    if schema_u == ctx["schema"] or len(ctx["rede"]) == 1:
+        return None
+    return schema_u if schema_valido(schema_u) else ""
+
+
+@app.route("/financeiro/lucro-real/fechar-periodo", methods=["POST"])
+def lucro_real_fechar_periodo():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    mes = (request.form.get("mes") or "").strip()[:7]
+    try:
+        parse_mes(mes)
+    except Exception:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("pagina_financeiro"))
+    destino = redirect(url_for("pagina_financeiro", mes=mes))
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return destino
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            ctx, fim, erro = _periodo_real_da_matriz(cursor, mes)
+            if erro:
+                flash(erro, "warning")
+                return destino
+            vencimento = vencimento_trimestre(fim)
+            if date.today() <= vencimento:
+                flash(f"O período só pode ser fechado depois do vencimento da DARF ({vencimento.strftime('%d/%m/%Y')}).", "warning")
+                return destino
+            if (ler_saldos_lucro_real(cursor, None).get(fim) or {}).get("fechado"):
+                flash("Este período do Lucro Real já está fechado.", "info")
+                return destino
+            real = _lucro_real_rede(fim, cursor)
+            if not real or real.get("erros"):
+                flash("Período não fechado: " + "; ".join((real or {}).get("erros") or ["apuração indisponível"]), "danger")
+                return destino
+            usuario = session.get("usuario_nome") or session.get("usuario_email")
+            gravar_saldo_periodo(cursor, None, fim, real["provisao"]["periodo"], fechado_por=usuario)
+            for unidade in ctx["rede"]:
+                schema_q = _schema_consulta(ctx, unidade)
+                if schema_q == "":
+                    continue
+                for comp, dados in (real["meses_unidades"].get(unidade.get("id")) or {}).items():
+                    if dados.get("folha_fechada") and not dados.get("congelado"):
+                        gravar_tributos_snapshot(cursor, schema_q, comp, unidade.get("id"), "lucro_real", dados)
+            registrar_fechamento_lucro_real(cursor, None, fim, "fechar", usuario)
+        conexao.commit()
+        flash(f"Período do Lucro Real até {fim} fechado: o saldo de prejuízo passa a vir deste fechamento.", "success")
+    except Exception as e:
+        conexao.rollback()
+        flash(f"Erro ao fechar o período: {e}", "danger")
+    finally:
+        conexao.close()
+    return destino
+
+
+@app.route("/financeiro/lucro-real/reabrir-periodo", methods=["POST"])
+def lucro_real_reabrir_periodo():
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    mes = (request.form.get("mes") or "").strip()[:7]
+    try:
+        parse_mes(mes)
+    except Exception:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("pagina_financeiro"))
+    destino = redirect(url_for("pagina_financeiro", mes=mes))
+    motivo = (request.form.get("motivo") or "").strip()
+    if len(motivo) < MOTIVO_MINIMO_REABERTURA_REAL:
+        flash(f"Escreva o motivo da reabertura (mínimo {MOTIVO_MINIMO_REABERTURA_REAL} caracteres).", "warning")
+        return destino
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return destino
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            ctx, fim, erro = _periodo_real_da_matriz(cursor, mes)
+            if erro:
+                flash(erro, "warning")
+                return destino
+            if not (ler_saldos_lucro_real(cursor, None).get(fim) or {}).get("fechado"):
+                flash("Este período do Lucro Real não está fechado.", "info")
+                return destino
+            apagar_saldos_desde(cursor, None, fim)
+            inicio = meses_do_trimestre(fim)[0]
+            for unidade in ctx["rede"]:
+                schema_q = _schema_consulta(ctx, unidade)
+                if schema_q != "":
+                    apagar_tributos_snapshot(cursor, schema_q, desde=inicio)
+            registrar_fechamento_lucro_real(
+                cursor, None, fim, "reabrir", session.get("usuario_nome") or session.get("usuario_email"), motivo
+            )
+        conexao.commit()
+        flash(f"Período do Lucro Real até {fim} reaberto; os saldos deste período e dos seguintes serão recalculados.", "success")
+    except Exception as e:
+        conexao.rollback()
+        flash(f"Erro ao reabrir o período: {e}", "danger")
+    finally:
+        conexao.close()
+    return destino
 
 
 @app.route("/financeiro/relatorio-tributario")
@@ -16773,6 +16906,7 @@ def reabrir_competencia_folha():
                 cursor, mes_filtro, motivo,
                 usuario_id=session.get("usuario_id"), usuario_nome=session.get("usuario_nome"),
             )
+            apagar_tributos_snapshot(cursor, None, [mes_filtro])
         conexao.commit()
     except ValueError as e:
         conexao.rollback()
