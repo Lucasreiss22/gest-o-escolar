@@ -159,20 +159,23 @@ class TestAppParcelasFeriados(unittest.TestCase):
             return self.app._bloqueio_parcelas(Cur(), **kwargs)
 
     def test_baixa_no_caixa_em_trimestre_travado(self):
-        aberta = [{"data_vencimento": date(2026, 5, 10), "data_pagamento": None, "mora": 0}]
-        self.assertIsNotNone(self._bloqueio("caixa", aberta, ids=[1], pagamentos=[date(2026, 6, 15)], vencimento_dos_ids=False))
-        self.assertIsNone(self._bloqueio("caixa", aberta, ids=[1], pagamentos=[date(2026, 10, 4)], vencimento_dos_ids=False))
+        aberta = [{"data_vencimento": date(2026, 5, 10), "data_pagamento": None, "status": "Atrasado", "mora": 0}]
+        self.assertIsNotNone(self._bloqueio("caixa", aberta, operacao="dar_baixa", ids=[1],
+                                            depois={"pag": date(2026, 6, 15), "status": "Pago"}))
+        self.assertIsNone(self._bloqueio("caixa", aberta, operacao="dar_baixa", ids=[1],
+                                         depois={"pag": date(2026, 10, 4), "status": "Pago"}))
 
     def test_tirar_baixa_paga_em_trimestre_travado(self):
-        paga = [{"data_vencimento": date(2026, 9, 10), "data_pagamento": date(2026, 6, 20), "mora": 0}]
-        self.assertIsNotNone(self._bloqueio("caixa", paga, ids=[1], vencimento_dos_ids=False))
-        self.assertIsNone(self._bloqueio("competencia", paga, ids=[1], vencimento_dos_ids=False))
+        paga = [{"data_vencimento": date(2026, 9, 10), "data_pagamento": date(2026, 6, 20), "status": "Pago", "mora": 0}]
+        depois = {"pag": None, "status": "Pendente", "mora": 0}
+        self.assertIsNotNone(self._bloqueio("caixa", paga, operacao="tirar_baixa", ids=[1], depois=depois))
+        self.assertIsNone(self._bloqueio("competencia", paga, operacao="tirar_baixa", ids=[1], depois=depois))
 
     def test_baixa_na_competencia_so_trava_com_juros(self):
-        aberta = [{"data_vencimento": date(2026, 5, 10), "data_pagamento": None, "mora": 0}]
-        kwargs = {"ids": [1], "pagamentos": [date(2026, 6, 15)], "vencimento_dos_ids": False}
-        self.assertIsNone(self._bloqueio("competencia", aberta, **kwargs))
-        self.assertIsNotNone(self._bloqueio("competencia", aberta, mora_nova=True, **kwargs))
+        aberta = [{"data_vencimento": date(2026, 5, 10), "data_pagamento": None, "status": "Atrasado", "mora": 0}]
+        kwargs = {"operacao": "dar_baixa", "ids": [1]}
+        self.assertIsNone(self._bloqueio("competencia", aberta, depois={"pag": date(2026, 6, 15), "status": "Pago", "mora": 0}, **kwargs))
+        self.assertIsNotNone(self._bloqueio("competencia", aberta, depois={"pag": date(2026, 6, 15), "status": "Pago", "mora": 1}, **kwargs))
 
     def test_feriados_do_mes_junta_nacionais(self):
         class Cur:

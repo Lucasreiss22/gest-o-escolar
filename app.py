@@ -263,10 +263,20 @@ from empresa import (
 )
 from unidades import TIPOS_UNIDADE, resumo_unidade, unidades_da_rede
 from dre import calcular_dre, consolidar_dre, linhas_para_tela
-from parcelas import REGIMES_TRIMESTRAIS, juntar_planos, plano_parcelas, texto_puladas, travas_da_escola, vencimento_trimestre
+from parcelas import (
+    REGIMES_TRIMESTRAIS,
+    competencias_afetadas,
+    juntar_planos,
+    mensagem_competencia_apurada,
+    plano_parcelas,
+    texto_puladas,
+    travas_da_escola,
+    vencimento_trimestre,
+)
 from carga_tributos import (
     PADROES_TRIBUTARIOS,
     ROTULOS_HERDADOS,
+    _linhas,
     ajustes_lucro_real,
     cache_buscar,
     cache_guardar,
@@ -3577,60 +3587,62 @@ def _vencimento_trimestre(mes_filtro):
     return vencimento_trimestre(mes_filtro)
 
 
-def _travas_rede(cursor):
+def _travas_rede(cursor, hoje=None):
     """Travas de parcelas da empresa: regime da matriz e competências congeladas de todas as unidades."""
     ctx = _contexto_tributario(cursor)
     schemas = None
     if len(ctx["rede"]) > 1:
         schemas = [u.get("db_nome") for u in ctx["rede"] if schema_valido(u.get("db_nome"))]
-    return travas_da_escola(cursor, regime=ctx["efetiva"].get("regime_tributario") or "", schemas=schemas)
+    return travas_da_escola(cursor, hoje=hoje, regime=ctx["efetiva"].get("regime_tributario") or "", schemas=schemas)
 
 
-def _bloqueio_parcelas(cursor, ids=(), vencimentos=(), pagamentos=(), vencimento_dos_ids=True, mora_nova=False):
-    """Mensagem se a operação mexe em trimestre já vencido (Presumido/Real); None se pode.
+_REGIMES_COM_TRAVA = ("simples_nacional",) + REGIMES_TRIMESTRAIS
 
-    Caixa: a receita é do mês do pagamento. Competência: a receita é do mês do vencimento, mas juros e
-    multa entram no mês do pagamento. `vencimento_dos_ids=False` nas baixas, que não mudam a receita
-    por vencimento; `mora_nova` quando a operação grava juros/multa."""
+
+def _bloqueio_parcelas(cursor, operacao, ids=(), depois=None, hoje=None):
+    """Mensagem se a operação mexe em competência já apurada; None se pode.
+
+    `depois`: o que a operação grava ({venc, pag, status, valor, mora}); None em exclusão.
+    O regime e a forma de apuração são os da empresa (na rede, os da matriz)."""
     ctx = _contexto_tributario(cursor)
     regime = ctx["efetiva"].get("regime_tributario")
-    if regime not in REGIMES_TRIMESTRAIS:
+    if regime not in _REGIMES_COM_TRAVA:
         return None
-    travas = _travas_rede(cursor)
+    ids = [int(i) for i in ids if str(i).strip().isdigit()]
+    if not ids:
+        return None
+    travas = _travas_rede(cursor, hoje)
     if not travas:
         return None
-    caixa = regime_apuracao_efetivo(regime, ctx["efetiva"].get("regime_apuracao"))[0] == "caixa"
-    novos_pag = {d.strftime("%Y-%m") for d in pagamentos if hasattr(d, "strftime")}
-    comps = set(novos_pag) if caixa else {d.strftime("%Y-%m") for d in vencimentos if hasattr(d, "strftime")}
-    tem_mora = bool(mora_nova)
-    ids = [int(i) for i in ids if str(i).isdigit()]
-    if ids:
-        cursor.execute(
-            "SELECT data_vencimento, data_pagamento, "
-            "COALESCE(juros_valor, 0) + COALESCE(multa_valor, 0) AS mora "
-            "FROM financeiro_mensalidades WHERE id = ANY(%s)",
-            (ids,),
-        )
-        for row in cursor.fetchall() or []:
-            if isinstance(row, dict):
-                venc, pag, mora = row["data_vencimento"], row["data_pagamento"], row["mora"]
-            else:
-                venc, pag, mora = row[0], row[1], row[2]
-            com_mora = float(mora or 0) > 0
-            if pag and (caixa or com_mora):
-                comps.add(pag.strftime("%Y-%m"))
-            if not caixa and venc and vencimento_dos_ids:
-                comps.add(venc.strftime("%Y-%m"))
-            tem_mora = tem_mora or com_mora
-    if not caixa and tem_mora:
-        comps |= novos_pag
-    travadas = sorted(c for c in comps if c in travas)
-    if not travadas:
-        return None
-    rotulos = ", ".join(f"{c[5:7]}/{c[:4]}" for c in travadas)
-    return (f"Competência já apurada ({rotulos}): o trimestre encerrou e a DARF venceu. "
-            "A parcela não pode ser criada, alterada, baixada nem excluída nesse período: "
-            "mudaria a receita e os tributos já declarados.")
+    apuracao = regime_apuracao_efetivo(regime, ctx["efetiva"].get("regime_apuracao"))[0]
+    cursor.execute(
+        "SELECT data_vencimento, data_pagamento, status, valor, "
+        "COALESCE(juros_valor, 0) + COALESCE(multa_valor, 0) AS mora "
+        "FROM financeiro_mensalidades WHERE id = ANY(%s)",
+        (ids,),
+    )
+    comps = set()
+    for row in _linhas(cursor):
+        antes = {
+            "venc": row.get("data_vencimento"), "pag": row.get("data_pagamento"),
+            "status": row.get("status"), "valor": row.get("valor"), "mora": row.get("mora"),
+        }
+        comps |= competencias_afetadas(regime, apuracao, operacao, antes, depois)
+    travadas = {c for c in comps if c in travas}
+    return mensagem_competencia_apurada(regime, travadas) if travadas else None
+
+
+def _competencias_congeladas_da_receita(cursor, a_partir):
+    """Competências a partir de `a_partir` em que mudar o valor de parcela aberta altera receita já apurada.
+    Só na competência (no caixa, parcela aberta não é receita); antes do mês atual o limite já cobre."""
+    ctx = _contexto_tributario(cursor)
+    regime = ctx["efetiva"].get("regime_tributario")
+    if regime not in _REGIMES_COM_TRAVA:
+        return []
+    if regime_apuracao_efetivo(regime, ctx["efetiva"].get("regime_apuracao"))[0] != "competencia":
+        return []
+    travas = _travas_rede(cursor)
+    return sorted(c for c in travas.congeladas if c >= a_partir)
 
 
 def _presumido_empresa(cursor, mes_filtro, ctx):
@@ -9515,6 +9527,8 @@ def pagina_alunos():
                         )
                         if liquido <= 0:
                             raise ValueError("Mensalidade com desconto zerada: ajuste as parcelas no Financeiro.")
+                        mes_atual = datetime.now().strftime("%Y-%m")
+                        travadas = _competencias_congeladas_da_receita(cursor, mes_atual)
                         cursor.execute(
                             """
                             UPDATE financeiro_mensalidades
@@ -9524,14 +9538,22 @@ def pagina_alunos():
                               AND status = ANY(%s)
                               AND ABS(valor - %s) > 0.004
                               AND TO_CHAR(data_vencimento, 'YYYY-MM') >= %s
+                              AND NOT (TO_CHAR(data_vencimento, 'YYYY-MM') = ANY(%s))
                             """,
-                            (liquido, aluno_id, list(STATUS_MENSALIDADE_ABERTA), liquido, datetime.now().strftime("%Y-%m")),
+                            (liquido, aluno_id, list(STATUS_MENSALIDADE_ABERTA), liquido, mes_atual, travadas),
                         )
                         qtd = cursor.rowcount
                         conexao.commit()
+                        texto_travadas = ""
+                        if travadas:
+                            texto_travadas = (
+                                " Competências já apuradas (" + ", ".join(f"{c[5:7]}/{c[:4]}" for c in travadas) +
+                                ") ficaram com o valor original."
+                            )
                         flash(
                             f"{qtd} mensalidade(s) em aberto ajustada(s) para R$ {br_money(liquido)}, do mês atual em diante. "
-                            "Parcelas de meses passados mantêm o valor original para não alterar competências já apuradas.",
+                            "Parcelas de meses passados mantêm o valor original para não alterar competências já apuradas."
+                            + texto_travadas,
                             "success",
                         )
                 except Exception as e:
@@ -12822,7 +12844,11 @@ def pagina_financeiro():
                                 data_pag_d = datetime.strptime(str(data_pag)[:10], "%Y-%m-%d").date() if data_pag else None
                             except ValueError:
                                 data_pag_d = None
-                            bloqueio = _bloqueio_parcelas(cursor, [cobranca_id], [venc_date], [data_pag_d])
+                            valor_edit = _parse_moeda(request.form.get("valor"), 0.0)
+                            bloqueio = _bloqueio_parcelas(cursor, "editar_cobranca", [cobranca_id], {
+                                "venc": venc_date, "pag": data_pag_d,
+                                "status": "Pago" if pago else "Pendente", "valor": valor_edit,
+                            })
                             if bloqueio:
                                 raise ValueError(bloqueio)
                             cursor.execute(
@@ -12853,7 +12879,7 @@ def pagina_financeiro():
                                     limpar_campo("descricao"),
                                     venc_date,
                                     limpar_campo("descricao"),
-                                    _parse_moeda(request.form.get("valor"), 0.0),
+                                    valor_edit,
                                     venc_date,
                                     data_pag,
                                     pago,
@@ -12878,7 +12904,7 @@ def pagina_financeiro():
                         except (TypeError, ValueError):
                             flash("Informe a data de vencimento.", "danger")
                         else:
-                            bloqueio = _bloqueio_parcelas(cursor, [cobranca_id], [venc_date])
+                            bloqueio = _bloqueio_parcelas(cursor, "alterar_data_vencimento", [cobranca_id], {"venc": venc_date})
                             if bloqueio:
                                 raise ValueError(bloqueio)
                             cursor.execute(
@@ -12924,7 +12950,7 @@ def pagina_financeiro():
                             except ValueError:
                                 raise ValueError("Data de pagamento inválida.")
                             bloqueio = _bloqueio_parcelas(
-                                cursor, [request.form.get("cobranca_id")], pagamentos=[nova_pag], vencimento_dos_ids=False
+                                cursor, "alterar_data_pagamento", [request.form.get("cobranca_id")], {"pag": nova_pag}
                             )
                             if bloqueio:
                                 raise ValueError(bloqueio)
@@ -12958,10 +12984,9 @@ def pagina_financeiro():
                             flash("Informe a data da baixa. No regime de caixa, essa data define o mês do imposto.", "danger")
                         else:
                             juros_percentual, multa_valor = _acrescimos_form()
-                            bloqueio = _bloqueio_parcelas(
-                                cursor, [request.form.get("cobranca_id")], pagamentos=[data_baixa],
-                                vencimento_dos_ids=False, mora_nova=bool(juros_percentual or multa_valor),
-                            )
+                            bloqueio = _bloqueio_parcelas(cursor, "dar_baixa", [request.form.get("cobranca_id")], {
+                                "pag": data_baixa, "status": "Pago", "mora": 1 if (juros_percentual or multa_valor) else 0,
+                            })
                             if bloqueio:
                                 raise ValueError(bloqueio)
                             cursor.execute(
@@ -13014,10 +13039,9 @@ def pagina_financeiro():
                             flash("Informe a data da baixa. No regime de caixa, essa data define o mês do imposto.", "danger")
                         else:
                             juros_percentual, multa_valor = _acrescimos_form()
-                            bloqueio = _bloqueio_parcelas(
-                                cursor, ids, pagamentos=[data_baixa],
-                                vencimento_dos_ids=False, mora_nova=bool(juros_percentual or multa_valor),
-                            )
+                            bloqueio = _bloqueio_parcelas(cursor, "dar_baixa_lote", ids, {
+                                "pag": data_baixa, "status": "Pago", "mora": 1 if (juros_percentual or multa_valor) else 0,
+                            })
                             if bloqueio:
                                 raise ValueError(bloqueio)
                             cursor.execute(
@@ -13060,7 +13084,7 @@ def pagina_financeiro():
                         if not ids:
                             flash("Selecione ao menos uma mensalidade para tirar a baixa.", "danger")
                         else:
-                            bloqueio = _bloqueio_parcelas(cursor, ids, vencimento_dos_ids=False)
+                            bloqueio = _bloqueio_parcelas(cursor, acao, ids, {"pag": None, "status": "Pendente", "mora": 0})
                             if bloqueio:
                                 raise ValueError(bloqueio)
                             cursor.execute(
@@ -13659,8 +13683,9 @@ def excluir_financeiro(id):
     if conexao:
         try:
             with conexao.cursor() as cursor:
-                bloqueio = _bloqueio_parcelas(cursor, [id])
+                bloqueio = _bloqueio_parcelas(cursor, "excluir_financeiro", [id])
                 if bloqueio:
+                    conexao.rollback()
                     flash(bloqueio, "danger")
                     return redirect(url_for("pagina_financeiro"))
                 cursor.execute("DELETE FROM financeiro_mensalidades WHERE id = %s;", (id,))
