@@ -1,15 +1,20 @@
 """Quais parcelas de um contrato podem ser geradas agora.
 
 Padrão: do mês atual em diante. Meses passados só com confirmação de quem cadastra.
-Competência já apurada no Simples nunca recebe parcela nova: mudaria receita, RBT12 e DAS já declarados.
+Competência já apurada nunca recebe parcela nova: mudaria receita e tributos já declarados.
+Simples: PGDAS-D vencido (dia 20 do mês seguinte). Presumido/Real: trimestre com DARF vencida
+(último dia útil do mês seguinte ao trimestre).
 """
 
 import calendar
-from datetime import date, datetime
+import re
+from datetime import date, datetime, timedelta
 
 from simples_nacional import _ORIGENS_CONGELADAS
 
 DIA_LIMITE_PGDAS = 20
+REGIMES_TRIMESTRAIS = ("lucro_presumido", "lucro_real")
+_SCHEMA_OK = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 
 def add_meses(data_ref, meses):
@@ -28,11 +33,32 @@ def _comp_menos(hoje, meses):
     return f"{total // 12:04d}-{total % 12 + 1:02d}"
 
 
+def _ultimo_dia_util(ano, mes):
+    dia = date(ano, mes, calendar.monthrange(ano, mes)[1])
+    while dia.weekday() >= 5:
+        dia -= timedelta(days=1)
+    return dia
+
+
+def vencimento_trimestre(comp):
+    """DARF trimestral de IRPJ/CSLL da competência: último dia útil do mês seguinte ao fim do trimestre."""
+    ano, mes = int(comp[:4]), int(comp[5:7])
+    fim = ((mes - 1) // 3 + 1) * 3
+    ano_v, mes_v = (ano + 1, 1) if fim == 12 else (ano, fim + 1)
+    return _ultimo_dia_util(ano_v, mes_v)
+
+
 def limite_apurado(hoje, regime_tributario):
-    """Última competência com PGDAS-D vencido (dia 20 do mês seguinte). None fora do Simples."""
-    if (regime_tributario or "") != "simples_nacional":
-        return None
-    return _comp_menos(hoje, 1 if hoje.day > DIA_LIMITE_PGDAS else 2)
+    """Última competência já apurada e vencida. None sem regime informado."""
+    regime = regime_tributario or ""
+    if regime == "simples_nacional":
+        return _comp_menos(hoje, 1 if hoje.day > DIA_LIMITE_PGDAS else 2)
+    if regime in REGIMES_TRIMESTRAIS:
+        fim_tri = _comp_menos(hoje, (hoje.month - 1) % 3 + 1)
+        if hoje > vencimento_trimestre(fim_tri):
+            return fim_tri
+        return _comp_menos(hoje, (hoje.month - 1) % 3 + 4)
+    return None
 
 
 class TravaCompetencias:
@@ -47,22 +73,27 @@ class TravaCompetencias:
         return bool(self.limite or self.congeladas)
 
 
-def travas_da_escola(cursor, hoje=None):
+def travas_da_escola(cursor, hoje=None, regime=None, schemas=None):
+    """Travas da empresa. `regime`: regime da empresa (a filial usa o da matriz); None lê a própria configuração.
+    `schemas`: unidades da rede; competência congelada em qualquer uma trava a empresa toda."""
     hoje = hoje or date.today()
-    cursor.execute("SELECT regime_tributario FROM configuracoes WHERE id = 1")
-    linha = cursor.fetchone() or {}
-    regime = linha.get("regime_tributario") if isinstance(linha, dict) else (linha[0] if linha else None)
+    if regime is None:
+        cursor.execute("SELECT regime_tributario FROM configuracoes WHERE id = 1")
+        linha = cursor.fetchone() or {}
+        regime = linha.get("regime_tributario") if isinstance(linha, dict) else (linha[0] if linha else None)
     congeladas = set()
     if regime == "simples_nacional":
+        tabelas = [f'"{s}".simples_competencias' for s in (schemas or []) if _SCHEMA_OK.match(s or "")]
         cursor.execute("SAVEPOINT travas_simples")
         try:
-            cursor.execute(
-                "SELECT competencia FROM simples_competencias WHERE origem = ANY(%s)",
-                (sorted(_ORIGENS_CONGELADAS),),
-            )
-            congeladas = {
-                (l["competencia"] if isinstance(l, dict) else l[0]) for l in cursor.fetchall() or []
-            }
+            for tabela in tabelas or ["simples_competencias"]:
+                cursor.execute(
+                    f"SELECT competencia FROM {tabela} WHERE origem = ANY(%s)",
+                    (sorted(_ORIGENS_CONGELADAS),),
+                )
+                congeladas |= {
+                    (l["competencia"] if isinstance(l, dict) else l[0]) for l in cursor.fetchall() or []
+                }
             cursor.execute("RELEASE SAVEPOINT travas_simples")
         except Exception:
             cursor.execute("ROLLBACK TO SAVEPOINT travas_simples")
@@ -101,8 +132,8 @@ def texto_puladas(plano):
         )
     if plano.get("travadas"):
         partes.append(
-            f"Parcelas em competências já apuradas no Simples ({_faixa(plano['travadas'])}) foram bloqueadas: "
-            "mudariam receita, RBT12 e DAS já declarados."
+            f"Parcelas em competências já apuradas ({_faixa(plano['travadas'])}) foram bloqueadas: "
+            "mudariam a receita e os tributos já declarados."
         )
     return " ".join(partes)
 

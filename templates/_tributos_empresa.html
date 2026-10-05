@@ -1,0 +1,199 @@
+{% if avisos_tributos %}
+<div class="card-box" style="background:#fffbeb;border:1px solid #f59e0b;">
+    <strong style="color:#92400e;">Atenção nos tributos</strong>
+    <ul style="margin:6px 0 0 18px;color:#78350f;">
+        {% for aviso in avisos_tributos %}<li>{{ aviso }}</li>{% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+{% if regime_atual == 'simples_nacional' and apuracao_simples and apuracao_simples.rede %}
+{% set ap = apuracao_simples %}
+<div class="card-box">
+    <h3 style="margin-top:0;">Simples Nacional da empresa</h3>
+    {% if ap.rede.papel == 'filial' %}
+    <p class="hint">DAS recolhido pela matriz {{ ap.rede.matriz_nome }} (CNPJ {{ ap.rede.matriz_cnpj }}). Esta filial não tem PGDAS próprio: abaixo está a parte dela no DAS da empresa.</p>
+    {% else %}
+    <p class="hint">DAS da empresa (matriz + {{ ap.rede.n_filiais }} filial(is)): receita e RBT12 somadas de todos os estabelecimentos. Um PGDAS-D, entregue pela matriz.</p>
+    {% endif %}
+    <p><strong>RBT12 da empresa:</strong> R$ {{ ap.rbt12|moeda }} · Anexo {{ ap.anexo }}, faixa {{ ap.faixa }} · alíquota efetiva {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Estabelecimento</th><th>CNPJ</th><th>Receita do mês</th><th>Parte do DAS</th></tr></thead>
+            <tbody>
+            {% for u in ap.unidades %}
+                <tr {% if u.atual %}style="font-weight:700;"{% endif %}>
+                    <td>{{ u.nome }}{% if u.atual %} (esta unidade){% endif %}</td>
+                    <td>{{ u.cnpj or '—' }}</td>
+                    <td>R$ {{ u.receita_mes|moeda }}</td>
+                    <td>R$ {{ u.das|moeda }}</td>
+                </tr>
+            {% endfor %}
+                <tr style="font-weight:700;background:#f8fafc;">
+                    <td colspan="2">Empresa</td>
+                    <td>R$ {{ ap.receita_mes|moeda }}</td>
+                    <td>R$ {{ ap.das_total|moeda }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if regime_atual == 'lucro_presumido' and apuracao_presumido %}
+{% set p = apuracao_presumido %}
+{% set tri = p.empresa.trimestre %}
+<div class="card-box">
+    <h3 style="margin-top:0;">Lucro Presumido — trimestre da empresa</h3>
+    <p class="hint">
+        Presunção IRPJ {{ p.presuncao_irpj_pct|round(3) }}% · CSLL {{ p.presuncao_csll_pct|round(3) }}%
+        {% if p.presuncao_fundamento %} · {{ p.presuncao_fundamento }}{% endif %}
+        · ISS {{ p.iss_pct|round(2) }}% · PIS/COFINS {% if p.incluir_mora %}com{% else %}sem{% endif %} juros e multa
+        {% if p.lc224 %} · LC 224/2025 aplicada{% endif %}
+    </p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Receita do trimestre</th><th>Base IRPJ</th><th>Base CSLL</th><th>IRPJ</th><th>Adicional</th><th>CSLL</th><th>DARF vence</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>R$ {{ tri.receita|moeda }}</td>
+                    <td>R$ {{ tri.base_irpj|moeda }}</td>
+                    <td>R$ {{ tri.base_csll|moeda }}</td>
+                    <td>R$ {{ tri.irpj|moeda }}</td>
+                    <td>R$ {{ tri.adicional|moeda }}</td>
+                    <td>R$ {{ tri.csll|moeda }}</td>
+                    <td>{{ p.vencimento_darf.strftime('%d/%m/%Y') }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="hint">Provisão deste mês = acumulado do trimestre até {{ mes_label }} − meses anteriores. Adicional de 10% sobre a base acima de R$ 60.000 no trimestre{% if p.rede %}, um único limite para a empresa{% endif %}.</p>
+    {% if p.rede %}
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Estabelecimento</th><th>Receita do mês</th><th>IRPJ</th><th>Adicional</th><th>CSLL</th><th>PIS</th><th>COFINS</th></tr></thead>
+            <tbody>
+            {% for u in p.unidades %}
+                <tr {% if u.atual %}style="font-weight:700;"{% endif %}>
+                    <td>{{ u.nome }}{% if u.atual %} (esta unidade){% endif %}</td>
+                    <td>R$ {{ u.receita_mes|moeda }}</td>
+                    <td>R$ {{ (u.irpj or 0)|moeda }}</td>
+                    <td>R$ {{ (u.adicional or 0)|moeda }}</td>
+                    <td>R$ {{ (u.csll or 0)|moeda }}</td>
+                    <td>R$ {{ (u.pis or 0)|moeda }}</td>
+                    <td>R$ {{ (u.cofins or 0)|moeda }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="hint">O ISS é de cada unidade (alíquota do município): R$ {{ p.iss|moeda }} nesta unidade.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if regime_atual == 'lucro_real' and apuracao_real %}
+{% set r = apuracao_real %}
+{% set det = r.detalhe or {} %}
+<div class="card-box">
+    <h3 style="margin-top:0;">Lucro Real</h3>
+    <p class="hint">
+        PIS/COFINS {% if r.pis_cofins.modo == 'nao_cumulativo' %}não cumulativo{% else %}cumulativo (ensino regular, Lei 10.833/2003, art. 10, XIV){% endif %}
+        · ISS {{ r.iss_pct|round(2) }}%
+        · {% if r.periodo_tipo == 'anual_estimativa' %}anual por estimativa ({{ 'receita' if r.estimativa_modo == 'receita' else 'balancete' }}){% else %}trimestral{% endif %}
+    </p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>PIS</th><th>COFINS</th><th>ISS</th><th>IRPJ</th><th>Adicional</th><th>CSLL</th><th>Total</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>R$ {{ r.pis_cofins.pis|moeda }}</td>
+                    <td>R$ {{ r.pis_cofins.cofins|moeda }}</td>
+                    <td>R$ {{ r.iss|moeda }}</td>
+                    <td>R$ {{ r.irpj|moeda }}</td>
+                    <td>R$ {{ r.adicional|moeda }}</td>
+                    <td>R$ {{ r.csll|moeda }}</td>
+                    <td><strong>R$ {{ r.tributos|moeda }}</strong></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    {% if det.provisao %}
+    {% set per = det.provisao.periodo %}
+    <p style="margin:10px 0 4px;"><strong>Período {{ det.competencias[0] }} a {{ det.competencias[-1] }} (empresa)</strong></p>
+    <div class="table-wrap">
+        <table>
+            <tbody>
+                <tr><td>Resultado antes de IRPJ/CSLL</td><td>R$ {{ per.lair|moeda }}</td></tr>
+                <tr><td>Lucro ajustado IRPJ / CSLL</td><td>R$ {{ per.lucro_ajustado_irpj|moeda }} / R$ {{ per.lucro_ajustado_csll|moeda }}</td></tr>
+                <tr><td>Compensação (limite 30%) IRPJ / CSLL</td><td>R$ {{ per.compensacao_irpj|moeda }} / R$ {{ per.compensacao_csll|moeda }}</td></tr>
+                <tr><td>Lucro real / base da CSLL</td><td>R$ {{ per.base_irpj|moeda }} / R$ {{ per.base_csll|moeda }}</td></tr>
+                <tr><td>Saldo anterior: prejuízo fiscal / base negativa</td><td>R$ {{ det.saldo_anterior.prejuizo_fiscal|moeda }} / R$ {{ det.saldo_anterior.base_negativa_csll|moeda }}</td></tr>
+                <tr><td>Saldo após o período: prejuízo fiscal / base negativa</td><td>R$ {{ per.novo_prejuizo|moeda }} / R$ {{ per.nova_base_negativa|moeda }}</td></tr>
+            </tbody>
+        </table>
+    </div>
+    {% if det.unidades and det.unidades|length > 1 %}
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Estabelecimento</th><th>Resultado no período</th><th>IRPJ</th><th>Adicional</th><th>CSLL</th></tr></thead>
+            <tbody>
+            {% for u in det.unidades %}
+                <tr>
+                    <td>{{ u.nome }}</td>
+                    <td>R$ {{ u.lair|moeda }}</td>
+                    <td>R$ {{ (u.irpj or 0)|moeda }}</td>
+                    <td>R$ {{ (u.adicional or 0)|moeda }}</td>
+                    <td>R$ {{ (u.csll or 0)|moeda }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="hint">IRPJ e CSLL da empresa rateados pelo resultado positivo de cada unidade; unidade com prejuízo fica com zero.</p>
+    {% endif %}
+    <details style="margin-top:10px;">
+        <summary><strong>Adições e exclusões do período</strong></summary>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Competência</th><th>Tipo</th><th>Tributo</th><th>Descrição</th><th>Valor</th><th></th></tr></thead>
+                <tbody>
+                {% for comp in det.competencias %}
+                    {% for item in (det.ajustes.get(comp) or {}).get('itens', []) %}
+                    <tr>
+                        <td>{{ comp }}</td>
+                        <td>{{ 'Adição' if item.tipo == 'adicao' else 'Exclusão' }}</td>
+                        <td>{{ {'irpj': 'IRPJ', 'csll': 'CSLL'}.get(item.tributo, 'IRPJ e CSLL') }}</td>
+                        <td>{{ item.descricao or '—' }}</td>
+                        <td>R$ {{ item.valor|moeda }}</td>
+                        <td>
+                            {% if pode_ajustar_real and (not rede_tributos or rede_tributos.papel != 'filial') %}
+                            <form method="post" action="{{ url_for('lucro_real_ajuste_excluir', ajuste_id=item.id) }}" onsubmit="return confirm('Excluir este ajuste?');">
+                                <input type="hidden" name="mes" value="{{ mes_atual }}">
+                                <button class="btn" type="submit">Excluir</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if pode_ajustar_real and (not rede_tributos or rede_tributos.papel != 'filial') %}
+        <form method="post" action="{{ url_for('lucro_real_ajuste_salvar') }}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px;">
+            <input type="hidden" name="mes" value="{{ mes_atual }}">
+            <label>Competência<br><input type="month" name="competencia" value="{{ mes_atual }}" required></label>
+            <label>Tipo<br><select name="tipo"><option value="adicao">Adição</option><option value="exclusao">Exclusão</option></select></label>
+            <label>Tributo<br><select name="tributo"><option value="ambos">IRPJ e CSLL</option><option value="irpj">Só IRPJ</option><option value="csll">Só CSLL</option></select></label>
+            <label>Descrição<br><input type="text" name="descricao" maxlength="255" placeholder="Ex.: multa indedutível"></label>
+            <label>Valor (R$)<br><input type="text" name="valor" inputmode="decimal" required></label>
+            <button class="btn" type="submit">Adicionar</button>
+        </form>
+        {% elif rede_tributos and rede_tributos.papel == 'filial' %}
+        <p class="hint">Os ajustes são da empresa e ficam na matriz.</p>
+        {% endif %}
+    </details>
+    {% endif %}
+</div>
+{% endif %}

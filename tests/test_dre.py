@@ -3,14 +3,12 @@ import unittest
 from dre import (
     CAMPOS_BASE,
     LINHAS_DRE,
-    aliquota_simples_rede,
     calcular_dre,
     consolidar_dre,
-    das_pela_rede,
     linhas_para_tela,
 )
 from relatorios_pdf import pdf_dre
-from tributacao import apurar_simples
+from tributos_rede import apurar_simples_empresa
 from unidades import unidades_da_rede
 
 
@@ -51,25 +49,24 @@ class ConsolidarDreTest(unittest.TestCase):
 
 
 class SimplesDaRedeTest(unittest.TestCase):
-    def test_aliquota_pela_rbt12_somada(self):
-        matriz = {"rbt12": 1_000_000, "fs12": 300_000, "receita_mes": 90_000}
-        filial = {"rbt12": 800_000, "fs12": 200_000, "receita_mes": 70_000}
-        rede = aliquota_simples_rede([matriz, filial])
-        esperado = apurar_simples(1_800_000, 500_000, 12, 160_000)
-        self.assertAlmostEqual(rede["aliquota_efetiva"], esperado["aliquota_efetiva"])
-        self.assertEqual(rede["faixa"], esperado["faixa"])
+    def setUp(self):
+        matriz = {f"2026-{m:02d}": 112_990.0 for m in range(2, 10)}
+        matriz["2026-10"] = 113_870.0
+        receitas = {"matriz": matriz, "filial": {"2026-10": 51_000.0}}
+        self.ap = apurar_simples_empresa(receitas, "2026-10", "2026-02", ordem=["matriz", "filial"])
+        self.colunas = [
+            {"dre": calcular_dre({"receita_bruta": r["receita_mes"], "deducoes": r["das"]})}
+            for r in self.ap["rateio"]
+        ]
 
-    def test_rede_pode_subir_de_faixa(self):
-        so_filial = apurar_simples(800_000, 200_000, 12, 70_000)
-        rede = aliquota_simples_rede([
-            {"rbt12": 1_000_000, "fs12": 300_000, "receita_mes": 90_000},
-            {"rbt12": 800_000, "fs12": 200_000, "receita_mes": 70_000},
-        ])
-        self.assertGreater(rede["aliquota_efetiva"], so_filial["aliquota_efetiva"])
+    def test_consolidada_igual_ao_das_da_empresa(self):
+        total = consolidar_dre([c["dre"] for c in self.colunas])
+        self.assertEqual(total["deducoes"], 22_045.51)
+        self.assertEqual([c["dre"]["deducoes"] for c in self.colunas], [15_226.07, 6_819.44])
 
-    def test_das_pela_rede(self):
-        self.assertEqual(das_pela_rede(70_000, {"aliquota_efetiva": 0.1}), 7000)
-        self.assertEqual(das_pela_rede(70_000, None), 0)
+    def test_filial_individual_mostra_a_sua_parte(self):
+        self.assertEqual(self.colunas[1]["dre"]["deducoes"], 6_819.44)
+        self.assertEqual(self.colunas[1]["dre"]["irpj_csll"], 0)
 
 
 class LinhasParaTelaTest(unittest.TestCase):

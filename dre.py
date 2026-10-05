@@ -1,11 +1,8 @@
 """DRE do mês: individual por unidade e consolidada (matriz + filiais).
 
-Simples Nacional da rede: matriz e filiais são a mesma empresa (mesma raiz de CNPJ) e declaram um único PGDAS-D.
-A faixa e a alíquota saem da RBT12 somada de todos os estabelecimentos (LC 123/2006, art. 3º e art. 18),
-e cada unidade paga essa alíquota sobre a própria receita.
+Os tributos de cada unidade já chegam como a parte dela no imposto da empresa (tributos_rede),
+então o consolidado é a soma das colunas.
 """
-
-from tributacao import ATIVIDADE_ENSINO, apurar_simples
 
 LINHAS_DRE = (
     ("receita_bruta", "Receita bruta (mensalidades)", "receita"),
@@ -45,18 +42,6 @@ def consolidar_dre(dres):
     """Soma linha a linha as DREs das unidades e recalcula a margem."""
     soma = {campo: sum(_n((d or {}).get(campo)) for d in dres or []) for campo in CAMPOS_BASE}
     return calcular_dre(soma)
-
-
-def aliquota_simples_rede(unidades, atividade=ATIVIDADE_ENSINO):
-    """Apuração com a RBT12 e a folha (FS12) somadas da rede. `unidades`: [{"rbt12", "fs12"}] já anualizadas."""
-    rbt12 = sum(_n(u.get("rbt12")) for u in unidades or [])
-    fs12 = sum(_n(u.get("fs12")) for u in unidades or [])
-    receita_mes = sum(_n(u.get("receita_mes")) for u in unidades or [])
-    return apurar_simples(rbt12, fs12, 12, receita_mes, atividade=atividade)
-
-
-def das_pela_rede(receita_mes, apuracao_rede):
-    return round(_n(receita_mes) * float((apuracao_rede or {}).get("aliquota_efetiva") or 0), 2)
 
 
 def linhas_para_tela(colunas, consolidado=None):

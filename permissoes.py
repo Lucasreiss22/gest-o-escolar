@@ -52,6 +52,8 @@ ENDPOINTS = {
     "excluir_financeiro": "financeiro",
     "relatorio_tributario": "financeiro",
     "relatorio_dre": "financeiro",
+    "lucro_real_ajuste_salvar": "financeiro",
+    "lucro_real_ajuste_excluir": "financeiro",
     "relatorio_cartao_financeiro": "financeiro",
     "relatorio_pdf_folha": "financeiro",
     "relatorio_pdf_custos": "financeiro",
@@ -306,6 +308,7 @@ _ENDPOINTS_EXCLUIR = {
     "excluir_professor": "professores",
     "excluir_turma": "pedagogico_cadastro",
     "excluir_financeiro": "financeiro",
+    "lucro_real_ajuste_excluir": "financeiro",
     "excluir_usuario_sistema": "usuarios",
 }
 

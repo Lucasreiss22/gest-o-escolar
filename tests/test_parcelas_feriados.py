@@ -45,7 +45,32 @@ class TestPlanoParcelas(unittest.TestCase):
         self.assertEqual(limite_apurado(HOJE, "simples_nacional"), "2026-08")
         self.assertEqual(limite_apurado(date(2026, 10, 21), "simples_nacional"), "2026-09")
         self.assertEqual(limite_apurado(date(2026, 1, 5), "simples_nacional"), "2025-11")
-        self.assertIsNone(limite_apurado(HOJE, "lucro_presumido"))
+        self.assertIsNone(limite_apurado(HOJE, None))
+        self.assertIsNone(limite_apurado(HOJE, ""))
+
+    def test_limite_apurado_trimestral(self):
+        self.assertEqual(limite_apurado(HOJE, "lucro_presumido"), "2026-06")
+        self.assertEqual(limite_apurado(date(2026, 10, 30), "lucro_presumido"), "2026-06")
+        self.assertEqual(limite_apurado(date(2026, 10, 31), "lucro_presumido"), "2026-09")
+        self.assertEqual(limite_apurado(date(2026, 11, 2), "lucro_real"), "2026-09")
+        self.assertEqual(limite_apurado(date(2026, 1, 5), "lucro_presumido"), "2025-09")
+        self.assertEqual(limite_apurado(date(2026, 2, 2), "lucro_presumido"), "2025-12")
+
+    def test_travas_da_rede_juntam_unidades(self):
+        class Cur:
+            def __init__(self):
+                self.sqls = []
+
+            def execute(self, sql, params=None):
+                self.sqls.append(sql)
+
+            def fetchall(self):
+                return [{"competencia": "2026-09"}] if '"esc_filial"' in self.sqls[-1] else []
+
+        cur = Cur()
+        travas = travas_da_escola(cur, hoje=HOJE, regime="simples_nacional", schemas=["esc_matriz", "esc_filial"])
+        self.assertIn("2026-09", travas)
+        self.assertFalse(any("configuracoes" in s for s in cur.sqls))
 
     def test_padrao_comeca_no_mes_atual(self):
         plano = plano_parcelas("2026-02-10", 12, hoje=HOJE)

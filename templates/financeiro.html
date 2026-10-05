@@ -294,17 +294,28 @@
             </a>
             <a href="{% if regime_atual == 'simples_nacional' and apuracao_simples %}{{ url_for('extrato_pgdas_pdf', mes=mes_atual) }}{% else %}{{ url_for('relatorio_tributario', mes=mes_atual) }}{% endif %}" class="card-resumo tributos">
                 {% if regime_atual == 'simples_nacional' and apuracao_simples %}
+                {% set rede_s = apuracao_simples.rede %}
                 <h4>DAS ({{ "%.2f"|format(apuracao_simples.aliquota_efetiva_pct) }}% · Anexo {{ apuracao_simples.anexo }})</h4>
                 <div class="valor">R$ {{ (totais.tributos)|moeda }}</div>
+                {% if rede_s and rede_s.papel == 'filial' %}
+                <span class="hint" style="color: #e67e22;">DAS recolhido pela matriz (CNPJ {{ rede_s.matriz_cnpj }}): parte desta unidade. DAS da empresa R$ {{ (apuracao_simples.das_total)|moeda }}</span>
+                {% elif rede_s %}
+                <span class="hint" style="color: #e67e22;">Parte da matriz · DAS da empresa (matriz + {{ rede_s.n_filiais }} filial(is)) R$ {{ (apuracao_simples.das_total)|moeda }} · abrir PGDAS</span>
+                {% else %}
                 <span class="hint" style="color: #e67e22;">Abrir extrato PGDAS</span>
+                {% endif %}
                 {% elif regime_atual == 'lucro_presumido' and apuracao_presumido %}
-                <h4>Tributos da empresa</h4>
+                <h4>Tributos (Lucro Presumido)</h4>
                 <div class="valor">R$ {{ (apuracao_presumido.tributos)|moeda }}</div>
-                <span class="hint" style="color: #e67e22;">Abrir apuração e DRE</span>
-                {% elif regime_atual == 'lucro_real' %}
-                <h4>PIS+COFINS (1,65% + 7,6%)</h4>
-                <div class="valor">R$ {{ (apuracao_pis_cofins.total if apuracao_pis_cofins else 0)|moeda }}</div>
-                <span class="hint" style="color: #e67e22;">Abrir relatório</span>
+                <span class="hint" style="color: #e67e22;">PIS, COFINS, ISS {{ apuracao_presumido.iss_pct|round(2) }}%, IRPJ e CSLL ({{ apuracao_presumido.presuncao_irpj_pct|round(2) }}% presunção) · DARF até {{ apuracao_presumido.vencimento_darf.strftime('%d/%m/%Y') }}</span>
+                {% elif regime_atual == 'lucro_real' and apuracao_real %}
+                <h4>Tributos (Lucro Real)</h4>
+                <div class="valor">R$ {{ (apuracao_real.tributos)|moeda }}</div>
+                <span class="hint" style="color: #e67e22;">PIS+COFINS R$ {{ (apuracao_real.pis_cofins.total)|moeda }} · ISS R$ {{ (apuracao_real.iss)|moeda }} · IRPJ+CSLL R$ {{ (apuracao_real.irpj_csll)|moeda }}</span>
+                {% elif regime_atual == 'nao_informado' %}
+                <h4>Tributos</h4>
+                <div class="valor">—</div>
+                <span class="hint" style="color: #b91c1c;">Regime tributário não informado em Configurações</span>
                 {% else %}
                 <h4>Tributos</h4>
                 <div class="valor">R$ {{ (totais.tributos)|moeda }}</div>
@@ -411,6 +422,8 @@
             </div>
         </div>
 
+        {% include "_tributos_empresa.html" %}
+
         <div class="fin-tabs">
             <a class="{% if aba == 'resumo' %}ativa{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='resumo') }}">Resumo</a>
             <a class="{% if aba == 'receitas' %}ativa{% endif %}" href="{{ url_for('pagina_financeiro', mes=mes_atual, aba='receitas', busca=busca, status=status) }}">Mensalidades</a>
@@ -471,7 +484,7 @@
                     <table class="calc-lista">
                         <thead><tr><th>Competência</th><th>Entra</th><th>Receita</th></tr></thead>
                         <tbody>
-                        {% for linha in (quadro_simples.linhas if quadro_simples else []) %}
+                        {% for linha in (ap.linhas_rbt12 or (quadro_simples.linhas if quadro_simples else [])) %}
                         <tr>
                             <td>{{ linha.rotulo }}</td>
                             <td>{% if linha.entra_rbt12 %}Sim{% else %}Não{% endif %}</td>
@@ -498,7 +511,7 @@
                     <table class="calc-lista">
                         <thead><tr><th>Competência</th><th>Folha e encargos</th></tr></thead>
                         <tbody>
-                        {% for linha in (quadro_simples.linhas if quadro_simples else []) if linha.entra_rbt12 %}
+                        {% for linha in (ap.linhas_rbt12 or (quadro_simples.linhas if quadro_simples else [])) if linha.entra_rbt12 %}
                         <tr>
                             <td>{{ linha.rotulo }}</td>
                             <td>R$ {{ (linha.folha_encargos)|moeda }}</td>
@@ -540,6 +553,11 @@
                     <div class="calc-passo"><strong>Faixa do anexo {{ ap.anexo }}</strong>Faixa {{ ap.faixa }}, alíquota nominal {{ "%.2f"|format(aliq_nom) }}%, parcela a deduzir R$ {{ (ap.parcela_deduzir)|moeda }}.</div>
                     <div class="calc-passo"><strong>Alíquota efetiva</strong>((R$ {{ (ap.rbt12)|moeda }} × {{ "%.2f"|format(aliq_nom) }}%) − R$ {{ (ap.parcela_deduzir)|moeda }}) ÷ R$ {{ (ap.rbt12)|moeda }} = {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}%</div>
                     <div class="calc-passo"><strong>DAS</strong>R$ {{ (ap.receita_mes)|moeda }} × {{ "%.4f"|format(ap.aliquota_efetiva_pct) }}% = R$ {{ (ap.das)|moeda }}</div>
+                    {% if ap.rede %}
+                    <div class="calc-passo"><strong>Empresa com filiais</strong>Receita e RBT12 acima são da empresa (matriz + {{ ap.rede.n_filiais }} filial(is)).
+                        {% if ap.rede.papel == 'filial' %}O DAS é recolhido pela matriz (CNPJ {{ ap.rede.matriz_cnpj }}).{% endif %}
+                        Parte desta unidade, pela receita do mês: R$ {{ (ap.das_unidade)|moeda }}.</div>
+                    {% endif %}
                     {% if ap.acrescimos_mora %}
                     <div class="calc-passo"><strong>Juros e multa por atraso</strong>R$ {{ (ap.acrescimos_mora)|moeda }} recebidos neste mês ficam fora da receita bruta do Simples (Res. CGSN 140/2018, art. 2º, § 5º, II). Entram no caixa, não no DAS.</div>
                     {% endif %}
@@ -918,6 +936,12 @@
                             <option value="boleto">Boleto</option>
                         </select>
                     </div>
+                    {% if regime_atual == 'lucro_real' and apuracao_real and apuracao_real.pis_cofins.modo == 'nao_cumulativo' %}
+                    <div class="form-group" data-custos="avista parcelado recorrente servico">
+                        <label><input type="checkbox" name="gera_credito_pis_cofins" value="1"> Gera crédito de PIS/COFINS</label>
+                        <small style="color:#64748b;">Lucro Real não cumulativo: insumos, aluguel, energia etc. (Lei 10.833/2003, art. 3º). Folha não gera crédito.</small>
+                    </div>
+                    {% endif %}
                     <div class="form-group" data-custos="servico"><label>Prestador</label><input name="prestador_custo" placeholder="Nome / razão social"></div>
                     <div class="form-group" data-custos="servico"><label>Valor bruto da NFS-e</label><input name="valor_bruto_custo" data-moeda placeholder="Digite o valor"></div>
                     <div class="form-group" data-custos="servico">

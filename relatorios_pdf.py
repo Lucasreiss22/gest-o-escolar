@@ -606,7 +606,35 @@ def _pagina_resultado(pdf, titulo, subtitulo, linhas, nota):
 
 
 def _quadro_linhas(apuracao):
-    return ((apuracao or {}).get("quadro") or {}).get("linhas") or []
+    ap = apuracao or {}
+    return ap.get("linhas_rbt12") or (ap.get("quadro") or {}).get("linhas") or []
+
+
+def _secao_rede_simples(pdf, ap):
+    """Matriz e filiais são uma empresa: um PGDAS-D e um DAS, com a parte de cada estabelecimento."""
+    rede = ap.get("rede")
+    if not rede:
+        return
+    pdf.secao("Empresa com filiais")
+    if rede.get("papel") == "filial":
+        pdf.paragrafo(
+            f"O PGDAS-D e o DAS são entregues e pagos pela matriz {rede.get('matriz_nome') or ''} "
+            f"(CNPJ {rede.get('matriz_cnpj') or '-'}). Esta unidade não tem PGDAS próprio; "
+            "aqui aparece a parte dela no DAS da empresa."
+        )
+    else:
+        pdf.paragrafo(
+            f"DAS da empresa (matriz + {rede.get('n_filiais') or 0} filial(is)): receita e RBT12 somadas "
+            "de todos os estabelecimentos (LC 123/2006, art. 3º, e Resolução CGSN 140/2018)."
+        )
+    linhas = [
+        [u.get("nome") or "", u.get("cnpj") or "", _brl(u.get("receita_mes")), _brl(u.get("das"))]
+        for u in ap.get("unidades") or []
+    ]
+    if linhas:
+        pdf.tabela(["Estabelecimento", "CNPJ", "Receita do mês", "Parte do DAS"], linhas, [55, 45, 40, 40])
+    pdf.linha("DAS da empresa", _brl(ap.get("das_total", ap.get("das"))), negrito=True)
+    pdf.linha("Parte desta unidade", _brl(ap.get("das_unidade")), negrito=True)
 
 
 def pdf_calculo_rbt12(escola, mes_label, apuracao, regime_apuracao="competencia"):
@@ -872,10 +900,11 @@ def pdf_extrato_pgdas(
         if apuracao_mes.get("origem"):
             pdf.linha("Origem da base", str(apuracao_mes.get("origem")))
 
+    _secao_rede_simples(pdf, ap)
     pdf.secao("RBT12")
     pdf.paragrafo("Soma da receita dos 12 meses anteriores. O mês de apuração fica de fora.")
     linhas = []
-    for linha in quadro.get("linhas") or []:
+    for linha in _quadro_linhas(ap):
         linhas.append([
             linha.get("rotulo") or linha.get("competencia") or "",
             _brl(linha.get("receita_bruta")),
@@ -951,9 +980,10 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
         "Mês anterior ao primeiro lançamento do sistema fica de fora quando sai da janela."
     )
 
+    _secao_rede_simples(pdf, ap)
     pdf.secao("RBT12 — receita dos 12 meses anteriores")
     linhas_rbt = []
-    for linha in quadro.get("linhas") or []:
+    for linha in _quadro_linhas(ap):
         linhas_rbt.append([
             linha.get("rotulo") or linha.get("competencia") or "",
             "Sim" if linha.get("entra_rbt12") else "Não",
@@ -969,7 +999,7 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
 
     pdf.secao("FS12 — folha e encargos dos mesmos meses")
     linhas_fs = []
-    for linha in quadro.get("linhas") or []:
+    for linha in _quadro_linhas(ap):
         if not linha.get("entra_rbt12"):
             continue
         linhas_fs.append([
@@ -1037,46 +1067,86 @@ def pdf_simples_nacional(escola, mes_label, regime, apuracao, funcionarios, rece
     return _saida(pdf)
 
 
-def pdf_lucro_real(escola, mes_label, regime, totais, recebidos, pendentes, atrasados, folha, pis_cofins=None, titulos=None, regime_apuracao="competencia"):
+def pdf_lucro_real(escola, mes_label, regime, totais, recebidos, pendentes, atrasados, folha, pis_cofins=None, titulos=None, regime_apuracao="competencia", real=None):
     pdf = RelatorioPDF("Apuração — Lucro Real")
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label} · {nome_regime(regime)}")
     ap = pis_cofins or {}
+    real = real or {}
     receita = float(ap.get("receita_mes") or 0)
     mora = float(ap.get("acrescimos_mora") or 0)
-    base = float(ap.get("base") or (receita + mora))
-    pdf.paragrafo(
-        "PIS e COFINS não cumulativos incidem sobre a receita do mês, incluindo juros e multa "
-        "por atraso recebidos (STJ, Tema 1.237): PIS 1,65% e COFINS 7,6%."
-    )
+    nao_cumulativo = ap.get("modo") == "nao_cumulativo"
+    pdf.secao("PIS e COFINS")
+    if nao_cumulativo:
+        pdf.paragrafo(
+            "Não cumulativo (opção da escola): PIS 1,65% e COFINS 7,6% sobre a receita, menos os créditos dos custos "
+            "marcados como geradores de crédito (a folha não gera crédito). Juros e multa recebidos são receita "
+            "financeira: PIS 0,65% e COFINS 4% (Decreto 8.426/2015)."
+        )
+    else:
+        pdf.paragrafo(
+            "Cumulativo (padrão): a receita de ensino regular continua no regime cumulativo mesmo no Lucro Real "
+            "(Lei 10.833/2003, art. 10, XIV): PIS 0,65% e COFINS 3%."
+        )
     pdf.linha("Receita bruta do mês", _brl(receita))
     pdf.linha("Juros e multa por atraso recebidos", _brl(mora))
-    pdf.linha("Base de PIS/COFINS", _brl(base), negrito=True)
-    pdf.linha("PIS 1,65%", _brl(ap.get("pis")))
-    pdf.linha("COFINS 7,6%", _brl(ap.get("cofins")))
+    if ap.get("base_cumulativa"):
+        pdf.linha("Base cumulativa", _brl(ap.get("base_cumulativa")))
+    if ap.get("base_nao_cumulativa"):
+        pdf.linha("Base não cumulativa", _brl(ap.get("base_nao_cumulativa")))
+    if ap.get("creditos_base"):
+        pdf.linha("Custos que geram crédito", _brl(ap.get("creditos_base")))
+        pdf.linha("Crédito de PIS / COFINS", f"{_brl(ap.get('credito_pis'))} / {_brl(ap.get('credito_cofins'))}")
+    pdf.linha("PIS", _brl(ap.get("pis")))
+    pdf.linha("COFINS", _brl(ap.get("cofins")))
     pdf.linha("PIS + COFINS", _brl(ap.get("total")), negrito=True)
-    pdf.paragrafo(
-        f"Conta: {_brl(base)} × 1,65% = {_brl(ap.get('pis'))}. "
-        f"{_brl(base)} × 7,6% = {_brl(ap.get('cofins'))}."
-    )
+    pdf.linha(f"ISS ({float(real.get('iss_pct') or 0):g}% da receita)", _brl(real.get("iss")))
+
+    pdf.secao("IRPJ e CSLL")
+    detalhe = real.get("detalhe") or {}
+    periodo = (detalhe.get("provisao") or {}).get("periodo") or {}
+    if detalhe.get("modo") == "receita":
+        pdf.paragrafo("Estimativa mensal sobre a receita (bases de presunção), conforme a opção da escola.")
+    elif periodo:
+        pdf.paragrafo(
+            "Lucro da empresa (soma de todas as unidades) no período, com adições e exclusões e compensação "
+            "de prejuízo fiscal / base negativa limitada a 30% do lucro ajustado (Lei 9.065/1995, art. 15)."
+        )
+        pdf.linha("Resultado antes de IRPJ/CSLL (período)", _brl(periodo.get("lair")))
+        pdf.linha("Lucro ajustado (IRPJ)", _brl(periodo.get("lucro_ajustado_irpj")))
+        pdf.linha("Compensação de prejuízo", _brl(periodo.get("compensacao_irpj")))
+        pdf.linha("Lucro real (base IRPJ)", _brl(periodo.get("base_irpj")), negrito=True)
+        pdf.linha("Lucro ajustado (CSLL)", _brl(periodo.get("lucro_ajustado_csll")))
+        pdf.linha("Compensação de base negativa", _brl(periodo.get("compensacao_csll")))
+        pdf.linha("Base da CSLL", _brl(periodo.get("base_csll")), negrito=True)
+        pdf.linha("Saldo de prejuízo após o período", _brl(periodo.get("novo_prejuizo")))
+        pdf.linha("Saldo de base negativa após o período", _brl(periodo.get("nova_base_negativa")))
+    pdf.linha("IRPJ (15%) — parte da unidade no mês", _brl(real.get("irpj")))
+    pdf.linha("Adicional de IRPJ (10%)", _brl(real.get("adicional")))
+    pdf.linha("CSLL (9%)", _brl(real.get("csll")))
+    pdf.linha("Total de tributos do mês", _brl(real.get("tributos")), negrito=True)
+    for aviso in real.get("avisos") or []:
+        pdf.paragrafo(aviso, tamanho=9)
     _anexar_titulos_base(pdf, titulos, regime_apuracao, receita)
     tot = totais or {}
-    receita_card = float(tot.get("recebido") or 0)
     folha_valor = float(tot.get("folha_pagamento") or 0)
     compras = float(tot.get("custos_compras") or 0)
     servicos = float(tot.get("custos_servicos") or 0)
+    tributos = float(real.get("tributos") or 0)
     _pagina_resultado(
         pdf,
         "DRE simplificada — Lucro Real",
         f"{escola} · {mes_label}",
         [
-            ("(+) Recebido nas mensalidades do vencimento", receita_card, False),
+            ("(+) Receita bruta de serviços", receita, False),
+            ("(+) Juros e multa por atraso", mora, False),
+            ("(−) PIS, COFINS, ISS, IRPJ e CSLL", tributos, False),
             ("(−) Folha e encargos", folha_valor, False),
             ("(−) Compras e custos fixos", compras, False),
             ("(−) Serviços contratados", servicos, False),
-            ("(=) Caixa restante do cartão", receita_card - folha_valor - compras - servicos, True),
+            ("(=) Resultado do período", receita + mora - tributos - folha_valor - compras - servicos, True),
         ],
-        "DRE simplificada, sem plano de contas. O PIS e a COFINS estão na apuração e não entram nesta subtração do caixa.",
+        "DRE simplificada, sem plano de contas.",
     )
     return _saida(pdf)
 
@@ -1088,27 +1158,52 @@ def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos, 
     pdf.add_page()
     pdf.paragrafo(f"{escola} · {mes_label}")
     mora = float(ap.get("acrescimos_mora") or 0)
+    p_irpj = float(ap.get("presuncao_irpj_pct") or 32)
+    p_csll = float(ap.get("presuncao_csll_pct") or 32)
+    iss_pct = float(ap.get("iss_pct") or 5)
+    incluir_mora = ap.get("incluir_mora", True)
+    empresa = ap.get("empresa") or {}
+    tri = empresa.get("trimestre") or {}
+    pdf.secao("Mês — parte desta unidade")
     pdf.linha("Receita bruta do mês", _brl(ap.get("receita_mes")))
     pdf.linha("Juros e multa por atraso recebidos", _brl(mora))
-    pdf.linha("Base de PIS/COFINS (receita + juros/multa)", _brl(ap.get("base_pis_cofins")))
+    pdf.linha(
+        "Base de PIS/COFINS" + (" (receita + juros/multa)" if incluir_mora else " (só receita)"),
+        _brl(ap.get("base_pis_cofins")),
+    )
     pdf.linha("PIS (0,65%)", _brl(ap.get("pis")))
     pdf.linha("COFINS (3%)", _brl(ap.get("cofins")))
-    pdf.linha("ISS estimado (5% da mensalidade)", _brl(ap.get("iss")))
-    pdf.linha("32% da receita de serviços", _brl(ap.get("base_servicos")))
-    pdf.linha("(+) Juros e multa (100%)", _brl(mora))
-    pdf.linha("Base de IRPJ/CSLL", _brl(ap.get("base_presumida")), negrito=True)
-    pdf.linha("CSLL (9% da base)", _brl(ap.get("csll")))
-    pdf.linha("IRPJ (15% da base)", _brl(ap.get("irpj")))
-    if ap.get("aplica_adicional_irpj"):
-        pdf.linha("Adicional de IRPJ (10%)", _brl(ap.get("irpj_adicional")))
+    pdf.linha(f"ISS ({iss_pct:g}% da mensalidade)", _brl(ap.get("iss")))
+    pdf.linha("IRPJ (15%)", _brl(ap.get("irpj")))
+    pdf.linha("Adicional de IRPJ (10%)", _brl(ap.get("irpj_adicional")))
+    pdf.linha("CSLL (9%)", _brl(ap.get("csll")))
     pdf.linha("Total de tributos", _brl(ap.get("tributos")), negrito=True)
+    if tri:
+        pdf.secao("Trimestre — empresa")
+        if ap.get("rede"):
+            pdf.paragrafo("Matriz e filiais são a mesma empresa: um único limite de R$ 60.000 do adicional por trimestre, "
+                          "rateado pela receita de cada unidade.")
+        pdf.linha("Receita do trimestre até o mês", _brl(tri.get("receita")))
+        pdf.linha(f"Base presumida IRPJ ({p_irpj:g}% + juros/multa)", _brl(tri.get("base_irpj")))
+        pdf.linha(f"Base presumida CSLL ({p_csll:g}% + juros/multa)", _brl(tri.get("base_csll")))
+        if tri.get("excedente_lc224_irpj") or tri.get("excedente_lc224_csll"):
+            pdf.linha("Acréscimo LC 224/2025 na base (IRPJ / CSLL)",
+                      f"{_brl(tri.get('excedente_lc224_irpj'))} / {_brl(tri.get('excedente_lc224_csll'))}")
+        pdf.linha("IRPJ", _brl(tri.get("irpj")))
+        pdf.linha("Adicional de IRPJ", _brl(tri.get("adicional")))
+        pdf.linha("CSLL", _brl(tri.get("csll")), negrito=True)
+        if ap.get("vencimento_darf"):
+            pdf.linha("Vencimento da DARF (quota única)", _data_br(ap.get("vencimento_darf")), negrito=True)
+    if ap.get("presuncao_fundamento"):
+        pdf.paragrafo(f"Fundamento da presunção: {ap['presuncao_fundamento']}", tamanho=9)
     pdf.paragrafo(
-        "PIS = (receita + juros/multa) × 0,65%. COFINS = (receita + juros/multa) × 3% (STJ, Tema 1.237). "
-        "ISS estimado = mensalidade × 5% (juros de mora não são preço do serviço). "
-        "IRPJ e CSLL: 32% da receita de serviços educacionais + 100% dos juros e multa recebidos, "
-        "que não sofrem presunção (Lei 9.430/96, art. 25, II). IRPJ 15% e CSLL 9% dessa base. "
-        "O adicional de 10% de IRPJ só entra se a base do trimestre passar de R$ 60.000, "
-        "e o mês mostra um terço desse adicional."
+        ("PIS e COFINS sobre receita + juros/multa (STJ, Tema 1.237). " if incluir_mora else "PIS e COFINS só sobre a receita. ")
+        + f"ISS = mensalidade × {iss_pct:g}% (juros de mora não são preço do serviço). "
+        f"IRPJ: {p_irpj:g}% da receita; CSLL: {p_csll:g}% da receita; juros e multa entram 100% "
+        "(Lei 9.430/96, art. 25, II). IRPJ 15% e CSLL 9% dessas bases. Adicional de 10% sobre a base do trimestre "
+        "acima de R$ 60.000. O mês mostra o acumulado do trimestre menos o que já foi provisionado nos meses anteriores."
+        + (" LC 224/2025 aplicada: +10% na presunção da receita acima de R$ 5 milhões no ano." if ap.get("lc224") else ""),
+        tamanho=9,
     )
     _anexar_titulos_base(pdf, titulos, regime_apuracao, ap.get("receita_mes"))
 
@@ -1133,7 +1228,7 @@ def pdf_lucro_presumido(escola, mes_label, regime, apuracao, totais, recebidos, 
             ("(−) Serviços contratados", servicos, False),
             ("(=) Resultado do período", resultado, True),
         ],
-        "DRE simplificada, sem plano de contas. IRPJ e CSLL usam a presunção de 32% sobre a receita de serviços educacionais.",
+        f"DRE simplificada, sem plano de contas. IRPJ e CSLL usam a presunção de {p_irpj:g}% (IRPJ) e {p_csll:g}% (CSLL).",
     )
     return _saida(pdf)
 

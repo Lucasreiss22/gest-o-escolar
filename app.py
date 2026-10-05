@@ -8,7 +8,7 @@ try:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
-from flask import Flask, Response, flash, g, redirect, render_template, request, url_for, session, send_file
+from flask import Flask, Response, flash, g, has_request_context, redirect, render_template, request, url_for, session, send_file
 from markupsafe import escape
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -62,6 +62,7 @@ from simples_nacional import (
     parse_moeda_livre,
 )
 from database import obter_conexao, garantir_tabelas_pedagogicas, garantir_tabelas_folha, definir_banco_escola, limpar_banco_escola, resetar_tenant, erro_conexao_atual, host_postgres_configurado
+from database import _nome_banco_atual
 from nfse import (
     anexar_ultima_nota,
     cancelar_nota,
@@ -261,8 +262,46 @@ from empresa import (
     tem_dados_empresa,
 )
 from unidades import TIPOS_UNIDADE, resumo_unidade, unidades_da_rede
-from dre import aliquota_simples_rede, calcular_dre, consolidar_dre, das_pela_rede, linhas_para_tela
-from parcelas import juntar_planos, plano_parcelas, texto_puladas, travas_da_escola
+from dre import calcular_dre, consolidar_dre, linhas_para_tela
+from parcelas import REGIMES_TRIMESTRAIS, juntar_planos, plano_parcelas, texto_puladas, travas_da_escola, vencimento_trimestre
+from carga_tributos import (
+    PADROES_TRIBUTARIOS,
+    ROTULOS_HERDADOS,
+    ajustes_lucro_real,
+    cache_buscar,
+    cache_guardar,
+    carregar_unidade,
+    carregar_unidade_cache,
+    config_efetiva,
+    gravar_saldo_periodo,
+    invalidar_schema,
+    ler_config,
+    ler_escolas_plataforma,
+    mora_do_mes,
+    quadro_da_unidade,
+    receita_regime,
+    receitas_do_ano,
+    saldo_prejuizo_anterior,
+    schema_valido,
+    versao_schema,
+    SALDO_INICIAL,
+    garantir_tabelas_lucro_real,
+)
+from tributos_rede import (
+    ISS_MINIMO_PCT,
+    apurar_pis_cofins_real,
+    apurar_presumido_periodo,
+    apurar_simples_empresa,
+    arred,
+    avisos_limites_simples,
+    mes_inicio_empresa,
+    provisao_lucro_real,
+    ratear,
+    ratear_por_lucro,
+    regime_apuracao_efetivo,
+    validar_percentual,
+)
+from simples_nacional import _rotulo_comp, competencia_add
 from feriados import feriados_nacionais_mes
 from fechamento import (
     MOTIVO_MINIMO_REABERTURA,
@@ -310,6 +349,22 @@ def _iniciar_medicao():
 
     g._inicio_req = time.perf_counter()
     iniciar_contagem_consultas()
+    if request.method == "POST":
+        _invalidar_tributos()
+
+
+def _invalidar_tributos():
+    try:
+        from database import _nome_banco_atual as _schema_req
+        schema = _schema_req()
+        if schema:
+            ctx = cache_buscar(schema, "ctx") or {}
+            for unidade in ctx.get("rede") or []:
+                if schema_valido(unidade.get("db_nome")):
+                    invalidar_schema(unidade.get("db_nome"))
+            invalidar_schema(schema)
+    except Exception:
+        pass
 
 
 @app.after_request
@@ -322,6 +377,8 @@ def _registrar_medicao(resposta):
     ms = (time.perf_counter() - inicio) * 1000
     consultas = contagem_consultas()
     resposta.headers["Server-Timing"] = f'app;dur={ms:.0f}, db;desc="{consultas} consultas"'
+    if request.method == "POST":
+        _invalidar_tributos()
     if ms >= _LIMITE_LOG_LENTO_MS:
         print(f"[lento] {request.method} {request.path} ({request.endpoint}) {ms:.0f} ms, {consultas} consultas")
     return resposta
@@ -1339,10 +1396,10 @@ def _gravar_custo(cursor, dados):
                 descricao, categoria, valor, data_custo, tipo, forma, parcelas, parcela_num,
                 grupo_id, data_inicio, data_fim, valor_unitario, valor_bruto, prestador,
                 reter_federal, reter_iss, aliquota_iss, federal_na_nota, iss_na_nota,
-                irrf, pis, cofins, csll, iss, ativo
+                irrf, pis, cofins, csll, iss, gera_credito_pis_cofins, ativo
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE
             )
             """,
             (
@@ -1350,6 +1407,7 @@ def _gravar_custo(cursor, dados):
                 grupo, data_ini, data_fim, valor_unit, valor_bruto or valor_unit, prestador,
                 reter_fed, reter_iss, aliq_iss, bool(fed_nota), bool(iss_nota),
                 impostos["irrf"], impostos["pis"], impostos["cofins"], impostos["csll"], impostos["iss"],
+                bool(dados.get("gera_credito_pis_cofins")),
             ),
         )
 
@@ -3224,7 +3282,7 @@ def _titulos_base_imposto(cursor, mes_filtro, regime_apuracao):
         FROM financeiro_mensalidades f
         LEFT JOIN alunos a ON a.id = f.aluno_id
         WHERE TO_CHAR(f.data_vencimento, 'YYYY-MM') = %s
-          AND LOWER(COALESCE(f.status, '')) NOT IN ('cancelado', 'cancelada')
+          AND LOWER(COALESCE(f.status, '')) IN ('pago', 'pendente', 'atrasado')
         ORDER BY f.data_vencimento, a.nome_completo
         """,
         (mes_filtro,),
@@ -3362,27 +3420,550 @@ def atividade_simples_escola(cursor):
         return normalizar_atividade_simples(None)
 
 
-def calcular_apuracao_simples(cursor, mes_filtro):
-    regime = regime_apuracao_escola(cursor)
-    quadro = montar_quadro_simples(cursor, mes_filtro, regime)
-    n_meses = quadro["meses_validos"] or 1
-    colaboradores, _folha_mes = montar_folha_colaboradores(cursor)
-    mora = acrescimos_mora_mes(cursor, mes_filtro)
-    apuracao = apurar_simples(
-        quadro["rbt12"], quadro["fs12"], n_meses, quadro["receita_mes"],
-        acrescimos_mora=mora["total"],
-        atividade=atividade_simples_escola(cursor),
-        folha_mes=quadro.get("folha_mes") or 0,
+def _contexto_tributario(cursor):
+    """Unidade do schema atual, rede (matriz + filiais) e configuração tributária efetiva.
+
+    Filial usa a configuração da matriz (mesmo CNPJ = mesma empresa). Guardado por 60 s por schema.
+    """
+    schema = _nome_banco_atual() or ""
+    ctx = cache_buscar(schema, "ctx")
+    if ctx is not None:
+        return ctx
+    cfg = ler_config(cursor)
+    escolas = ler_escolas_plataforma(cursor)
+    escola = next((e for e in escolas if (e.get("db_nome") or "") == schema), None)
+    if escola is None:
+        escola = {
+            "id": session.get("escola_id") if has_request_context() else None,
+            "nome": cfg.get("nome_escola"), "db_nome": schema, "tipo_unidade": "independente",
+        }
+    rede = unidades_da_rede(escola, escolas)
+    if len(rede) == 1:
+        papel = "independente"
+    elif str(rede[0].get("id")) == str(escola.get("id")):
+        papel = "matriz"
+    else:
+        papel = "filial"
+    cfg_matriz = None
+    if papel == "filial":
+        schema_matriz = rede[0].get("db_nome")
+        cfg_matriz = ler_config(cursor, schema_matriz) if schema_valido(schema_matriz) else {}
+    ctx = {
+        "schema": schema,
+        "cfg": cfg,
+        "escola": escola,
+        "rede": rede,
+        "papel": papel,
+        "matriz": rede[0],
+        "efetiva": config_efetiva(cfg, cfg_matriz, papel == "filial"),
+    }
+    return cache_guardar(schema, ctx, "ctx")
+
+
+def _dados_unidade(cursor, ctx, unidade, mes_filtro):
+    schema_u = (unidade or {}).get("db_nome") or ""
+    if schema_u == ctx["schema"] or len(ctx["rede"]) == 1:
+        return carregar_unidade_cache(cursor, ctx["schema"], None, mes_filtro)
+    if not schema_valido(schema_u):
+        raise ValueError(f"unidade {unidade.get('nome') or unidade.get('id')} sem banco definido")
+    return carregar_unidade_cache(cursor, schema_u, schema_u, mes_filtro)
+
+
+def _dados_rede(cursor, ctx, mes_filtro):
+    dados, erros = {}, []
+    for unidade in ctx["rede"]:
+        try:
+            dados[unidade.get("id")] = _dados_unidade(cursor, ctx, unidade, mes_filtro)
+        except Exception as e:
+            erros.append(f"{unidade.get('nome') or unidade.get('id')}: dados não lidos ({e}).")
+    return dados, erros
+
+
+def _resumo_rede(ctx):
+    if ctx["papel"] == "independente":
+        return None
+    matriz = ctx["matriz"]
+    return {
+        "papel": ctx["papel"],
+        "matriz_nome": matriz.get("nome"),
+        "matriz_cnpj": _formatar_cnpj(matriz.get("cnpj") or ""),
+        "n_filiais": len(ctx["rede"]) - 1,
+        "unidade_id": ctx["escola"].get("id"),
+    }
+
+
+def calcular_apuracao_simples(cursor, mes_filtro, colaboradores=False):
+    """Um DAS por empresa: matriz e filiais somam receita e RBT12; cada unidade fica com a sua parte.
+
+    `das`, `receita_mes`, `rbt12`... são da empresa. `das_unidade`/`receita_unidade` são da unidade atual.
+    """
+    ctx = _contexto_tributario(cursor)
+    ef = ctx["efetiva"]
+    regime = normalizar_regime_apuracao(ef["regime_apuracao"])
+    regime_rbt12 = "competencia" if ef.get("simples_rbt12_criterio") == "competencia" else regime
+    dados, erros = _dados_rede(cursor, ctx, mes_filtro)
+    unidades = [u for u in ctx["rede"] if u.get("id") in dados]
+    quadros = {u["id"]: quadro_da_unidade(dados[u["id"]], mes_filtro, regime, regime_rbt12) for u in unidades}
+    ordem = [u["id"] for u in unidades]
+    receitas = {uid: {l["competencia"]: l["receita_bruta"] for l in q["linhas"]} for uid, q in quadros.items()}
+    folhas = {
+        uid: dict({l["competencia"]: l["folha_encargos"] for l in q["linhas"]}, **{mes_filtro: q["folha_mes"]})
+        for uid, q in quadros.items()
+    }
+    inicio = mes_inicio_empresa(ef.get("data_abertura"), primeiras=[q["primeira"] for q in quadros.values()])
+    apuracao = apurar_simples_empresa(
+        receitas, mes_filtro, inicio,
+        atividade=normalizar_atividade_simples(ef.get("simples_atividade")),
+        folha_por_mes=folhas,
+        receitas_mes={uid: q["receita_mes"] for uid, q in quadros.items()},
+        ordem=ordem,
     )
-    apuracao["mora"] = mora
+    atual_id = ctx["escola"].get("id")
+    if atual_id not in quadros and ordem:
+        atual_id = ordem[0]
+    quadro = quadros.get(atual_id) or quadro_da_unidade(carregar_unidade_cache(cursor, ctx["schema"], None, mes_filtro), mes_filtro, regime)
+    mora = mora_do_mes(dados[atual_id], mes_filtro) if atual_id in dados else {"juros": 0.0, "multa": 0.0, "total": 0.0, "qtd": 0}
+    parte = next((r for r in apuracao["rateio"] if r["unidade_id"] == atual_id), {"das": apuracao["das_total"], "receita_mes": apuracao["receita_mes"]})
+    nomes = {u["id"]: u for u in unidades}
+    apuracao.update({
+        "mora": mora,
+        "acrescimos_mora": mora["total"],
+        "quadro": quadro,
+        "regime_apuracao": regime,
+        "inicio_escola": inicio,
+        "das_unidade": parte["das"],
+        "receita_unidade": parte["receita_mes"],
+        "rede": _resumo_rede(ctx),
+        "unidades": [
+            {
+                "id": r["unidade_id"],
+                "nome": nomes[r["unidade_id"]].get("nome"),
+                "cnpj": _formatar_cnpj(nomes[r["unidade_id"]].get("cnpj") or ""),
+                "receita_mes": r["receita_mes"],
+                "das": r["das"],
+                "atual": r["unidade_id"] == atual_id,
+            }
+            for r in apuracao["rateio"]
+        ],
+        "avisos": list(erros),
+    })
+    if len(unidades) > 1:
+        apuracao["linhas_rbt12"] = [
+            dict(l, rotulo=_rotulo_comp(l["competencia"]), origem="empresa") for l in apuracao["linhas_empresa"]
+        ]
+    else:
+        apuracao["linhas_rbt12"] = quadro["linhas"]
     ano, mes = parse_mes(mes_filtro)
-    inicio_janela, fim_janela = janela_12_meses_anteriores(ano, mes)
-    apuracao["inicio_janela"] = inicio_janela
-    apuracao["fim_janela"] = fim_janela
-    apuracao["inicio_escola"] = quadro.get("primeira")
-    apuracao["quadro"] = quadro
-    apuracao["regime_apuracao"] = regime
-    return apuracao, colaboradores
+    apuracao["inicio_janela"], apuracao["fim_janela"] = janela_12_meses_anteriores(ano, mes)
+    if regime == "caixa" or regime_rbt12 != "competencia":
+        receitas_comp = {
+            uid: {l["competencia"]: l["receita_bruta"] for l in quadro_da_unidade(dados[uid], mes_filtro, "competencia")["linhas"]}
+            for uid in ordem
+        }
+        rbt_comp = apurar_simples_empresa(receitas_comp, mes_filtro, inicio, ordem=ordem)["rbt12"]
+    else:
+        rbt_comp = apuracao["rbt12"]
+    apuracao["avisos"] += avisos_limites_simples(rbt_comp)
+    if ef.get("divergentes"):
+        apuracao["avisos"].append(
+            "Configuração desta unidade diferente da matriz (" + ", ".join(ef["divergentes"]) +
+            "): o valor desta unidade é ignorado enquanto ela for filial."
+        )
+    lista_colab = montar_folha_colaboradores(cursor)[0] if colaboradores else []
+    return apuracao, lista_colab
+
+
+def _vencimento_trimestre(mes_filtro):
+    return vencimento_trimestre(mes_filtro)
+
+
+def _travas_rede(cursor):
+    """Travas de parcelas da empresa: regime da matriz e competências congeladas de todas as unidades."""
+    ctx = _contexto_tributario(cursor)
+    schemas = None
+    if len(ctx["rede"]) > 1:
+        schemas = [u.get("db_nome") for u in ctx["rede"] if schema_valido(u.get("db_nome"))]
+    return travas_da_escola(cursor, regime=ctx["efetiva"].get("regime_tributario") or "", schemas=schemas)
+
+
+def _bloqueio_parcelas(cursor, ids=(), vencimentos=(), pagamentos=()):
+    """Mensagem se a edição/exclusão mexe em trimestre já vencido (Presumido/Real); None se pode.
+    Competência olha o vencimento; caixa olha o pagamento."""
+    ctx = _contexto_tributario(cursor)
+    regime = ctx["efetiva"].get("regime_tributario")
+    if regime not in REGIMES_TRIMESTRAIS:
+        return None
+    travas = _travas_rede(cursor)
+    if not travas:
+        return None
+    caixa = regime_apuracao_efetivo(regime, ctx["efetiva"].get("regime_apuracao"))[0] == "caixa"
+    comps = {d.strftime("%Y-%m") for d in (pagamentos if caixa else vencimentos) if hasattr(d, "strftime")}
+    ids = [int(i) for i in ids if str(i).isdigit()]
+    if ids:
+        cursor.execute(
+            "SELECT data_vencimento, data_pagamento FROM financeiro_mensalidades WHERE id = ANY(%s)", (ids,)
+        )
+        for row in cursor.fetchall() or []:
+            venc, pag = (row["data_vencimento"], row["data_pagamento"]) if isinstance(row, dict) else (row[0], row[1])
+            if caixa:
+                if pag:
+                    comps.add(pag.strftime("%Y-%m"))
+            elif venc:
+                comps.add(venc.strftime("%Y-%m"))
+    travadas = sorted(c for c in comps if c in travas)
+    if not travadas:
+        return None
+    rotulos = ", ".join(f"{c[5:7]}/{c[:4]}" for c in travadas)
+    return (f"Competência já apurada ({rotulos}): o trimestre encerrou e a DARF venceu. "
+            "A parcela não pode ser criada, alterada nem excluída: mudaria a receita e os tributos já declarados.")
+
+
+def _presumido_empresa(cursor, mes_filtro, ctx):
+    """IRPJ/CSLL/PIS/COFINS da empresa (todas as unidades), rateados pela receita; ISS de cada unidade."""
+    ef = ctx["efetiva"]
+    regime = normalizar_regime_apuracao(ef["regime_apuracao"])
+    comps_tri = [c for c in meses_do_trimestre(mes_filtro) if c <= mes_filtro]
+    dados, erros = _dados_rede(cursor, ctx, mes_filtro)
+    por_unidade = {uid: receitas_do_ano(d, mes_filtro, regime) for uid, d in dados.items()}
+    ordem = [u["id"] for u in ctx["rede"] if u.get("id") in por_unidade]
+    meses_ano = sorted({c for p in por_unidade.values() for c in p})
+    receita_emp = {c: sum(por_unidade[u].get(c, {}).get("receita", 0.0) for u in ordem) for c in meses_ano}
+    mora_emp = {c: sum(por_unidade[u].get(c, {}).get("mora", 0.0) for u in ordem) for c in meses_ano}
+    incluir_mora = bool(ef.get("pis_cofins_incluir_mora", True))
+    empresa = apurar_presumido_periodo(
+        [receita_emp.get(c, 0.0) for c in comps_tri],
+        [mora_emp.get(c, 0.0) for c in comps_tri],
+        presuncao_irpj=ef.get("presuncao_irpj_pct"),
+        presuncao_csll=ef.get("presuncao_csll_pct"),
+        iss_pct=ef.get("iss_aliquota_pct"),
+        incluir_mora=incluir_mora,
+        lc224=bool(ef.get("presumido_aplicar_lc224", True)),
+        receita_acumulada_ano_antes={c: v for c, v in receita_emp.items() if c < comps_tri[0]},
+        competencias=comps_tri,
+    )
+    mes = empresa["mes"]
+    pesos_receita = [(u, por_unidade[u].get(mes_filtro, {}).get("receita", 0.0)) for u in ordem]
+    pesos_pis = [
+        (u, por_unidade[u].get(mes_filtro, {}).get("receita", 0.0) + (por_unidade[u].get(mes_filtro, {}).get("mora", 0.0) if incluir_mora else 0.0))
+        for u in ordem
+    ]
+    partes = {}
+    for tributo, pesos in (("irpj", pesos_receita), ("adicional", pesos_receita), ("csll", pesos_receita),
+                           ("pis", pesos_pis), ("cofins", pesos_pis)):
+        for uid, valor in ratear(mes[tributo], pesos):
+            partes.setdefault(uid, {})[tributo] = valor
+    atual_id = ctx["escola"].get("id") if ctx["escola"].get("id") in por_unidade else (ordem[0] if ordem else None)
+    parte = partes.get(atual_id) or {k: mes[k] for k in ("irpj", "adicional", "csll", "pis", "cofins")}
+    receita_u = por_unidade.get(atual_id, {}).get(mes_filtro, {}).get("receita", 0.0)
+    mora_u = por_unidade.get(atual_id, {}).get(mes_filtro, {}).get("mora", 0.0)
+    iss_pct = float(ef.get("iss_aliquota_pct") or 0)
+    iss_u = arred(receita_u * iss_pct / 100)
+    tributos_u = arred(sum(parte.values()) + iss_u)
+    p_irpj = empresa["presuncao_irpj_pct"] / 100
+    tri = empresa["trimestre"]
+    nomes = {u["id"]: u for u in ctx["rede"]}
+    return {
+        "receita_mes": receita_u,
+        "acrescimos_mora": mora_u,
+        "base_pis_cofins": receita_u + (mora_u if incluir_mora else 0.0),
+        "pis": parte["pis"],
+        "cofins": parte["cofins"],
+        "iss": iss_u,
+        "iss_pct": iss_pct,
+        "base_servicos": arred(receita_u * p_irpj),
+        "base_presumida": arred(receita_u * p_irpj + mora_u),
+        "irpj": parte["irpj"],
+        "csll": parte["csll"],
+        "irpj_adicional": parte["adicional"],
+        "aplica_adicional_irpj": tri["adicional"] > 0,
+        "receita_trimestre": tri["receita"],
+        "base_presumida_trimestre": tri["base_irpj"],
+        "irpj_adicional_trimestre": tri["adicional"],
+        "tributos": tributos_u,
+        "deducoes": arred(parte["pis"] + parte["cofins"] + iss_u),
+        "irpj_csll": arred(parte["irpj"] + parte["adicional"] + parte["csll"]),
+        "empresa": empresa,
+        "presuncao_irpj_pct": empresa["presuncao_irpj_pct"],
+        "presuncao_csll_pct": empresa["presuncao_csll_pct"],
+        "presuncao_fundamento": ef.get("presuncao_fundamento"),
+        "incluir_mora": incluir_mora,
+        "lc224": empresa["lc224"],
+        "competencias_trimestre": comps_tri,
+        "vencimento_darf": _vencimento_trimestre(mes_filtro),
+        "rede": _resumo_rede(ctx),
+        "unidades": [
+            dict(
+                {"id": uid, "nome": nomes[uid].get("nome"), "cnpj": _formatar_cnpj(nomes[uid].get("cnpj") or ""),
+                 "receita_mes": dict(pesos_receita)[uid], "atual": uid == atual_id},
+                **partes.get(uid, {}),
+            )
+            for uid in ordem
+        ],
+        "avisos": erros,
+    }
+
+
+def _creditos_pis_cofins(cursor, mes_filtro):
+    """Custos do mês marcados como geradores de crédito de PIS/COFINS (não cumulativo). A folha nunca gera crédito."""
+    cursor.execute("SAVEPOINT creditos_pis")
+    try:
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(valor::numeric), 0) AS total
+            FROM financeiro_custos
+            WHERE COALESCE(ativo, TRUE) = TRUE AND COALESCE(gera_credito_pis_cofins, FALSE) = TRUE
+              AND (
+                (COALESCE(tipo, 'avista') IN ('avista', 'servico', 'parcelado') AND TO_CHAR(data_custo, 'YYYY-MM') = %s)
+                OR (tipo = 'recorrente'
+                    AND TO_CHAR(COALESCE(data_inicio, data_custo), 'YYYY-MM') <= %s
+                    AND (data_fim IS NULL OR TO_CHAR(data_fim, 'YYYY-MM') >= %s))
+              )
+            """,
+            (mes_filtro, mes_filtro, mes_filtro),
+        )
+        total = float((cursor.fetchone() or {}).get("total") or 0)
+        cursor.execute("RELEASE SAVEPOINT creditos_pis")
+        return total
+    except Exception:
+        cursor.execute("ROLLBACK TO SAVEPOINT creditos_pis")
+        return 0.0
+
+
+def _pis_cofins_iss_real(cursor, ctx, dados, comp):
+    ef = ctx["efetiva"]
+    receita = receita_regime(dados, comp, "competencia")
+    mora = mora_do_mes(dados, comp)["total"]
+    modo = ef.get("pis_cofins_lucro_real") or "cumulativo_ensino"
+    creditos = _creditos_pis_cofins(cursor, comp) if modo == "nao_cumulativo" else 0.0
+    pis_cofins = apurar_pis_cofins_real(receita, 0, mora, creditos, modo, bool(ef.get("pis_cofins_incluir_mora", True)))
+    pis_cofins.update({"receita_mes": receita, "acrescimos_mora": mora, "creditos_base": creditos})
+    iss = arred(receita * float(ef.get("iss_aliquota_pct") or 0) / 100)
+    return pis_cofins, iss
+
+
+def _lair_mes(cursor, ctx, dados, comp):
+    """Lucro antes do IRPJ/CSLL da unidade do schema atual no mês (mesmas linhas da DRE)."""
+    pis_cofins, iss = _pis_cofins_iss_real(cursor, ctx, dados, comp)
+    _itens, folha = _folha_competencia(cursor, "lucro_real", comp)
+    custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, comp))
+    return arred(
+        pis_cofins["receita_mes"] - pis_cofins["total"] - iss
+        - float(folha.get("custo_escola") or 0) - float(custos.get("rescisoes") or 0)
+        - float(custos.get("compras") or 0) - float(custos.get("servicos") or 0)
+        + pis_cofins["acrescimos_mora"]
+    )
+
+
+def _competencias_lucro_real(mes_filtro, periodo):
+    if periodo == "anual_estimativa":
+        return [f"{mes_filtro[:4]}-{m:02d}" for m in range(1, int(mes_filtro[5:7]) + 1)]
+    return [c for c in meses_do_trimestre(mes_filtro) if c <= mes_filtro]
+
+
+def _lucro_real_rede(mes_filtro):
+    """IRPJ/CSLL do Lucro Real da empresa: soma o LAIR de todas as unidades antes de compensar prejuízos.
+
+    Abre uma conexão por unidade, então só pode ser chamado fora de um cursor aberto.
+    """
+    schema = _nome_banco_atual() or ""
+    if not schema:
+        return None
+    ctx = cache_buscar(schema, "ctx")
+    if ctx is None:
+        conexao = obter_conexao()
+        if not conexao:
+            return None
+        try:
+            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                ctx = _contexto_tributario(cursor)
+        finally:
+            conexao.close()
+    ef = ctx["efetiva"]
+    if ef.get("regime_tributario") != "lucro_real":
+        return None
+    periodo = ef.get("lucro_real_periodo") or "trimestral"
+    if periodo == "anual_estimativa" and ef.get("lucro_real_estimativa_modo") == "receita":
+        return None
+    comps = _competencias_lucro_real(mes_filtro, periodo)
+    versoes = tuple(versao_schema(u.get("db_nome")) for u in ctx["rede"])
+    salvo = cache_buscar(schema, "real_rede", mes_filtro, versoes)
+    if salvo is not None:
+        return salvo
+    lairs, erros, ajustes, saldo = {}, [], {}, None
+    matriz_schema = ctx["matriz"].get("db_nome") or schema
+    for unidade in ctx["rede"]:
+        schema_u = unidade.get("db_nome") or (schema if len(ctx["rede"]) == 1 else "")
+        if not schema_valido(schema_u):
+            erros.append(f"{unidade.get('nome')}: unidade sem banco definido.")
+            continue
+        token = definir_banco_escola(schema_u)
+        try:
+            garantir_tabelas_folha()
+            conexao = obter_conexao()
+            if not conexao:
+                raise RuntimeError("sem conexão")
+            try:
+                with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                    ctx_u = _contexto_tributario(cursor)
+                    dados = carregar_unidade(cursor, None, mes_filtro)
+                    lairs[unidade.get("id")] = [_lair_mes(cursor, ctx_u, dados, c) for c in comps]
+                    if schema_u == matriz_schema:
+                        ajustes = ajustes_lucro_real(cursor, None, comps)
+                        saldo = saldo_prejuizo_anterior(cursor, None, comps[0])
+            finally:
+                conexao.close()
+        except Exception as e:
+            erros.append(f"{unidade.get('nome')}: {e}")
+        finally:
+            limpar_banco_escola(token)
+    ordem = [u.get("id") for u in ctx["rede"] if u.get("id") in lairs]
+    saldo = saldo or {"periodo": None, "prejuizo_fiscal": 0.0, "base_negativa_csll": 0.0}
+    lair_empresa = [arred(sum(lairs[u][i] for u in ordem)) for i in range(len(comps))]
+    provisao = provisao_lucro_real(
+        lair_empresa,
+        [ajustes.get(c) or {} for c in comps],
+        saldo["prejuizo_fiscal"], saldo["base_negativa_csll"],
+        modo="balancete" if periodo == "anual_estimativa" else "trimestral",
+    )
+    lair_unidades = {u: sum(lairs[u]) for u in ordem}
+    rateio = {}
+    for tributo in ("irpj", "adicional", "csll"):
+        for uid, valor in ratear_por_lucro(provisao["mes"][tributo], lair_unidades, ordem):
+            rateio.setdefault(uid, {})[tributo] = valor
+    for uid in rateio:
+        rateio[uid]["total"] = arred(sum(rateio[uid].values()))
+    fim_periodo = comps[-1] == (f"{mes_filtro[:4]}-12" if periodo == "anual_estimativa" else meses_do_trimestre(mes_filtro)[-1])
+    if fim_periodo and date.today().strftime("%Y-%m") > comps[-1] and not erros:
+        token = definir_banco_escola(matriz_schema)
+        try:
+            conexao = obter_conexao()
+            if conexao:
+                try:
+                    with conexao.cursor() as cursor:
+                        gravar_saldo_periodo(cursor, None, comps[-1], provisao["periodo"])
+                    conexao.commit()
+                finally:
+                    conexao.close()
+        except Exception as e:
+            erros.append(f"Saldo de prejuízo não gravado: {e}")
+        finally:
+            limpar_banco_escola(token)
+    nomes = {u.get("id"): u for u in ctx["rede"]}
+    resultado = {
+        "competencias": comps,
+        "periodo_tipo": periodo,
+        "lair_empresa": lair_empresa,
+        "lair_unidades": {u: arred(v) for u, v in lair_unidades.items()},
+        "provisao": provisao,
+        "saldo_anterior": saldo,
+        "ajustes": ajustes,
+        "rateio": rateio,
+        "unidades": [
+            dict({"id": u, "nome": nomes[u].get("nome"), "lair": arred(lair_unidades[u])}, **rateio.get(u, {}))
+            for u in ordem
+        ],
+        "erros": erros,
+    }
+    return cache_guardar(schema, resultado, "real_rede", mes_filtro, versoes)
+
+
+def _lucro_real_unidade(cursor, mes_filtro, ctx, dados, real_rede):
+    ef = ctx["efetiva"]
+    pis_cofins, iss = _pis_cofins_iss_real(cursor, ctx, dados, mes_filtro)
+    atual_id = ctx["escola"].get("id")
+    avisos = []
+    periodo = ef.get("lucro_real_periodo") or "trimestral"
+    if periodo == "anual_estimativa" and ef.get("lucro_real_estimativa_modo") == "receita":
+        dados_rede, erros = _dados_rede(cursor, ctx, mes_filtro)
+        avisos += erros
+        ordem = [u["id"] for u in ctx["rede"] if u.get("id") in dados_rede]
+        receitas = {u: receita_regime(dados_rede[u], mes_filtro, "competencia") for u in ordem}
+        moras = {u: mora_do_mes(dados_rede[u], mes_filtro)["total"] for u in ordem}
+        estimativa = apurar_presumido_periodo(
+            [sum(receitas.values())], [sum(moras.values())],
+            presuncao_irpj=ef.get("presuncao_irpj_pct"), presuncao_csll=ef.get("presuncao_csll_pct"),
+        )["mes"]
+        parte = {}
+        for tributo in ("irpj", "adicional", "csll"):
+            for uid, valor in ratear(estimativa[tributo], [(u, receitas[u]) for u in ordem]):
+                if uid == atual_id or (atual_id not in receitas and uid == (ordem[0] if ordem else None)):
+                    parte[tributo] = valor
+        irpj = {"irpj": parte.get("irpj", 0.0), "adicional": parte.get("adicional", 0.0), "csll": parte.get("csll", 0.0)}
+        detalhe = {"modo": "receita", "estimativa_empresa": estimativa}
+    elif real_rede:
+        irpj = real_rede["rateio"].get(atual_id) or {"irpj": 0.0, "adicional": 0.0, "csll": 0.0}
+        detalhe = real_rede
+        avisos += real_rede.get("erros") or []
+    else:
+        irpj = {"irpj": 0.0, "adicional": 0.0, "csll": 0.0}
+        detalhe = None
+        avisos.append("IRPJ e CSLL do Lucro Real não foram calculados nesta tela; veja o Financeiro ou a DRE.")
+    irpj_total = arred(irpj.get("irpj", 0) + irpj.get("adicional", 0) + irpj.get("csll", 0))
+    return {
+        "pis_cofins": pis_cofins,
+        "iss": iss,
+        "iss_pct": float(ef.get("iss_aliquota_pct") or 0),
+        "irpj": irpj.get("irpj", 0.0),
+        "adicional": irpj.get("adicional", 0.0),
+        "csll": irpj.get("csll", 0.0),
+        "irpj_csll": irpj_total,
+        "deducoes": arred(pis_cofins["total"] + iss),
+        "tributos": arred(pis_cofins["total"] + iss + irpj_total),
+        "periodo_tipo": periodo,
+        "estimativa_modo": ef.get("lucro_real_estimativa_modo"),
+        "detalhe": detalhe,
+        "rede": _resumo_rede(ctx),
+        "avisos": avisos,
+    }
+
+
+def _tributos_do_mes(cursor, mes_filtro, real_rede=None, colaboradores=False):
+    """Tributos do mês da unidade atual, com a regra da empresa (rede). Usado por Financeiro, PDFs e DRE."""
+    ctx = _contexto_tributario(cursor)
+    ef = ctx["efetiva"]
+    regime = ef.get("regime_tributario")
+    regime_ap, aviso_real = regime_apuracao_efetivo(regime, ef.get("regime_apuracao"))
+    dados = _dados_unidade(cursor, ctx, ctx["escola"], mes_filtro)
+    mora = mora_do_mes(dados, mes_filtro)
+    saida = {
+        "regime": regime or "nao_informado",
+        "regime_apuracao": regime_ap,
+        "receita": receita_regime(dados, mes_filtro, regime_ap),
+        "mora": mora,
+        "tributos": 0.0,
+        "deducoes": 0.0,
+        "irpj_csll": 0.0,
+        "simples": None,
+        "presumido": None,
+        "real": None,
+        "colaboradores": [],
+        "avisos": [aviso_real] if aviso_real else [],
+        "ctx": ctx,
+        "rede": _resumo_rede(ctx),
+    }
+    if ef.get("divergentes") and regime != "simples_nacional":
+        saida["avisos"].append(
+            "Configuração desta unidade diferente da matriz (" + ", ".join(ef["divergentes"]) +
+            "): o valor desta unidade é ignorado enquanto ela for filial."
+        )
+    if regime == "simples_nacional":
+        ap, colabs = calcular_apuracao_simples(cursor, mes_filtro, colaboradores=colaboradores)
+        saida.update(simples=ap, colaboradores=colabs, receita=ap["receita_unidade"],
+                     deducoes=ap["das_unidade"], tributos=ap["das_unidade"])
+        saida["avisos"] += ap.get("avisos") or []
+    elif regime == "lucro_presumido":
+        p = _presumido_empresa(cursor, mes_filtro, ctx)
+        saida.update(presumido=p, deducoes=p["deducoes"], irpj_csll=p["irpj_csll"], tributos=p["tributos"])
+        saida["avisos"] += p.get("avisos") or []
+    elif regime == "lucro_real":
+        r = _lucro_real_unidade(cursor, mes_filtro, ctx, dados, real_rede)
+        saida.update(real=r, deducoes=r["deducoes"], irpj_csll=r["irpj_csll"], tributos=r["tributos"])
+        saida["avisos"] += r.get("avisos") or []
+    else:
+        saida["avisos"].append("Regime tributário não informado em Configurações: nenhum tributo foi calculado.")
+    if colaboradores and not saida["colaboradores"]:
+        saida["colaboradores"] = montar_folha_colaboradores(cursor)[0]
+    return saida
 
 
 def mora_do_trimestre(cursor, mes_filtro):
@@ -9050,7 +9631,7 @@ def pagina_alunos():
                             _gerar_mensalidades_lote(
                                 cursor, ok,
                                 gerar_passadas=request.form.get("gerar_passadas") == "1",
-                                travas=travas_da_escola(cursor),
+                                travas=_travas_rede(cursor),
                                 planos_out=planos,
                             )
                         conexao_lote.commit()
@@ -9189,7 +9770,7 @@ def pagina_alunos():
                                     nger = _gerar_mensalidades_contrato(
                                         cursor, al_id, valor_cobrado, inicio_c, meses_c, turnos_c,
                                         gerar_passadas=request.form.get("gerar_passadas") == "1",
-                                        travas=travas_da_escola(cursor),
+                                        travas=_travas_rede(cursor),
                                         plano_out=planos,
                                     )
                                     texto_desc = (
@@ -12147,7 +12728,7 @@ def pagina_financeiro():
                             geradas = _gerar_mensalidades_contrato(
                                 cursor, aluno_id, valor, data_vencimento, duracao, turnos, descricao, forcar=True,
                                 gerar_passadas=request.form.get("gerar_passadas") == "1",
-                                travas=travas_da_escola(cursor),
+                                travas=_travas_rede(cursor),
                                 plano_out=planos,
                             )
                             conexao.commit()
@@ -12165,7 +12746,7 @@ def pagina_financeiro():
                         descricao_lote = request.form.get("descricao_lote") or "Mensalidade"
                         data_vencimento_lote = request.form.get("data_vencimento_lote") or datetime.now().strftime("%Y-%m-%d")
                         venc_lote = datetime.strptime(data_vencimento_lote[:10], "%Y-%m-%d").date()
-                        travas_lote = travas_da_escola(cursor)
+                        travas_lote = _travas_rede(cursor)
                         comp_lote = venc_lote.strftime("%Y-%m")
                         if comp_lote in travas_lote:
                             raise ValueError(
@@ -12222,6 +12803,13 @@ def pagina_financeiro():
                                 data_pag = datetime.now().date()
                             if not pago:
                                 data_pag = None
+                            try:
+                                data_pag_d = datetime.strptime(str(data_pag)[:10], "%Y-%m-%d").date() if data_pag else None
+                            except ValueError:
+                                data_pag_d = None
+                            bloqueio = _bloqueio_parcelas(cursor, [cobranca_id], [venc_date], [data_pag_d])
+                            if bloqueio:
+                                raise ValueError(bloqueio)
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
@@ -12275,6 +12863,9 @@ def pagina_financeiro():
                         except (TypeError, ValueError):
                             flash("Informe a data de vencimento.", "danger")
                         else:
+                            bloqueio = _bloqueio_parcelas(cursor, [cobranca_id], [venc_date])
+                            if bloqueio:
+                                raise ValueError(bloqueio)
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
@@ -12433,6 +13024,9 @@ def pagina_financeiro():
                         if not ids:
                             flash("Selecione ao menos uma mensalidade para tirar a baixa.", "danger")
                         else:
+                            bloqueio = _bloqueio_parcelas(cursor, ids)
+                            if bloqueio:
+                                raise ValueError(bloqueio)
                             cursor.execute(
                                 """
                                 UPDATE financeiro_mensalidades
@@ -12549,6 +13143,7 @@ def pagina_financeiro():
                                 "aliq_csll": _float_form("custo_aliq_csll", 1.0),
                                 "federal_na_nota": request.form.get("federal_na_nota") != "0",
                                 "iss_na_nota": request.form.get("iss_na_nota") != "0",
+                                "gera_credito_pis_cofins": request.form.get("gera_credito_pis_cofins") == "1",
                             })
                             conexao.commit()
                             if tipo == "parcelado":
@@ -12728,22 +13323,28 @@ def pagina_financeiro():
     if not mes_filtro:
         mes_filtro = datetime.now().strftime('%Y-%m')
 
+    apuracao_real = None
+    avisos_tributos = []
+    rede_tributos = None
+    try:
+        real_rede = _lucro_real_rede(mes_filtro)
+    except Exception as e:
+        real_rede = None
+        avisos_tributos.append(f"IRPJ/CSLL do Lucro Real não calculados: {e}")
     conexao = obter_conexao()
-    regime_tributario = "lucro_presumido" # Padrão caso não encontre
+    regime_tributario = "lucro_presumido"
 
     if conexao:
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-                # BUSCA O REGIME TRIBUTÁRIO CONFIGURADO NO BANCO[cite: 5]
                 cursor.execute("SELECT nome_escola, regime_tributario, regime_apuracao, email_contato FROM configuracoes WHERE id = 1;")
                 config_regime = cursor.fetchone()
                 nome_escola = "Gestão Escolar"
-                if config_regime:
-                    if config_regime.get("regime_tributario"):
-                        regime_tributario = config_regime["regime_tributario"]
-                    regime_apuracao = normalizar_regime_apuracao(config_regime.get("regime_apuracao"))
-                    if config_regime.get("nome_escola"):
-                        nome_escola = config_regime["nome_escola"]
+                ef_trib = _contexto_tributario(cursor)["efetiva"]
+                regime_tributario = ef_trib.get("regime_tributario") or "lucro_presumido"
+                regime_apuracao = regime_apuracao_efetivo(ef_trib.get("regime_tributario"), ef_trib.get("regime_apuracao"))[0]
+                if config_regime and config_regime.get("nome_escola"):
+                    nome_escola = config_regime["nome_escola"]
 
                 # 1. Atualiza faturas vencidas para 'Atrasado' globalmente[cite: 5]
                 cursor.execute(
@@ -12807,41 +13408,25 @@ def pagina_financeiro():
                 totais["custos_rescisoes"] = resumo_custos.get("rescisoes") or 0.0
                 totais["custos"] = resumo_custos["custos"]
 
-                apuracao_simples = None
-                apuracao_pis_cofins = None
-                apuracao_presumido = None
-                receita_mes_bruta = receita_do_mes(cursor, mes_filtro, regime_apuracao)
-                mora_mes = acrescimos_mora_mes(cursor, mes_filtro)
+                tributos_mes = _tributos_do_mes(cursor, mes_filtro, real_rede=real_rede)
+                regime_tributario = tributos_mes["regime"]
+                regime_apuracao = tributos_mes["regime_apuracao"]
+                mora_mes = tributos_mes["mora"]
                 totais["juros_mes"] = mora_mes["juros"]
                 totais["multa_mes"] = mora_mes["multa"]
                 totais["juros_multa_mes"] = mora_mes["total"]
                 totais["qtd_com_mora"] = mora_mes["qtd"]
-
-                if regime_tributario == "simples_nacional":
-                    apuracao_simples, _colabs_fator_r = calcular_apuracao_simples(cursor, mes_filtro)
+                apuracao_simples = tributos_mes["simples"]
+                apuracao_presumido = tributos_mes["presumido"]
+                apuracao_real = tributos_mes["real"]
+                apuracao_pis_cofins = (apuracao_real or {}).get("pis_cofins")
+                if apuracao_simples:
                     quadro_simples = apuracao_simples.get("quadro")
-                    totais["tributos"] = apuracao_simples["das"]
-                    totais["receita_bruta_mes"] = apuracao_simples["receita_mes"]
-                    totais["liquido"] = totais["recebido"] + totais["juros_multa_mes"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
-                elif regime_tributario == "lucro_real":
-                    apuracao_pis_cofins = apurar_pis_cofins(receita_mes_bruta, "lucro_real", mora_mes["total"])
-                    totais["tributos"] = 0.0
-                    totais["receita_bruta_mes"] = receita_mes_bruta
-                    totais["liquido"] = totais["recebido"] + totais["juros_multa_mes"] - totais["folha_pagamento"] - totais["custos"]
-                else:
-                    colaboradores_folha, _folha_cheia = montar_folha_colaboradores(cursor)
-                    receita_tri = sum(
-                        receita_sistema_mes(cursor, comp, regime_apuracao)
-                        for comp in meses_do_trimestre(mes_filtro)
-                    )
-                    apuracao_presumido = apurar_lucro_presumido(
-                        receita_mes_bruta, colaboradores_folha, receita_tri,
-                        acrescimos_mora=mora_mes["total"],
-                        acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
-                    )
-                    totais["tributos"] = apuracao_presumido["tributos"]
-                    totais["receita_bruta_mes"] = receita_mes_bruta
-                    totais["liquido"] = totais["recebido"] + totais["juros_multa_mes"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
+                totais["tributos"] = tributos_mes["tributos"]
+                totais["receita_bruta_mes"] = tributos_mes["receita"]
+                totais["liquido"] = totais["recebido"] + totais["juros_multa_mes"] - totais["folha_pagamento"] - totais["tributos"] - totais["custos"]
+                avisos_tributos += tributos_mes["avisos"]
+                rede_tributos = tributos_mes["rede"]
 
                 # Restante das consultas de lançamentos...[cite: 5]
                 query_lancamentos = """
@@ -13014,6 +13599,10 @@ def pagina_financeiro():
         quadro_simples=quadro_simples,
         apuracao_pis_cofins=apuracao_pis_cofins,
         apuracao_presumido=apuracao_presumido,
+        apuracao_real=apuracao_real,
+        avisos_tributos=avisos_tributos,
+        rede_tributos=rede_tributos,
+        pode_ajustar_real=pode_acao(session.get("usuario_papel"), "financeiro", "alterar", session.get("permissoes")),
         nome_escola=nome_escola,
         emails_escola=emails_escola,
         mes_label=nome_mes_extenso(mes_filtro),
@@ -13034,6 +13623,10 @@ def excluir_financeiro(id):
     if conexao:
         try:
             with conexao.cursor() as cursor:
+                bloqueio = _bloqueio_parcelas(cursor, [id])
+                if bloqueio:
+                    flash(bloqueio, "danger")
+                    return redirect(url_for("pagina_financeiro"))
                 cursor.execute("DELETE FROM financeiro_mensalidades WHERE id = %s;", (id,))
                 conexao.commit()
                 flash("🗑️ Cobrança excluída com sucesso!", "success")
@@ -13084,8 +13677,8 @@ def extrato_pgdas_pdf():
             cursor.execute("SELECT nome_escola, regime_apuracao FROM configuracoes WHERE id = 1;")
             config = cursor.fetchone() or {}
             escola = config.get("nome_escola") or "Gestão Escolar"
-            regime_apuracao = normalizar_regime_apuracao(config.get("regime_apuracao"))
             apuracao, _colabs = calcular_apuracao_simples(cursor, mes_filtro)
+            regime_apuracao = apuracao.get("regime_apuracao") or normalizar_regime_apuracao(config.get("regime_apuracao"))
             campo = (request.args.get("campo") or "").strip()
             mes_label = nome_mes_extenso(mes_filtro)
             if campo == "rbt12":
@@ -13190,6 +13783,7 @@ def relatorio_cartao_financeiro(tipo):
         flash("Esse relatório não existe.", "danger")
         return redirect(url_for("pagina_financeiro", mes=mes_filtro))
     garantir_tabelas_folha()
+    real_rede = _lucro_real_rede(mes_filtro) if tipo == "caixa" else None
     conexao = obter_conexao()
     if not conexao:
         flash("Sem conexão com o banco para gerar o relatório.", "danger")
@@ -13311,26 +13905,9 @@ def relatorio_cartao_financeiro(tipo):
                 _itens_folha, totais_folha = _folha_competencia(cursor, regime, mes_filtro)
                 folha = float(totais_folha.get("custo_escola") or 0)
                 custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
-                if regime == "simples_nacional":
-                    apuracao, _colabs = calcular_apuracao_simples(cursor, mes_filtro)
-                    tributos = float(apuracao.get("das") or 0)
-                elif regime == "lucro_real":
-                    tributos = 0.0
-                else:
-                    colaboradores, _folha = montar_folha_colaboradores(cursor)
-                    receita_mes = receita_do_mes(cursor, mes_filtro, regime_apuracao)
-                    receita_tri = sum(
-                        receita_sistema_mes(cursor, comp, regime_apuracao)
-                        for comp in meses_do_trimestre(mes_filtro)
-                    )
-                    tributos = float(
-                        apurar_lucro_presumido(
-                            receita_mes, colaboradores, receita_tri,
-                            acrescimos_mora=acrescimos_mora_mes(cursor, mes_filtro)["total"],
-                            acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
-                        ).get("tributos") or 0
-                    )
-                mora_caixa = acrescimos_mora_mes(cursor, mes_filtro)["total"]
+                tributos_mes = _tributos_do_mes(cursor, mes_filtro, real_rede=real_rede)
+                tributos = float(tributos_mes["tributos"] or 0)
+                mora_caixa = tributos_mes["mora"]["total"]
                 total = recebido + mora_caixa - folha - tributos - custos["compras"] - custos["servicos"] - custos.get("rescisoes", 0)
                 buffer = pdf_caixa_restante(
                     escola,
@@ -13396,63 +13973,37 @@ def relatorio_pdf_custos():
     )
 
 
-def _base_dre_escola(cursor, mes_filtro):
-    """Linhas de base da DRE da escola do schema atual, com os mesmos cálculos do Financeiro."""
-    cursor.execute("SELECT nome_escola, regime_tributario, regime_apuracao FROM configuracoes WHERE id = 1")
-    cfg = cursor.fetchone() or {}
-    regime = cfg.get("regime_tributario") or "lucro_presumido"
-    regime_ap = normalizar_regime_apuracao(cfg.get("regime_apuracao"))
-    mora = acrescimos_mora_mes(cursor, mes_filtro)
-    _itens, folha = _folha_competencia(cursor, regime, mes_filtro)
+def _base_dre_escola(cursor, mes_filtro, real_rede=None):
+    """Linhas de base da DRE da unidade do schema atual: os mesmos tributos do Financeiro (regra da empresa)."""
+    tributos = _tributos_do_mes(cursor, mes_filtro, real_rede=real_rede)
+    ctx = tributos["ctx"]
+    regime = tributos["regime"]
+    _itens, folha = _folha_competencia(cursor, regime if regime != "nao_informado" else "lucro_presumido", mes_filtro)
     custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
     base = {
-        "receitas_financeiras": mora["total"],
+        "receita_bruta": tributos["receita"],
+        "deducoes": tributos["deducoes"],
+        "irpj_csll": tributos["irpj_csll"],
+        "receitas_financeiras": tributos["mora"]["total"],
         "folha": folha.get("custo_escola") or 0,
         "rescisoes": custos.get("rescisoes") or 0,
         "compras": custos.get("compras") or 0,
         "servicos": custos.get("servicos") or 0,
     }
     info = {
-        "nome_escola": cfg.get("nome_escola"),
+        "nome_escola": ctx["cfg"].get("nome_escola"),
         "regime": regime,
-        "regime_apuracao": regime_ap,
+        "regime_apuracao": tributos["regime_apuracao"],
         "folha_fechada": bool(info_fechamento(cursor, mes_filtro)),
-        "simples": None,
-        "avisos": [],
+        "simples": tributos["simples"],
+        "presumido": tributos["presumido"],
+        "real": tributos["real"],
+        "avisos": list(tributos["avisos"]),
     }
-    if regime == "simples_nacional":
-        apuracao, _colabs = calcular_apuracao_simples(cursor, mes_filtro)
-        base["receita_bruta"] = apuracao["receita_mes"]
-        base["deducoes"] = apuracao["das"]
-        info["simples"] = {
-            "rbt12": apuracao["rbt12"],
-            "fs12": apuracao["fs12"],
-            "receita_mes": apuracao["receita_mes"],
-            "aliquota_efetiva": apuracao["aliquota_efetiva"],
-            "anexo": apuracao["anexo"],
-            "atividade": apuracao["atividade"],
-            "das": apuracao["das"],
-        }
-    elif regime == "lucro_real":
-        receita = receita_do_mes(cursor, mes_filtro, regime_ap)
-        base["receita_bruta"] = receita
-        base["deducoes"] = apurar_pis_cofins(receita, "lucro_real", mora["total"])["total"]
-        info["avisos"].append("Lucro Real: IRPJ e CSLL dependem do lucro contábil e não entram nesta DRE.")
-    else:
-        receita = receita_do_mes(cursor, mes_filtro, regime_ap)
-        receita_tri = sum(receita_sistema_mes(cursor, comp, regime_ap) for comp in meses_do_trimestre(mes_filtro))
-        presumido = apurar_lucro_presumido(
-            receita, [], receita_tri,
-            acrescimos_mora=mora["total"],
-            acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
-        )
-        base["receita_bruta"] = receita
-        base["deducoes"] = presumido["pis"] + presumido["cofins"] + presumido["iss"]
-        base["irpj_csll"] = presumido["irpj"] + presumido["csll"] + presumido["irpj_adicional"]
     return base, info
 
 
-def _base_dre_unidade(unidade, mes_filtro):
+def _base_dre_unidade(unidade, mes_filtro, real_rede=None):
     """Troca para o schema da unidade só durante a leitura."""
     schema = unidade.get("db_nome")
     if not schema:
@@ -13465,37 +14016,71 @@ def _base_dre_unidade(unidade, mes_filtro):
             raise RuntimeError("sem conexão com o banco")
         try:
             with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-                return _base_dre_escola(cursor, mes_filtro)
+                return _base_dre_escola(cursor, mes_filtro, real_rede)
         finally:
             conexao.close()
     finally:
         limpar_banco_escola(token)
 
 
-def _montar_dre_rede(rede, mes_filtro):
-    """DRE de cada unidade da rede; no Simples, o DAS usa a alíquota da RBT12 somada da rede."""
+def _montar_dre_rede(unidades, mes_filtro, real_rede=None):
+    """DRE de cada unidade pedida. Os tributos já são a parte da unidade no imposto da empresa,
+    então a soma das colunas é a apuração da empresa."""
     colunas = []
-    for unidade in rede:
+    for unidade in unidades:
         coluna = {"id": unidade.get("id"), "nome": unidade.get("nome") or f"Unidade #{unidade.get('id')}",
                   "tipo": unidade.get("tipo_unidade") or "independente", "erro": None}
         try:
-            coluna["base"], coluna["info"] = _base_dre_unidade(unidade, mes_filtro)
+            coluna["base"], coluna["info"] = _base_dre_unidade(unidade, mes_filtro, real_rede)
         except Exception as e:
             coluna["base"], coluna["info"] = {}, {"avisos": [], "simples": None}
             coluna["erro"] = f"Não foi possível ler os dados desta unidade: {e}"
         colunas.append(coluna)
-    simples = [c for c in colunas if (c["info"] or {}).get("simples")]
-    apuracao_rede = None
-    if len(rede) > 1 and simples:
-        apuracao_rede = aliquota_simples_rede(
-            [c["info"]["simples"] for c in simples], atividade=simples[0]["info"]["simples"]["atividade"]
-        )
-        for c in simples:
-            c["das_individual"] = c["base"].get("deducoes")
-            c["base"]["deducoes"] = das_pela_rede(c["info"]["simples"]["receita_mes"], apuracao_rede)
     for c in colunas:
         c["dre"] = calcular_dre(c["base"])
-    return colunas, apuracao_rede
+    return colunas
+
+
+def _notas_tributos_dre(colunas, consolidado):
+    """Notas obrigatórias: de onde vem cada tributo da DRE."""
+    info = next((c.get("info") for c in colunas if not c.get("erro")), None) or {}
+    regime = info.get("regime")
+    notas = []
+    if regime == "simples_nacional":
+        ap = info.get("simples") or {}
+        das_empresa = ap.get("das_total", ap.get("das"))
+        if ap.get("rede"):
+            notas.append(
+                f"Simples Nacional: um DAS para a empresa (matriz + {ap['rede']['n_filiais']} filial(is)), "
+                f"{br_money(das_empresa)}, com a RBT12 da empresa {br_money(ap.get('rbt12'))} "
+                f"(Anexo {ap.get('anexo')}, faixa {ap.get('faixa')}, alíquota efetiva {float(ap.get('aliquota_efetiva_pct') or 0):.4f}%). "
+                "Cada unidade mostra a sua parte, proporcional à receita do mês."
+            )
+        notas.append("IRPJ e CSLL incluídos no DAS (Simples Nacional): a linha de IRPJ e CSLL fica zerada.")
+    elif regime == "lucro_presumido":
+        p = info.get("presumido") or {}
+        notas.append(
+            f"Lucro Presumido: IRPJ/CSLL do trimestre apurados para a empresa (presunção IRPJ {float(p.get('presuncao_irpj_pct') or 0):g}%, "
+            f"CSLL {float(p.get('presuncao_csll_pct') or 0):g}%"
+            + (f"; {p['presuncao_fundamento']}" if p.get("presuncao_fundamento") else "")
+            + "), com um único limite de R$ 60.000 do adicional; provisão do mês = acumulado do trimestre − meses anteriores. "
+            f"ISS a {float(p.get('iss_pct') or 0):g}% sobre a receita de cada unidade."
+        )
+    elif regime == "lucro_real":
+        r = info.get("real") or {}
+        detalhe = r.get("detalhe") or {}
+        notas.append(
+            "Lucro Real: IRPJ e CSLL sobre o lucro da empresa (soma do resultado de todas as unidades), com adições, "
+            "exclusões e compensação de prejuízo limitada a 30%; rateados pelo resultado positivo de cada unidade. "
+            f"PIS/COFINS {'não cumulativo' if (r.get('pis_cofins') or {}).get('modo') == 'nao_cumulativo' else 'cumulativo (ensino, Lei 10.833/2003, art. 10, XIV)'}."
+        )
+        if detalhe.get("saldo_anterior"):
+            s = detalhe["saldo_anterior"]
+            notas.append(
+                f"Saldo de prejuízo fiscal antes do período: {br_money(s.get('prejuizo_fiscal'))}; "
+                f"base negativa de CSLL: {br_money(s.get('base_negativa_csll'))}."
+            )
+    return notas
 
 
 @app.route("/financeiro/dre")
@@ -13524,43 +14109,37 @@ def relatorio_dre():
     if visao != "individual" and not eh_matriz:
         visao = "individual"
 
-    colunas, apuracao_rede = _montar_dre_rede(rede, mes_filtro)
+    try:
+        real_rede = _lucro_real_rede(mes_filtro)
+    except Exception:
+        real_rede = None
     if visao == "individual":
-        exibidas = [c for c in colunas if str(c["id"]) == str(escola.get("id"))] or colunas[:1]
+        atual = next((u for u in rede if str(u.get("id")) == str(escola.get("id"))), None) or rede[0]
+        exibidas = _montar_dre_rede([atual], mes_filtro, real_rede)
         consolidado = None
     else:
-        exibidas = colunas
-        consolidado = consolidar_dre([c["dre"] for c in colunas if not c["erro"]])
+        exibidas = _montar_dre_rede(rede, mes_filtro, real_rede)
+        consolidado = consolidar_dre([c["dre"] for c in exibidas if not c["erro"]])
     linhas = linhas_para_tela(exibidas, consolidado)
 
-    notas = []
-    if apuracao_rede:
-        notas.append(
-            f"Simples Nacional da rede: matriz e filiais são a mesma empresa, então a alíquota sai da RBT12 somada "
-            f"das {len(rede)} unidades (R$ {br_money(apuracao_rede['rbt12'])}): Anexo {apuracao_rede['anexo']}, "
-            f"faixa {apuracao_rede['faixa']}, alíquota efetiva {apuracao_rede['aliquota_efetiva_pct']:.4f}%. "
-            "Cada unidade paga essa alíquota sobre a própria receita."
-        )
-        for c in exibidas:
-            if c.get("das_individual") is not None and abs((c.get("das_individual") or 0) - c["base"]["deducoes"]) >= 0.01:
-                notas.append(
-                    f"{c['nome']}: DAS pela alíquota da rede R$ {br_money(c['base']['deducoes'])}; "
-                    f"pela RBT12 só da unidade seria R$ {br_money(c['das_individual'])} (valor mostrado hoje no Financeiro da unidade)."
-                )
+    notas = _notas_tributos_dre(exibidas, consolidado)
+    vistos = set()
     for c in exibidas:
         info = c.get("info") or {}
         for aviso in info.get("avisos") or []:
-            notas.append(f"{c['nome']}: {aviso}" if len(exibidas) > 1 else aviso)
+            if aviso in vistos:
+                continue
+            vistos.add(aviso)
+            notas.append(aviso)
         if info.get("folha_fechada"):
             notas.append(f"{c['nome']}: folha do mês fechada; usa os valores gravados no fechamento." if len(exibidas) > 1
                          else "Folha do mês fechada: usa os valores gravados no fechamento.")
         if c.get("erro"):
             notas.append(f"{c['nome']}: {c['erro']}")
-    regimes = {(c.get("info") or {}).get("regime_apuracao") for c in exibidas if not c.get("erro")}
-    if "caixa" in regimes and "competencia" in regimes:
-        notas.append("Atenção: há unidades no regime de caixa e outras no de competência; a receita consolidada mistura os dois critérios.")
+    regime_ap = next(((c.get("info") or {}).get("regime_apuracao") for c in exibidas if not c.get("erro")), None)
     notas.append(
-        "Receita bruta: mensalidades do mês pelo regime de apuração da unidade (competência = vencimento; caixa = pagamento). "
+        "Receita bruta: mensalidades do mês pelo regime de apuração da empresa "
+        f"({'caixa = pagamento' if regime_ap == 'caixa' else 'competência = vencimento'}), o mesmo em todas as unidades. "
         "Juros e multa ficam fora da receita bruta (receita financeira)."
     )
 
@@ -13594,12 +14173,103 @@ def relatorio_dre():
     )
 
 
+def _ajuste_real_permitido(mes_volta):
+    """Ajustes do Lucro Real são da empresa: só a matriz (ou escola independente) com permissão de alterar."""
+    if "usuario_id" not in session:
+        return redirect(url_for("login"))
+    if not pode_acao(session.get("usuario_papel"), "financeiro", "alterar", session.get("permissoes")):
+        flash("Sem permissão para alterar a apuração.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_volta))
+    return None
+
+
+@app.route("/financeiro/lucro-real/ajuste", methods=["POST"])
+def lucro_real_ajuste_salvar():
+    mes_volta = request.form.get("mes") or datetime.now().strftime("%Y-%m")
+    bloqueio = _ajuste_real_permitido(mes_volta)
+    if bloqueio:
+        return bloqueio
+    competencia = (request.form.get("competencia") or "").strip()[:7]
+    tipo = request.form.get("tipo")
+    tributo = request.form.get("tributo") or "ambos"
+    valor = parse_moeda_livre(request.form.get("valor"))
+    descricao = (request.form.get("descricao") or "").strip()[:255] or None
+    try:
+        parse_mes(competencia)
+    except Exception:
+        competencia = ""
+    if not competencia or tipo not in ("adicao", "exclusao") or tributo not in ("irpj", "csll", "ambos") or valor <= 0:
+        flash("Preencha competência, tipo, tributo e um valor maior que zero.", "warning")
+        return redirect(url_for("pagina_financeiro", mes=mes_volta))
+    if date.today() > _vencimento_trimestre(competencia):
+        flash("O trimestre dessa competência já venceu: o ajuste não pode mais ser lançado.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_volta))
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_volta))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            ctx = _contexto_tributario(cursor)
+            if ctx["papel"] == "filial":
+                flash("Os ajustes do Lucro Real são da empresa: lance na matriz.", "warning")
+                return redirect(url_for("pagina_financeiro", mes=mes_volta))
+            cursor.execute(
+                "INSERT INTO lucro_real_ajustes (competencia, tipo, tributo, descricao, valor, criado_por) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (competencia, tipo, tributo, descricao, valor, session.get("usuario_email") or session.get("usuario_nome")),
+            )
+        conexao.commit()
+        flash("Ajuste do Lucro Real registrado.", "success")
+    except Exception as e:
+        conexao.rollback()
+        flash(f"Erro ao salvar o ajuste: {e}", "danger")
+    finally:
+        conexao.close()
+    return redirect(url_for("pagina_financeiro", mes=mes_volta))
+
+
+@app.route("/financeiro/lucro-real/ajuste/<int:ajuste_id>/excluir", methods=["POST"])
+def lucro_real_ajuste_excluir(ajuste_id):
+    mes_volta = request.form.get("mes") or datetime.now().strftime("%Y-%m")
+    bloqueio = _ajuste_real_permitido(mes_volta)
+    if bloqueio:
+        return bloqueio
+    conexao = obter_conexao()
+    if not conexao:
+        flash("Sem conexão com o banco.", "danger")
+        return redirect(url_for("pagina_financeiro", mes=mes_volta))
+    try:
+        with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+            if _contexto_tributario(cursor)["papel"] == "filial":
+                flash("Os ajustes do Lucro Real são da empresa: altere na matriz.", "warning")
+                return redirect(url_for("pagina_financeiro", mes=mes_volta))
+            cursor.execute("SELECT competencia FROM lucro_real_ajustes WHERE id = %s", (ajuste_id,))
+            row = cursor.fetchone()
+            if not row:
+                flash("Ajuste não encontrado.", "warning")
+                return redirect(url_for("pagina_financeiro", mes=mes_volta))
+            if date.today() > _vencimento_trimestre(row["competencia"]):
+                flash("O trimestre desse ajuste já venceu: ele não pode ser excluído.", "danger")
+                return redirect(url_for("pagina_financeiro", mes=mes_volta))
+            cursor.execute("DELETE FROM lucro_real_ajustes WHERE id = %s", (ajuste_id,))
+        conexao.commit()
+        flash("Ajuste excluído.", "success")
+    except Exception as e:
+        conexao.rollback()
+        flash(f"Erro ao excluir o ajuste: {e}", "danger")
+    finally:
+        conexao.close()
+    return redirect(url_for("pagina_financeiro", mes=mes_volta))
+
+
 @app.route("/financeiro/relatorio-tributario")
 def relatorio_tributario():
     if "usuario_id" not in session:
         return redirect(url_for("login"))
 
     mes_filtro = request.args.get("mes", "").strip() or datetime.now().strftime("%Y-%m")
+    real_rede = _lucro_real_rede(mes_filtro)
     conexao = obter_conexao()
     if not conexao:
         flash("❌ Sem conexão com o banco para gerar o relatório.", "danger")
@@ -13607,16 +14277,20 @@ def relatorio_tributario():
 
     try:
         with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT nome_escola, regime_tributario, regime_apuracao FROM configuracoes WHERE id = 1;")
-            config = cursor.fetchone() or {}
-            regime = config.get("regime_tributario") or "lucro_presumido"
-            regime_apuracao = normalizar_regime_apuracao(config.get("regime_apuracao"))
+            tributos_mes = _tributos_do_mes(cursor, mes_filtro, real_rede=real_rede, colaboradores=True)
+            config = tributos_mes["ctx"]["cfg"]
+            regime = tributos_mes["regime"]
+            regime_apuracao = tributos_mes["regime_apuracao"]
+            if regime == "nao_informado":
+                flash("Informe o regime tributário em Configurações para gerar o relatório tributário.", "warning")
+                return redirect(url_for("pagina_financeiro", mes=mes_filtro))
             escola = config.get("nome_escola") or "Gestão Escolar"
             mes_label = nome_mes_extenso(mes_filtro)
             titulos_base = _titulos_base_imposto(cursor, mes_filtro, regime_apuracao)
 
             if regime == "simples_nacional":
-                apuracao, colaboradores = calcular_apuracao_simples(cursor, mes_filtro)
+                apuracao = tributos_mes["simples"]
+                colaboradores = tributos_mes["colaboradores"]
                 receitas_mes = listar_lancamentos_mes(cursor, mes_filtro)
                 _itens_folha, totais_folha = _folha_competencia(cursor, regime, mes_filtro)
                 custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, mes_filtro))
@@ -13628,8 +14302,8 @@ def relatorio_tributario():
                     colaboradores,
                     receitas_mes,
                     dre={
-                        "receita": apuracao.get("receita_mes"),
-                        "das": apuracao.get("das"),
+                        "receita": apuracao.get("receita_unidade"),
+                        "das": apuracao.get("das_unidade"),
                         "folha": totais_folha.get("custo_escola"),
                         "compras": custos.get("compras"),
                         "servicos": custos.get("servicos"),
@@ -13651,17 +14325,16 @@ def relatorio_tributario():
                     (mes_filtro,),
                 )
                 resumo = cursor.fetchone() or {}
-                colaboradores, folha_mes = montar_folha_colaboradores(cursor)
-                receita_mes = receita_do_mes(cursor, mes_filtro, regime_apuracao)
-                mora_mes = acrescimos_mora_mes(cursor, mes_filtro)
-                pis_cofins = apurar_pis_cofins(receita_mes, regime, mora_mes["total"])
+                colaboradores = tributos_mes["colaboradores"]
+                receita_mes = tributos_mes["receita"]
+                mora_mes = tributos_mes["mora"]
                 totais = {
                     "recebido": float(resumo.get("recebido") or 0),
                     "pendente": float(resumo.get("pendente") or 0),
                     "atrasado": float(resumo.get("atrasado") or 0),
-                    "folha_pagamento": folha_mes,
+                    "folha_pagamento": 0.0,
                     "receita_bruta_mes": receita_mes,
-                    "tributos": pis_cofins["total"] if regime == "lucro_presumido" else 0.0,
+                    "tributos": tributos_mes["tributos"],
                     "juros_mes": mora_mes["juros"],
                     "multa_mes": mora_mes["multa"],
                     "juros_multa_mes": mora_mes["total"],
@@ -13674,19 +14347,10 @@ def relatorio_tributario():
                 totais["custos_servicos"] = resumo_custos["servicos"]
                 totais["custos_rescisoes"] = resumo_custos.get("rescisoes") or 0.0
                 totais["custos"] = resumo_custos["custos"]
+                _itens_folha, totais_folha = _folha_competencia(cursor, regime, mes_filtro)
+                totais["folha_pagamento"] = totais_folha.get("custo_escola") or 0
                 if regime == "lucro_presumido":
-                    receita_tri = sum(
-                        receita_sistema_mes(cursor, comp, regime_apuracao)
-                        for comp in meses_do_trimestre(mes_filtro)
-                    )
-                    apuracao_p = apurar_lucro_presumido(
-                        receita_mes, colaboradores, receita_tri,
-                        acrescimos_mora=mora_mes["total"],
-                        acrescimos_trimestre=mora_do_trimestre(cursor, mes_filtro),
-                    )
-                    _itens_folha, totais_folha = _folha_competencia(cursor, regime, mes_filtro)
-                    totais["tributos"] = apuracao_p["tributos"]
-                    totais["folha_pagamento"] = totais_folha.get("custo_escola") or 0
+                    apuracao_p = tributos_mes["presumido"]
                     buffer = pdf_lucro_presumido(
                         escola, mes_label, regime, apuracao_p, totais, recebidos,
                         titulos=titulos_base, regime_apuracao=regime_apuracao,
@@ -13702,9 +14366,10 @@ def relatorio_tributario():
                         pendentes,
                         atrasados,
                         colaboradores,
-                        pis_cofins,
+                        (tributos_mes["real"] or {}).get("pis_cofins"),
                         titulos=titulos_base,
                         regime_apuracao=regime_apuracao,
+                        real=tributos_mes["real"],
                     )
                     nome_arquivo = f"relatorio_receitas_pagamentos_{mes_filtro}.pdf"
     finally:
@@ -16173,13 +16838,20 @@ def pagina_configuracoes():
             simples_atividade = normalizar_atividade_simples(request.form.get("simples_atividade"))
             if conexao:
                 try:
-                    with conexao.cursor() as cursor:
+                    with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
                         cursor.execute(
                             "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS regime_apuracao VARCHAR(20) DEFAULT 'competencia'"
                         )
                         cursor.execute(
                             "ALTER TABLE configuracoes ADD COLUMN IF NOT EXISTS simples_atividade VARCHAR(20) DEFAULT 'ensino'"
                         )
+                        if _contexto_tributario(cursor)["papel"] == "filial":
+                            cfg_atual = ler_config(cursor)
+                            regime_tributario = cfg_atual.get("regime_tributario")
+                            regime_apuracao = cfg_atual.get("regime_apuracao") or "competencia"
+                            simples_atividade = cfg_atual.get("simples_atividade") or "ensino"
+                        elif regime_tributario not in ("simples_nacional", "lucro_presumido", "lucro_real"):
+                            regime_tributario = ler_config(cursor).get("regime_tributario")
                         cursor.execute(
                             """
                             INSERT INTO configuracoes (
@@ -16208,6 +16880,69 @@ def pagina_configuracoes():
                 finally:
                     conexao.close()
             return redirect(url_for("pagina_configuracoes"))
+
+        if acao == "salvar_tributacao":
+            if normalizar_papel(session.get("usuario_papel")) != "admin":
+                if conexao:
+                    conexao.close()
+                flash("Só o administrador da escola altera a tributação.", "danger")
+                return redirect(url_for("pagina_configuracoes") + "#tributacao")
+            erros, avisos = [], []
+            iss = validar_percentual(request.form.get("iss_aliquota_pct"), 0, 5)
+            if iss is None:
+                erros.append("ISS deve ficar entre 0% e 5% (LC 116/2003, art. 8º).")
+            elif iss < ISS_MINIMO_PCT:
+                avisos.append("ISS abaixo de 2%: só vale com benefício previsto em lei municipal (LC 116/2003, art. 8º-A).")
+            valores = {"iss_aliquota_pct": iss}
+            if conexao:
+                try:
+                    with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
+                        eh_filial = _contexto_tributario(cursor)["papel"] == "filial"
+                        if not eh_filial:
+                            p_irpj = validar_percentual(request.form.get("presuncao_irpj_pct"), 0, 100)
+                            p_csll = validar_percentual(request.form.get("presuncao_csll_pct"), 0, 100)
+                            if p_irpj is None or p_csll is None:
+                                erros.append("Presunção do IRPJ e da CSLL deve ficar entre 0% e 100%.")
+                            valores.update({
+                                "presuncao_irpj_pct": p_irpj,
+                                "presuncao_csll_pct": p_csll,
+                                "presuncao_fundamento": (request.form.get("presuncao_fundamento") or "").strip()[:255] or None,
+                                "pis_cofins_incluir_mora": request.form.get("pis_cofins_incluir_mora") == "1",
+                                "presumido_aplicar_lc224": request.form.get("presumido_aplicar_lc224") == "1",
+                                "simples_rbt12_criterio": "competencia" if request.form.get("simples_rbt12_criterio") == "competencia" else "mesmo_regime",
+                                "lucro_real_periodo": "anual_estimativa" if request.form.get("lucro_real_periodo") == "anual_estimativa" else "trimestral",
+                                "lucro_real_estimativa_modo": "receita" if request.form.get("lucro_real_estimativa_modo") == "receita" else "balancete",
+                                "pis_cofins_lucro_real": "nao_cumulativo" if request.form.get("pis_cofins_lucro_real") == "nao_cumulativo" else "cumulativo_ensino",
+                            })
+                        if erros:
+                            raise ValueError(" ".join(erros))
+                        colunas = ", ".join(f"{c} = %s" for c in valores)
+                        cursor.execute(f"UPDATE configuracoes SET {colunas} WHERE id = 1", list(valores.values()))
+                        if not eh_filial and request.form.get("saldo_inicial") == "1":
+                            garantir_tabelas_lucro_real(cursor)
+                            cursor.execute(
+                                """
+                                INSERT INTO lucro_real_saldos (periodo, prejuizo_fiscal, base_negativa_csll, atualizado_em)
+                                VALUES (%s, %s, %s, NOW())
+                                ON CONFLICT (periodo) DO UPDATE SET
+                                    prejuizo_fiscal = EXCLUDED.prejuizo_fiscal,
+                                    base_negativa_csll = EXCLUDED.base_negativa_csll,
+                                    atualizado_em = NOW()
+                                """,
+                                (SALDO_INICIAL, max(parse_moeda_livre(request.form.get("prejuizo_inicial")), 0),
+                                 max(parse_moeda_livre(request.form.get("base_negativa_inicial")), 0)),
+                            )
+                    conexao.commit()
+                    flash("Tributação salva." + (" " + " ".join(avisos) if avisos else ""), "warning" if avisos else "success")
+                except ValueError as e:
+                    conexao.rollback()
+                    flash(str(e), "danger")
+                except Exception as e:
+                    conexao.rollback()
+                    flash(f"Não foi possível salvar a tributação: {e}", "danger")
+                finally:
+                    conexao.close()
+            return redirect(url_for("pagina_configuracoes") + "#tributacao")
 
         if acao == "salvar_ponto_tempos":
             try:
@@ -16355,6 +17090,7 @@ def pagina_configuracoes():
         return redirect(url_for("pagina_configuracoes"))
 
     config = {}
+    tributacao_tela = None
     equipe_acesso = []
     acesso = None
     uid_acesso = request.args.get("uid", type=int)
@@ -16371,6 +17107,17 @@ def pagina_configuracoes():
                     garantir_colunas_empresa(cursor)
                     cursor.execute("SELECT * FROM configuracoes WHERE id = 1;")
                     config = preparar_config_tela(cursor.fetchone() or {})
+                except Exception:
+                    conexao.rollback()
+                try:
+                    ctx_trib = _contexto_tributario(cursor)
+                    saldo_ini = saldo_prejuizo_anterior(cursor, None, "0000-01")
+                    tributacao_tela = {
+                        "papel": ctx_trib["papel"],
+                        "matriz_nome": ctx_trib["matriz"].get("nome"),
+                        "efetiva": ctx_trib["efetiva"],
+                        "saldo_inicial": saldo_ini,
+                    }
                 except Exception:
                     conexao.rollback()
                 try:
@@ -16421,6 +17168,7 @@ def pagina_configuracoes():
         unidade=_unidade_da_escola(session.get("escola_id")) if session.get("escola_id") else None,
         tipos_unidade=TIPOS_UNIDADE,
         pode_unidade=normalizar_papel(session.get("usuario_papel")) == "admin",
+        tributacao=tributacao_tela,
         equipe_acesso=equipe_acesso,
         acesso=acesso,
         areas_acesso=[
