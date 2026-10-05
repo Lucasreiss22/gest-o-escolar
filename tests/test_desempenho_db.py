@@ -93,5 +93,104 @@ class CursorMemoTest(unittest.TestCase):
         self.assertEqual(database.contagem_consultas(), 2)
 
 
+class _CursorRede:
+    """Banco falso de uma rede (matriz + filial) só com o necessário para a apuração."""
+
+    ESCOLAS = [
+        {"id": 1, "nome": "Matriz", "db_nome": "esc_matriz", "tipo_unidade": "matriz", "matriz_id": None, "cnpj": "11222333000181"},
+        {"id": 2, "nome": "Filial", "db_nome": "esc_filial", "tipo_unidade": "filial", "matriz_id": 1, "cnpj": "11222333000262"},
+    ]
+
+    def __init__(self, regime="simples_nacional"):
+        self.regime = regime
+        self.consultas = []
+        self._resultado = []
+        matriz = [{"tipo": "v", "comp": f"2026-{m:02d}", "receita": 112_990.0} for m in range(2, 10)]
+        matriz.append({"tipo": "v", "comp": "2026-10", "receita": 113_870.0})
+        matriz.append({"tipo": "iv", "comp": "2026-02", "receita": 0})
+        filial = [{"tipo": "v", "comp": "2026-10", "receita": 51_000.0}, {"tipo": "iv", "comp": "2026-10", "receita": 0}]
+        self.mensalidades = {"esc_matriz": matriz, "esc_filial": filial}
+
+    def _schema(self, sql):
+        for escola in self.ESCOLAS:
+            if f'"{escola["db_nome"]}".' in sql:
+                return escola["db_nome"]
+        return database._nome_banco_atual()
+
+    def execute(self, sql, params=None):
+        texto = sql.strip().upper()
+        if texto.startswith(("SAVEPOINT", "RELEASE", "ROLLBACK")):
+            return
+        self.consultas.append(sql)
+        schema = self._schema(sql)
+        if "plataforma_escolas" in sql:
+            self._resultado = [dict(e) for e in self.ESCOLAS]
+        elif "configuracoes" in sql:
+            self._resultado = [{"nome_escola": schema, "regime_tributario": self.regime, "regime_apuracao": "competencia"}]
+        elif "financeiro_mensalidades" in sql:
+            self._resultado = [dict({"juros": 0, "multa": 0, "qtd": 0}, **l) for l in self.mensalidades[schema]]
+        else:
+            self._resultado = []
+
+    def fetchone(self):
+        return self._resultado[0] if self._resultado else None
+
+    def fetchall(self):
+        return list(self._resultado)
+
+
+class ConsultasDaApuracaoTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import app as app_mod
+
+        cls.app = app_mod
+
+    def setUp(self):
+        import carga_tributos
+
+        carga_tributos._CACHE.clear()
+
+    def _apurar(self, schema, regime="simples_nacional"):
+        cur = _CursorRede(regime)
+        token = database.definir_banco_escola(schema)
+        try:
+            with self.app.app.test_request_context("/"):
+                tributos = self.app._tributos_do_mes(cur, "2026-10")
+        finally:
+            database.limpar_banco_escola(token)
+        return tributos, cur.consultas
+
+    def test_carregador_faz_tres_consultas_por_unidade(self):
+        from carga_tributos import carregar_unidade
+
+        cur = _CursorRede()
+        carregar_unidade(cur, "esc_filial", "2026-10")
+        self.assertEqual(len(cur.consultas), 3)
+
+    def test_simples_da_rede_na_matriz(self):
+        tributos, consultas = self._apurar("esc_matriz")
+        self.assertLessEqual(len(consultas), 20)
+        self.assertEqual(tributos["simples"]["das_total"], 22_045.51)
+        self.assertEqual(tributos["tributos"], 15_226.07)
+
+    def test_simples_da_rede_na_filial(self):
+        tributos, consultas = self._apurar("esc_filial")
+        self.assertLessEqual(len(consultas), 20)
+        self.assertEqual(tributos["tributos"], 6_819.44)
+        self.assertEqual(tributos["simples"]["rede"]["papel"], "filial")
+
+    def test_presumido_da_rede(self):
+        tributos, consultas = self._apurar("esc_matriz", "lucro_presumido")
+        self.assertLessEqual(len(consultas), 20)
+        self.assertGreater(tributos["tributos"], 0)
+        self.assertEqual(tributos["irpj_csll"], tributos["presumido"]["irpj_csll"])
+
+    def test_regime_vazio_nao_calcula(self):
+        tributos, _consultas = self._apurar("esc_matriz", None)
+        self.assertEqual(tributos["regime"], "nao_informado")
+        self.assertEqual(tributos["tributos"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
