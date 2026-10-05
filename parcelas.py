@@ -61,6 +61,98 @@ def limite_apurado(hoje, regime_tributario):
     return None
 
 
+OPERACOES_BAIXA = ("dar_baixa", "dar_baixa_lote")
+OPERACOES_TIRAR_BAIXA = ("tirar_baixa", "tirar_baixa_lote")
+OPERACOES_COM_VENCIMENTO = ("editar_cobranca", "alterar_data_vencimento", "excluir_financeiro")
+
+
+def _comp_de(valor):
+    if not valor:
+        return None
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%Y-%m")
+    texto = str(valor)
+    return texto[:7] if re.match(r"^\d{4}-\d{2}", texto) else None
+
+
+def _valor(estado):
+    try:
+        return round(float(estado.get("valor") or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _entra_na_receita(status):
+    return not str(status or "").strip().lower().startswith("cancel")
+
+
+def _pago(estado):
+    return str(estado.get("status") or "").strip().lower() == "pago" or bool(estado.get("pag"))
+
+
+def competencias_afetadas(regime_tributario, regime_apuracao, operacao, antes, depois=None):
+    """Competências ("AAAA-MM") cuja receita a operação na parcela altera.
+
+    `antes`/`depois`: {venc, pag, status, valor, mora}; `depois` só com o que muda (None em exclusão).
+    `regime_apuracao`: o efetivo da empresa (na rede, o da matriz)."""
+    antes = dict(antes or {})
+    novo = None if depois is None else {**antes, **depois}
+    caixa = str(regime_apuracao or "").strip().lower() == "caixa"
+    pag_antes = _comp_de(antes.get("pag")) if _pago(antes) else None
+    pag_depois = _comp_de(novo.get("pag")) if novo is not None and _pago(novo) else None
+    venc_antes = _comp_de(antes.get("venc"))
+    venc_depois = _comp_de(novo.get("venc")) if novo is not None else None
+    comps = set()
+
+    if regime_tributario == "simples_nacional":
+        if caixa:
+            if operacao in OPERACOES_BAIXA or operacao == "alterar_data_pagamento":
+                comps = {pag_antes, pag_depois}
+            elif operacao in OPERACOES_TIRAR_BAIXA or operacao == "excluir_financeiro":
+                comps = {pag_antes}
+            elif operacao == "editar_cobranca":
+                mudou = pag_antes != pag_depois or (pag_antes and _valor(antes) != _valor(novo))
+                comps = {pag_antes, pag_depois} if mudou else set()
+        else:
+            if operacao == "alterar_data_vencimento":
+                comps = {venc_antes, venc_depois} if venc_antes != venc_depois else set()
+            elif operacao == "editar_cobranca":
+                mudou = (
+                    venc_antes != venc_depois
+                    or _valor(antes) != _valor(novo)
+                    or _entra_na_receita(antes.get("status")) != _entra_na_receita(novo.get("status"))
+                )
+                comps = {venc_antes, venc_depois} if mudou else set()
+            elif operacao == "excluir_financeiro" and _entra_na_receita(antes.get("status")):
+                comps = {venc_antes}
+        comps.discard(None)
+        return comps
+
+    if regime_tributario not in REGIMES_TRIMESTRAIS:
+        return set()
+    comps = {pag_antes, pag_depois}
+    if not caixa:
+        comps = {venc_antes, venc_depois} if operacao in OPERACOES_COM_VENCIMENTO else set()
+        mora_antes = float(antes.get("mora") or 0) > 0
+        if mora_antes:
+            comps.add(pag_antes)
+        if mora_antes or (novo is not None and float(novo.get("mora") or 0) > 0):
+            comps.add(pag_depois)
+    comps.discard(None)
+    return comps
+
+
+def mensagem_competencia_apurada(regime_tributario, competencias):
+    rotulos = ", ".join(f"{c[5:7]}/{c[:4]}" for c in sorted(competencias))
+    if regime_tributario == "simples_nacional":
+        return (f"Competência já apurada ({rotulos}): o PGDAS-D desse mês já venceu. "
+                "A parcela não pode ser baixada, alterada, ter a baixa removida nem ser excluída nesse período: "
+                "mudaria a receita e o DAS já declarados.")
+    return (f"Competência já apurada ({rotulos}): o trimestre encerrou e a DARF venceu. "
+            "A parcela não pode ser criada, alterada, baixada nem excluída nesse período: "
+            "mudaria a receita e os tributos já declarados.")
+
+
 class TravaCompetencias:
     def __init__(self, limite=None, congeladas=()):
         self.limite = limite
