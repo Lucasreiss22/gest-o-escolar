@@ -4,6 +4,7 @@ As unidades da rede ficam em schemas diferentes do mesmo banco. A conexão é um
 as outras unidades são lidas com o nome do schema na consulta, sem trocar o search_path do cursor aberto.
 """
 
+import json
 import re
 import time
 
@@ -211,10 +212,10 @@ def carregar_unidade(cursor, schema, mes_apuracao, meses_antes=12):
     except Exception:
         dados["gravados"] = {}
 
-    def _folha():
+    def _folha_itens():
         cursor.execute(
             f"""
-            SELECT competencia, SUM(custo_escola::numeric) AS total
+            SELECT 'i' AS origem, competencia, SUM(custo_escola::numeric) AS total
             FROM {tabela(schema, 'folha_itens')}
             WHERE competencia >= %s AND competencia <= %s
             GROUP BY competencia
@@ -223,11 +224,42 @@ def carregar_unidade(cursor, schema, mes_apuracao, meses_antes=12):
         )
         return _linhas(cursor)
 
+    def _folha():
+        cursor.execute(
+            f"""
+            SELECT 'f' AS origem, c.competencia, COALESCE(SUM((s.item->>'custo_escola')::numeric), 0) AS total
+            FROM {tabela(schema, 'competencias_fechadas')} c
+            LEFT JOIN {tabela(schema, 'folha_snapshot')} s ON s.competencia = c.competencia
+            WHERE c.competencia >= %s AND c.competencia <= %s
+            GROUP BY c.competencia
+            UNION ALL
+            SELECT 'i', competencia, SUM(custo_escola::numeric)
+            FROM {tabela(schema, 'folha_itens')}
+            WHERE competencia >= %s AND competencia <= %s
+            GROUP BY competencia
+            """,
+            (inicio, mes_apuracao, inicio, mes_apuracao),
+        )
+        return _linhas(cursor)
+
     try:
-        dados["folha"] = {l["competencia"]: _f(l["total"]) for l in _savepoint(cursor, "carga_folha", _folha)}
+        linhas_folha = _savepoint(cursor, "carga_folha", _folha)
     except Exception:
-        dados["folha"] = {}
+        try:
+            linhas_folha = _savepoint(cursor, "carga_folha", _folha_itens)
+        except Exception:
+            linhas_folha = []
+    dados["folha"], dados["folha_fechada"] = folha_por_competencia(linhas_folha)
     return dados
+
+
+def folha_por_competencia(linhas):
+    """Folha e encargos por mês: o snapshot nos meses fechados, `folha_itens` nos abertos.
+    Devolve (folha, folha_fechada)."""
+    fechada = {l["competencia"]: _f(l["total"]) for l in linhas if l.get("origem") == "f" and l.get("competencia")}
+    folha = {l["competencia"]: _f(l["total"]) for l in linhas if l.get("origem") != "f" and l.get("competencia")}
+    folha.update(fechada)
+    return folha, fechada
 
 
 def carregar_unidade_cache(cursor, schema_cache, schema_consulta, mes_apuracao):
@@ -293,6 +325,214 @@ def garantir_tabelas_lucro_real(cursor):
         )
         """
     )
+    garantir_tributos_snapshot(cursor)
+
+
+def garantir_tributos_snapshot(cursor, schema=None):
+    cursor.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {tabela(schema, 'tributos_snapshot')} (
+            competencia VARCHAR(7),
+            unidade_id INT,
+            regime VARCHAR(20),
+            dados JSONB,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (competencia, unidade_id)
+        )
+        """
+    )
+
+
+def ler_tributos_snapshot(cursor, unidades, competencias):
+    """{(unidade_id, competencia): dados} dos meses congelados de cada unidade. `unidades`: [(id, schema)].
+    Uma consulta para a rede toda; unidade sem a tabela fica sem snapshot."""
+    unidades = [(uid, s) for uid, s in unidades if uid is not None and schema_valido(s)]
+    if not unidades or not competencias:
+        return {}
+    comps = list(competencias)
+
+    def _ler(lista):
+        partes = [
+            f"SELECT unidade_id, competencia, dados FROM {tabela(s, 'tributos_snapshot')} "
+            "WHERE unidade_id = %s AND competencia = ANY(%s)"
+            for _uid, s in lista
+        ]
+        params = [p for uid, _s in lista for p in (uid, comps)]
+        cursor.execute(" UNION ALL ".join(partes), params)
+        return _linhas(cursor)
+
+    try:
+        linhas = _savepoint(cursor, "carga_trib_snap", lambda: _ler(unidades))
+    except Exception:
+        linhas = []
+        for item in unidades:
+            try:
+                linhas += _savepoint(cursor, "carga_trib_snap", lambda item=item: _ler([item]))
+            except Exception:
+                pass
+    saida = {}
+    for linha in linhas:
+        dados = linha.get("dados")
+        if isinstance(dados, str):
+            try:
+                dados = json.loads(dados)
+            except ValueError:
+                dados = None
+        if isinstance(dados, dict):
+            saida[(linha.get("unidade_id"), linha.get("competencia"))] = dados
+    return saida
+
+
+def gravar_tributos_snapshot(cursor, schema, competencia, unidade_id, regime, dados):
+    garantir_tributos_snapshot(cursor, schema)
+    cursor.execute(
+        f"""
+        INSERT INTO {tabela(schema, 'tributos_snapshot')} (competencia, unidade_id, regime, dados)
+        VALUES (%s, %s, %s, %s::jsonb)
+        ON CONFLICT (competencia, unidade_id) DO UPDATE SET
+            regime = EXCLUDED.regime, dados = EXCLUDED.dados, criado_em = CURRENT_TIMESTAMP
+        """,
+        (competencia, unidade_id, regime, json.dumps(dados, default=str)),
+    )
+
+
+def apagar_tributos_snapshot(cursor, schema, competencias):
+    def _apagar():
+        cursor.execute(
+            f"DELETE FROM {tabela(schema, 'tributos_snapshot')} WHERE competencia = ANY(%s)",
+            (list(competencias),),
+        )
+
+    try:
+        _savepoint(cursor, "apaga_trib_snap", _apagar)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------- custos e LAIR
+
+CATEGORIAS_RESCISAO = ("rescisao", "rescisão", "rescisoes", "rescisões")
+
+
+def efeito_caixa_custo(custo):
+    valor = _f(custo.get("valor"))
+    tipo = (custo.get("tipo") or "avista").lower()
+    extra = 0.0
+    if tipo == "servico":
+        federais = _f(custo.get("irrf")) + _f(custo.get("pis")) + _f(custo.get("cofins")) + _f(custo.get("csll"))
+        if not custo.get("federal_na_nota"):
+            extra += federais
+        if not custo.get("iss_na_nota"):
+            extra += _f(custo.get("iss"))
+    return valor + extra, tipo
+
+
+def resumir_custos(custos):
+    compras = servicos = rescisoes = 0.0
+    for item in custos or []:
+        efeito, tipo = efeito_caixa_custo(item)
+        categoria = (item.get("categoria") or "").strip().lower()
+        if categoria in CATEGORIAS_RESCISAO:
+            rescisoes += efeito
+        elif tipo == "servico":
+            servicos += efeito
+        else:
+            compras += efeito
+    return {
+        "compras": round(compras, 2),
+        "servicos": round(servicos, 2),
+        "rescisoes": round(rescisoes, 2),
+        "custos": round(compras + servicos + rescisoes, 2),
+    }
+
+
+def _comp_data(valor):
+    if not valor:
+        return None
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%Y-%m")
+    texto = str(valor)
+    return texto[:7] if re.match(r"^\d{4}-\d{2}", texto) else None
+
+
+def meses_do_custo(custo, competencias):
+    """Meses de `competencias` em que o custo entra (mesma regra de `listar_custos_do_mes`)."""
+    tipo = (custo.get("tipo") or "avista").lower()
+    if tipo == "recorrente":
+        inicio = _comp_data(custo.get("data_inicio") or custo.get("data_custo"))
+        fim = _comp_data(custo.get("data_fim"))
+        return [c for c in competencias if inicio and inicio <= c and (not fim or fim >= c)]
+    if tipo in ("avista", "servico", "parcelado"):
+        comp = _comp_data(custo.get("data_custo"))
+        return [comp] if comp in competencias else []
+    return []
+
+
+def custos_por_mes(linhas, competencias):
+    """{comp: {"custos": resumo, "creditos_pis": soma dos custos que geram crédito de PIS/COFINS}}."""
+    por_mes = {c: [] for c in competencias}
+    for custo in linhas or []:
+        if custo.get("ativo") is False:
+            continue
+        for comp in meses_do_custo(custo, competencias):
+            por_mes[comp].append(custo)
+    return {
+        c: {
+            "custos": resumir_custos(itens),
+            "creditos_pis": round(sum(_f(i.get("valor")) for i in itens if i.get("gera_credito_pis_cofins")), 2),
+        }
+        for c, itens in por_mes.items()
+    }
+
+
+def carregar_custos_meses(cursor, schema, competencias):
+    """Custos de vários meses numa consulta."""
+    if not competencias:
+        return {}
+    inicio, fim = min(competencias), max(competencias)
+
+    def _ler():
+        cursor.execute(
+            f"""
+            SELECT * FROM {tabela(schema, 'financeiro_custos')}
+            WHERE COALESCE(ativo, TRUE) = TRUE
+              AND (
+                (COALESCE(tipo, 'avista') IN ('avista', 'servico', 'parcelado')
+                    AND TO_CHAR(data_custo, 'YYYY-MM') >= %s AND TO_CHAR(data_custo, 'YYYY-MM') <= %s)
+                OR (tipo = 'recorrente'
+                    AND TO_CHAR(COALESCE(data_inicio, data_custo), 'YYYY-MM') <= %s
+                    AND (data_fim IS NULL OR TO_CHAR(data_fim, 'YYYY-MM') >= %s))
+              )
+            """,
+            (inicio, fim, fim, inicio),
+        )
+        return _linhas(cursor)
+
+    return custos_por_mes(_savepoint(cursor, "carga_custos", _ler), list(competencias))
+
+
+def lair_do_mes(dados, comp, cfg, folha_custo, custos_mes):
+    """LAIR da unidade no mês, com as linhas da DRE: receita por competência − PIS/COFINS − ISS − folha
+    − rescisões − compras − serviços + juros e multa recebidos."""
+    from tributos_rede import apurar_pis_cofins_real, arred
+
+    receita = receita_regime(dados, comp, "competencia")
+    mora = mora_do_mes(dados, comp)["total"]
+    modo = cfg.get("pis_cofins_lucro_real") or "cumulativo_ensino"
+    custos_mes = custos_mes or {}
+    creditos = _f(custos_mes.get("creditos_pis")) if modo == "nao_cumulativo" else 0.0
+    pis_cofins = apurar_pis_cofins_real(receita, 0, mora, creditos, modo, bool(cfg.get("pis_cofins_incluir_mora", True)))
+    iss = arred(receita * _f(cfg.get("iss_aliquota_pct")) / 100)
+    custos = custos_mes.get("custos") or {}
+    lair = arred(
+        receita - pis_cofins["total"] - iss - _f(folha_custo)
+        - _f(custos.get("rescisoes")) - _f(custos.get("compras")) - _f(custos.get("servicos"))
+        + mora
+    )
+    return {
+        "lair": lair, "receita": receita, "mora": mora, "pis_cofins": pis_cofins["total"], "iss": iss,
+        "folha": round(_f(folha_custo), 2), "custos": _f(custos.get("custos")),
+    }
 
 
 def ajustes_lucro_real(cursor, schema, competencias):
