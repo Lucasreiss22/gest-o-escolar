@@ -283,63 +283,10 @@ def _receita_da_linha(cursor, comp, gravado, regime_apuracao, mes_apuracao=None)
 
 
 def montar_quadro_simples(cursor, mes_apuracao, regime_apuracao="competencia"):
-    regime_apuracao = normalizar_regime_apuracao(regime_apuracao)
-    janela = janela_competencias(mes_apuracao)
-    primeira = primeira_competencia_sistema(cursor, regime_apuracao)
-    gravados = mapa_competencias(cursor)
-    linhas = []
-    rbt12 = 0.0
-    fs12 = 0.0
-    meses_validos = 0
-    for comp in janela:
-        fora_primeira = bool(primeira and comp < primeira)
-        gravado = gravados.get(comp) or {}
-        rec = _receita_da_linha(cursor, comp, gravado, regime_apuracao, mes_apuracao)
-        folha = float(gravado.get("folha_encargos") or 0) if gravado else folha_sistema_mes(cursor, comp)
-        entra = not fora_primeira
-        if entra:
-            rbt12 += rec
-            fs12 += folha
-            meses_validos += 1
-        linhas.append(
-            {
-                "competencia": comp,
-                "receita_bruta": rec,
-                "folha_encargos": folha,
-                "origem": gravado.get("origem") or ("sistema" if rec or folha else ""),
-                "observacao": gravado.get("observacao") or "",
-                "entra_rbt12": entra,
-                "rotulo": _rotulo_comp(comp),
-            }
-        )
-    gravado_mes = gravados.get(mes_apuracao) or {}
-    receita_mes = _receita_da_linha(cursor, mes_apuracao, gravado_mes, regime_apuracao, mes_apuracao)
-    folha_mes = float(gravado_mes.get("folha_encargos") or 0) or folha_sistema_mes(cursor, mes_apuracao)
-    origem_mes = gravado_mes.get("origem") or ("sistema" if receita_mes or folha_mes else "")
-    if regime_apuracao == "competencia":
-        origem_mes = "sistema"
-    linha_apuracao = {
-        "competencia": mes_apuracao,
-        "receita_bruta": receita_mes,
-        "folha_encargos": folha_mes,
-        "origem": origem_mes,
-        "observacao": gravado_mes.get("observacao") or "",
-        "entra_rbt12": False,
-        "rotulo": _rotulo_comp(mes_apuracao),
-    }
-    return {
-        "janela": janela,
-        "linhas": linhas,
-        "linha_apuracao": linha_apuracao,
-        "rbt12": rbt12,
-        "fs12": fs12,
-        "meses_validos": meses_validos or 1,
-        "primeira": primeira,
-        "receita_mes": receita_mes,
-        "folha_mes": folha_mes,
-        "mes_apuracao": mes_apuracao,
-        "regime_apuracao": regime_apuracao,
-    }
+    """Janela da RBT12 da escola do schema atual, lida com consultas agregadas (carga_tributos)."""
+    from carga_tributos import carregar_unidade, quadro_da_unidade
+
+    return quadro_da_unidade(carregar_unidade(cursor, None, mes_apuracao), mes_apuracao, regime_apuracao)
 
 
 def _rotulo_comp(comp):

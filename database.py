@@ -987,7 +987,7 @@ def garantir_tabelas_folha():
     schema = _nome_banco_atual(master=False)
     if not schema:
         return
-    chave = f"{schema}:folha:simples:rescisao2:fechamento1:feriados1"
+    chave = f"{schema}:folha:simples:rescisao2:fechamento1:feriados1:tributos1"
     if chave in _tabelas_ok:
         return
     conexao = obter_conexao()
@@ -1211,6 +1211,17 @@ def garantir_tabelas_folha():
                 ("configuracoes", "feriados_nacionais_auto", "BOOLEAN DEFAULT TRUE"),
                 ("configuracoes", "feriado_carnaval", "BOOLEAN DEFAULT FALSE"),
                 ("configuracoes", "feriado_corpus_christi", "BOOLEAN DEFAULT FALSE"),
+                ("configuracoes", "simples_rbt12_criterio", "VARCHAR(20) DEFAULT 'mesmo_regime'"),
+                ("configuracoes", "presuncao_irpj_pct", "NUMERIC(6,3) DEFAULT 32"),
+                ("configuracoes", "presuncao_csll_pct", "NUMERIC(6,3) DEFAULT 32"),
+                ("configuracoes", "presuncao_fundamento", "VARCHAR(255)"),
+                ("configuracoes", "iss_aliquota_pct", "NUMERIC(5,2) DEFAULT 5"),
+                ("configuracoes", "pis_cofins_incluir_mora", "BOOLEAN DEFAULT TRUE"),
+                ("configuracoes", "presumido_aplicar_lc224", "BOOLEAN DEFAULT TRUE"),
+                ("configuracoes", "lucro_real_periodo", "VARCHAR(20) DEFAULT 'trimestral'"),
+                ("configuracoes", "lucro_real_estimativa_modo", "VARCHAR(20) DEFAULT 'balancete'"),
+                ("configuracoes", "pis_cofins_lucro_real", "VARCHAR(20) DEFAULT 'cumulativo_ensino'"),
+                ("financeiro_custos", "gera_credito_pis_cofins", "BOOLEAN DEFAULT FALSE"),
                 ("funcionarios", "ponto_minutos_cafe", "INT"),
                 ("funcionarios", "ponto_minutos_almoco", "INT"),
                 ("funcionarios", "ponto_jornada_minutos", "INT"),
@@ -1259,6 +1270,8 @@ def garantir_tabelas_folha():
             garantir_tabelas_rescisao(cursor)
             from fechamento import garantir_tabelas_fechamento
             garantir_tabelas_fechamento(cursor)
+            from carga_tributos import garantir_tabelas_lucro_real
+            garantir_tabelas_lucro_real(cursor)
             if "alunos" in mapa:
                 cursor.execute("SAVEPOINT migrar_desconto")
                 try:
