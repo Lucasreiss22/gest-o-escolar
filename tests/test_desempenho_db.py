@@ -235,9 +235,10 @@ class _CursorFolha:
         elif "FROM configuracoes" in texto:
             self._resultado = [{"nome_escola": "Escola", "regime_tributario": "simples_nacional", "ponto_he_folha": True}]
         elif "FROM ponto_registros" in texto:
-            self._resultado = [dict(r) for r in self.ponto if r["funcionario_id"] in params[2]]
-        elif "FROM ponto_faltas" in texto:
-            self._resultado = [dict(r) for r in self.faltas if r["funcionario_id"] in params[2]]
+            ids = params[2]
+            self._resultado = [dict(r, fonte="p") for r in self.ponto if r["funcionario_id"] in ids]
+            if "FROM ponto_faltas" in texto:
+                self._resultado += [dict(r, fonte="f") for r in self.faltas if r["funcionario_id"] in ids]
         else:
             self._resultado = []
 

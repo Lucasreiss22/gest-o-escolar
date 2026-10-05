@@ -282,10 +282,15 @@ from carga_tributos import (
     ajustes_lucro_real,
     cache_buscar,
     cache_guardar,
-    carregar_unidade,
+    carregar_custos_meses,
     carregar_unidade_cache,
     config_efetiva,
+    efeito_caixa_custo as _efeito_caixa_custo,
     gravar_saldo_periodo,
+    lair_do_mes,
+    ler_tributos_snapshot,
+    resumir_custos as resumir_custos_operacionais,
+    tabela,
     invalidar_schema,
     ler_config,
     ler_escolas_plataforma,
@@ -738,45 +743,6 @@ def _formacao_do_form():
     if curso and curso not in partes:
         partes.append(curso)
     return " | ".join(partes)[:150]
-
-
-def _efeito_caixa_custo(custo):
-    valor = float(custo.get("valor") or 0)
-    tipo = (custo.get("tipo") or "avista").lower()
-    extra = 0.0
-    if tipo == "servico":
-        federais = (
-            float(custo.get("irrf") or 0)
-            + float(custo.get("pis") or 0)
-            + float(custo.get("cofins") or 0)
-            + float(custo.get("csll") or 0)
-        )
-        if not custo.get("federal_na_nota"):
-            extra += federais
-        if not custo.get("iss_na_nota"):
-            extra += float(custo.get("iss") or 0)
-    return valor + extra, tipo
-
-
-def resumir_custos_operacionais(custos):
-    compras = 0.0
-    servicos = 0.0
-    rescisoes = 0.0
-    for item in custos or []:
-        efeito, tipo = _efeito_caixa_custo(item)
-        categoria = (item.get("categoria") or "").strip().lower()
-        if categoria in ("rescisao", "rescisão", "rescisoes", "rescisões"):
-            rescisoes += efeito
-        elif tipo == "servico":
-            servicos += efeito
-        else:
-            compras += efeito
-    return {
-        "compras": round(compras, 2),
-        "servicos": round(servicos, 2),
-        "rescisoes": round(rescisoes, 2),
-        "custos": round(compras + servicos + rescisoes, 2),
-    }
 
 
 def listar_custos_do_mes(cursor, mes_filtro):
@@ -2925,101 +2891,151 @@ def _feriados_competencia(cursor, competencia):
 
 _SQL_FUNCIONARIOS_FOLHA = """
     SELECT *
-    FROM funcionarios
+    FROM {funcionarios}
     WHERE COALESCE(ativo, TRUE) = TRUE OR data_fim_contrato IS NOT NULL
     ORDER BY nome_completo
 """
 
 
-def _carregar_folha_mes(cursor, competencia, funcionarios=None):
-    """Tudo que a folha do mês usa, em consultas que não crescem com o número de funcionários:
-    funcionários, ajustes, configuração, feriados do calendário, faltas e batidas do ponto."""
+def _mapa_ajustes_periodo(cursor, competencias, schema=None):
+    """{competencia: {funcionario_id: ajuste}} numa consulta."""
+    if schema is None:
+        _garantir_folha_ajustes(cursor)
+
+    def _ler():
+        cursor.execute(
+            "SELECT competencia, funcionario_id, horas_extras, horas_extras_100, valor_hora_extra "
+            f"FROM {tabela(schema, 'folha_ajustes')} WHERE competencia = ANY(%s)",
+            (list(competencias),),
+        )
+        return _linhas(cursor)
+
+    if schema is None:
+        linhas = _ler()
+    else:
+        try:
+            linhas = _savepoint(cursor, "folha_ajustes_periodo", _ler)
+        except Exception:
+            linhas = []
+    saida = {c: {} for c in competencias}
+    for row in linhas:
+        saida.setdefault(row.get("competencia"), {})[row.get("funcionario_id")] = row
+    return saida
+
+
+def _carregar_folha_periodo(cursor, competencias, funcionarios=None, schema=None, cfg=None):
+    """{competencia: dados do mês} com tudo que a folha usa, em consultas que não crescem com o número de
+    funcionários nem de meses: funcionários, ajustes, configuração (se `cfg` não vier), e numa só leitura
+    os feriados do calendário, as faltas e as batidas do ponto. `schema` lê outra unidade sem trocar de banco."""
     if funcionarios is None:
-        cursor.execute(_SQL_FUNCIONARIOS_FOLHA)
+        cursor.execute(_SQL_FUNCIONARIOS_FOLHA.format(funcionarios=tabela(schema, "funcionarios")))
         funcionarios = _linhas(cursor)
-    mes_dados = {
-        "funcionarios": [dict(f) for f in funcionarios or []],
-        "ajustes": {}, "feriados": [], "faltas": {}, "ponto": {}, "he_ponto": True, "jornada": 480,
+    funcionarios = [dict(f) for f in funcionarios or []]
+    competencias = [c for c in competencias or [] if c]
+    saida = {
+        c: {"funcionarios": funcionarios, "ajustes": {}, "feriados": [], "faltas": {}, "ponto": {},
+            "he_ponto": True, "jornada": 480}
+        for c in competencias
     }
-    if not competencia:
-        return mes_dados
+    meses = {}
+    for comp in competencias:
+        try:
+            meses[comp] = parse_mes(str(comp)[:7])
+        except Exception:
+            pass
+    if not meses:
+        return saida
+    ajustes = _mapa_ajustes_periodo(cursor, list(meses), schema)
+    if cfg is None:
+        cursor.execute(f"SELECT * FROM {tabela(schema, 'configuracoes')} WHERE id = 1")
+        cfg = _linha(cursor) or {}
     try:
-        ano, mes = parse_mes(str(competencia)[:7])
-    except Exception:
-        return mes_dados
-    mes_dados["ajustes"] = _mapa_ajustes_folha(cursor, competencia)
-    cursor.execute("SELECT * FROM configuracoes WHERE id = 1")
-    cfg = _linha(cursor) or {}
-    mes_dados["he_ponto"] = cfg.get("ponto_he_folha") is not False
-    try:
-        mes_dados["jornada"] = int(cfg.get("ponto_jornada_minutos") or 480)
+        jornada = int(cfg.get("ponto_jornada_minutos") or 480)
     except (TypeError, ValueError):
-        mes_dados["jornada"] = 480
-    cfg_feriados = {
-        "auto": cfg.get("feriados_nacionais_auto") is not False,
-        "carnaval": bool(cfg.get("feriado_carnaval")),
-        "corpus_christi": bool(cfg.get("feriado_corpus_christi")),
-    }
-    nacionais = set()
-    if cfg_feriados["auto"]:
-        nacionais = set(feriados_nacionais_mes(
-            ano, mes, carnaval=cfg_feriados["carnaval"], corpus_christi=cfg_feriados["corpus_christi"]
-        ))
-    feriados = set(nacionais)
-    inicio = date(ano, mes, 1)
-    fim = date(ano + 1, 1, 1) if mes == 12 else date(ano, mes + 1, 1)
-    ids = [f.get("id") for f in mes_dados["funcionarios"] if f.get("id")]
+        jornada = 480
+    auto = cfg.get("feriados_nacionais_auto") is not False
+    nacionais, feriados = {}, {}
+    for comp, (ano, mes) in meses.items():
+        nacionais[comp] = set(feriados_nacionais_mes(
+            ano, mes, carnaval=bool(cfg.get("feriado_carnaval")), corpus_christi=bool(cfg.get("feriado_corpus_christi"))
+        )) if auto else set()
+        feriados[comp] = set(nacionais[comp])
+        saida[comp].update(ajustes=ajustes.get(comp) or {}, he_ponto=cfg.get("ponto_he_folha") is not False, jornada=jornada)
+    ano_i, mes_i = min(meses.values())
+    ano_f, mes_f = max(meses.values())
+    inicio = date(ano_i, mes_i, 1)
+    fim = date(ano_f + 1, 1, 1) if mes_f == 12 else date(ano_f, mes_f + 1, 1)
+    ids = [f.get("id") for f in funcionarios if f.get("id")]
+    if schema is None:
+        try:
+            _garantir_ponto()
+        except Exception:
+            pass
+    t_cal, t_faltas, t_ponto = (tabela(schema, n) for n in ("calendario_eventos", "ponto_faltas", "ponto_registros"))
+    sql_cal = (
+        f"SELECT 'c' AS fonte, NULL::int AS funcionario_id, data_evento::date AS data_ref{', NULL' * 7} FROM {t_cal} "
+        "WHERE tipo = 'feriado' AND turma_id IS NULL AND aluno_id IS NULL AND data_evento >= %s AND data_evento < %s"
+    )
+    sql_faltas = (
+        f"SELECT 'f' AS fonte, funcionario_id, data_ref{', NULL' * 7} FROM {t_faltas} "
+        "WHERE tipo = 'nao_justificada' AND status = 'confirmada' AND COALESCE(descontar, TRUE) = TRUE "
+        "AND data_ref >= %s AND data_ref < %s AND funcionario_id = ANY(%s)"
+    )
+    sql_ponto = (
+        "SELECT 'p' AS fonte, funcionario_id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida "
+        f"FROM {t_ponto} WHERE data_ref >= %s AND data_ref < %s AND funcionario_id = ANY(%s)"
+    )
+
+    def _distribuir(linhas):
+        for r in linhas:
+            fonte = r.pop("fonte", None)
+            dia = _como_data(r.get("data_ref"))
+            comp = dia.strftime("%Y-%m") if dia else None
+            if comp not in saida:
+                continue
+            if fonte == "c":
+                feriados[comp].add(dia)
+            elif fonte == "f":
+                saida[comp]["faltas"].setdefault(r.get("funcionario_id"), []).append(r.get("data_ref"))
+            elif fonte == "p":
+                saida[comp]["ponto"].setdefault(r.get("funcionario_id"), []).append(r)
+
+    def _ler(sql, params):
+        cursor.execute(sql, params)
+        return _linhas(cursor)
+
+    if ids:
+        sql = f"{sql_ponto} UNION ALL {sql_faltas} UNION ALL {sql_cal} ORDER BY data_ref"
+        params = (inicio, fim, ids, inicio, fim, ids, inicio, fim)
+    else:
+        sql, params = sql_cal, (inicio, fim)
     try:
-        _garantir_ponto()
+        _distribuir(_savepoint(cursor, "folha_mes", lambda: _ler(sql, params)))
     except Exception:
-        pass
-
-    def ler_calendario():
-        cursor.execute(
-            "SELECT data_evento FROM calendario_eventos "
-            "WHERE tipo = 'feriado' AND turma_id IS NULL AND aluno_id IS NULL "
-            "AND data_evento >= %s AND data_evento < %s",
-            (inicio, fim),
-        )
-        feriados.update(d for d in (_como_data(r.get("data_evento")) for r in _linhas(cursor)) if d)
-
-    def ler_faltas():
-        cursor.execute(
-            "SELECT funcionario_id, data_ref FROM ponto_faltas "
-            "WHERE tipo = 'nao_justificada' AND status = 'confirmada' AND COALESCE(descontar, TRUE) = TRUE "
-            "AND data_ref >= %s AND data_ref < %s AND funcionario_id = ANY(%s) ORDER BY data_ref",
-            (inicio, fim, ids),
-        )
-        for r in _linhas(cursor):
-            mes_dados["faltas"].setdefault(r.get("funcionario_id"), []).append(r.get("data_ref"))
-
-    def ler_ponto():
-        cursor.execute(
-            "SELECT funcionario_id, data_ref, entrada, cafe_ida, cafe_volta, almoco, almoco_volta, cafe, saida "
-            "FROM ponto_registros WHERE data_ref >= %s AND data_ref < %s AND funcionario_id = ANY(%s)",
-            (inicio, fim, ids),
-        )
-        for r in _linhas(cursor):
-            mes_dados["ponto"].setdefault(r.get("funcionario_id"), []).append(r)
-
-    leituras = [ler_calendario] + ([ler_faltas, ler_ponto] if ids else [])
-    try:
-        _savepoint(cursor, "folha_mes", lambda: [ler() for ler in leituras])
-    except Exception:
-        mes_dados["faltas"], mes_dados["ponto"] = {}, {}
-        feriados.clear()
-        feriados.update(nacionais)
-        for ler in leituras:
+        leituras = [("calendario", sql_cal, (inicio, fim))]
+        if ids:
+            leituras += [("faltas", sql_faltas + " ORDER BY data_ref", (inicio, fim, ids)),
+                         ("ponto", sql_ponto, (inicio, fim, ids))]
+        for nome, sql_item, params_item in leituras:
             try:
-                _savepoint(cursor, "folha_mes_item", ler)
+                _distribuir(_savepoint(cursor, "folha_mes_item", lambda: _ler(sql_item, params_item)))
             except Exception as erro:
-                print(f"[folha] {ler.__name__} ({competencia}): {erro}")
-    mes_dados["feriados"] = sorted(feriados)
+                print(f"[folha] {nome} ({schema or 'atual'} {min(meses)}..{max(meses)}): {erro}")
     try:
-        g.setdefault("_feriados_mes", {})[(_nome_banco_atual(master=False), ano, mes)] = mes_dados["feriados"]
+        memo = g.setdefault("_feriados_mes", {})
     except RuntimeError:
-        pass
-    return mes_dados
+        memo = {}
+    banco = schema or _nome_banco_atual(master=False)
+    for comp, (ano, mes) in meses.items():
+        saida[comp]["feriados"] = sorted(feriados[comp])
+        memo[(banco, ano, mes)] = saida[comp]["feriados"]
+    return saida
+
+
+def _carregar_folha_mes(cursor, competencia, funcionarios=None):
+    """Tudo que a folha do mês usa (ver `_carregar_folha_periodo`). Sem competência válida, só os funcionários."""
+    comp = str(competencia or "") or "sem_competencia"
+    return _carregar_folha_periodo(cursor, [comp], funcionarios)[comp]
 
 
 def _dados_folha_pessoa(func, mes_dados, competencia, agora=None):
@@ -3050,14 +3066,25 @@ def _func_com_ajuste(cursor, func, competencia):
 
 def montar_folha_contratos(cursor, regime, mes_filtro=None):
     garantir_tabelas_folha()
+    ano = None
+    if mes_filtro:
+        try:
+            ano, _mes = parse_mes(mes_filtro)
+        except Exception:
+            ano = None
+    competencia = mes_filtro if ano else None
+    return _calcular_folha_mes(_carregar_folha_mes(cursor, competencia), regime, competencia)
+
+
+def _calcular_folha_mes(mes_dados, regime, mes_filtro=None, agora=None):
+    """(itens, totais) da folha a partir dos dados já carregados do mês."""
     ano = mes = None
     if mes_filtro:
         try:
             ano, mes = parse_mes(mes_filtro)
         except Exception:
             ano = mes = None
-    mes_dados = _carregar_folha_mes(cursor, mes_filtro if ano else None)
-    agora = _agora_ponto_br()
+    agora = agora or _agora_ponto_br()
     itens = []
     totais = {
         "bruto": 0.0,
@@ -3586,6 +3613,7 @@ def _contexto_tributario(cursor):
         "rede": rede,
         "papel": papel,
         "matriz": rede[0],
+        "cfg_matriz": cfg if papel != "filial" else cfg_matriz,
         "efetiva": config_efetiva(cfg, cfg_matriz, papel == "filial"),
     }
     return cache_guardar(schema, ctx, "ctx")
@@ -3908,17 +3936,49 @@ def _pis_cofins_iss_real(cursor, ctx, dados, comp):
     return pis_cofins, iss
 
 
-def _lair_mes(cursor, ctx, dados, comp):
-    """Lucro antes do IRPJ/CSLL da unidade do schema atual no mês (mesmas linhas da DRE)."""
-    pis_cofins, iss = _pis_cofins_iss_real(cursor, ctx, dados, comp)
-    _itens, folha = _folha_competencia(cursor, "lucro_real", comp)
-    custos = resumir_custos_operacionais(listar_custos_do_mes(cursor, comp))
-    return arred(
-        pis_cofins["receita_mes"] - pis_cofins["total"] - iss
-        - float(folha.get("custo_escola") or 0) - float(custos.get("rescisoes") or 0)
-        - float(custos.get("compras") or 0) - float(custos.get("servicos") or 0)
-        + pis_cofins["acrescimos_mora"]
-    )
+def _folhas_abertas(cursor, regime, competencias, schema=None, cfg=None):
+    """{competencia: custo da folha} dos meses abertos, com o cache de `_folha_competencia` da unidade."""
+    schema_cache = schema or _nome_banco_atual() or ""
+    saida, faltam = {}, []
+    for comp in competencias:
+        guardada = cache_buscar(schema_cache, "folha", regime or "", comp) if schema_cache else None
+        if guardada is not None:
+            saida[comp] = float(guardada[1].get("custo_escola") or 0)
+        else:
+            faltam.append(comp)
+    if faltam:
+        meses = _carregar_folha_periodo(cursor, faltam, schema=schema, cfg=cfg)
+        agora = _agora_ponto_br()
+        for comp in faltam:
+            resultado = _calcular_folha_mes(meses[comp], regime, comp, agora)
+            if schema_cache:
+                cache_guardar(schema_cache, copy.deepcopy(resultado), "folha", regime or "", comp)
+            saida[comp] = float(resultado[1].get("custo_escola") or 0)
+    return saida
+
+
+def carregar_lair_unidade(cursor, schema, competencias, dados, cfg, cfg_unidade=None, versao_cfg=0):
+    """{competencia: lair_do_mes(...)} da unidade: folha pelo snapshot nos meses fechados e pelo cálculo
+    agregado nos abertos, custos e créditos de PIS/COFINS numa consulta. `schema=None` é a unidade atual."""
+    schema_cache = schema or _nome_banco_atual() or ""
+    saida, faltam = {}, []
+    for comp in competencias:
+        salvo = cache_buscar(schema_cache, "lair", comp, versao_cfg) if schema_cache else None
+        if salvo is not None:
+            saida[comp] = salvo
+        else:
+            faltam.append(comp)
+    if not faltam:
+        return saida
+    fechadas = dados.get("folha_fechada") or {}
+    folhas = _folhas_abertas(cursor, "lucro_real", [c for c in faltam if c not in fechadas], schema, cfg_unidade)
+    custos = carregar_custos_meses(cursor, schema, faltam)
+    for comp in faltam:
+        folha = fechadas[comp] if comp in fechadas else folhas.get(comp, 0.0)
+        saida[comp] = lair_do_mes(dados, comp, cfg, folha, custos.get(comp))
+        if schema_cache:
+            cache_guardar(schema_cache, saida[comp], "lair", comp, versao_cfg)
+    return saida
 
 
 def _competencias_lucro_real(mes_filtro, periodo):
@@ -3927,24 +3987,49 @@ def _competencias_lucro_real(mes_filtro, periodo):
     return [c for c in meses_do_trimestre(mes_filtro) if c <= mes_filtro]
 
 
-def _lucro_real_rede(mes_filtro):
+def _cfg_da_unidade(cursor, ctx, schema_u):
+    if schema_u == ctx["schema"]:
+        return ctx["cfg"]
+    if schema_u == (ctx["matriz"].get("db_nome") or "") and ctx.get("cfg_matriz") is not None:
+        return ctx["cfg_matriz"]
+    return ler_config(cursor, schema_u)
+
+
+def _lair_unidade_rede(cursor, ctx, unidade, schema_u, competencias, mes_filtro):
+    """LAIR da unidade nos meses pedidos, lida pelo nome do schema no mesmo cursor."""
+    atual = schema_u == ctx["schema"]
+    cfg_u = _cfg_da_unidade(cursor, ctx, schema_u)
+    if atual:
+        efetiva = ctx["efetiva"]
+    else:
+        eh_filial = str(unidade.get("id")) != str(ctx["matriz"].get("id"))
+        efetiva = config_efetiva(cfg_u, ctx.get("cfg_matriz") or {}, eh_filial)
+    dados = _dados_unidade(cursor, ctx, unidade, mes_filtro)
+    versao_cfg = versao_schema(ctx["matriz"].get("db_nome"))
+    return carregar_lair_unidade(
+        cursor, None if atual else schema_u, competencias, dados, efetiva, cfg_u, versao_cfg
+    )
+
+
+def _lucro_real_rede(mes_filtro, cursor=None):
     """IRPJ/CSLL do Lucro Real da empresa: soma o LAIR de todas as unidades antes de compensar prejuízos.
 
-    Abre uma conexão por unidade, então só pode ser chamado fora de um cursor aberto.
+    As outras unidades são lidas pelo nome do schema no mesmo cursor. Sem cursor, abre uma conexão só.
+    Meses com `tributos_snapshot` não são recalculados.
     """
-    schema = _nome_banco_atual() or ""
-    if not schema:
-        return None
-    ctx = cache_buscar(schema, "ctx")
-    if ctx is None:
+    if cursor is None:
         conexao = obter_conexao()
         if not conexao:
             return None
         try:
-            with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-                ctx = _contexto_tributario(cursor)
+            with conexao.cursor(cursor_factory=RealDictCursor) as cur:
+                return _lucro_real_rede(mes_filtro, cur)
         finally:
             conexao.close()
+    schema = _nome_banco_atual() or ""
+    if not schema:
+        return None
+    ctx = _contexto_tributario(cursor)
     ef = ctx["efetiva"]
     if ef.get("regime_tributario") != "lucro_real":
         return None
@@ -3956,33 +4041,33 @@ def _lucro_real_rede(mes_filtro):
     salvo = cache_buscar(schema, "real_rede", mes_filtro, versoes)
     if salvo is not None:
         return salvo
-    lairs, erros, ajustes, saldo = {}, [], {}, None
+    lairs, meses_lair, erros = {}, {}, []
     matriz_schema = ctx["matriz"].get("db_nome") or schema
+    unidades = []
     for unidade in ctx["rede"]:
         schema_u = unidade.get("db_nome") or (schema if len(ctx["rede"]) == 1 else "")
         if not schema_valido(schema_u):
             erros.append(f"{unidade.get('nome')}: unidade sem banco definido.")
             continue
-        token = definir_banco_escola(schema_u)
+        unidades.append((unidade, schema_u))
+    snapshots = ler_tributos_snapshot(cursor, [(u.get("id"), s) for u, s in unidades], comps)
+    for unidade, schema_u in unidades:
+        uid = unidade.get("id")
+        congelados = {c: snapshots[(uid, c)] for c in comps if (uid, c) in snapshots and "lair" in snapshots[(uid, c)]}
+        faltam = [c for c in comps if c not in congelados]
         try:
-            garantir_tabelas_folha()
-            conexao = obter_conexao()
-            if not conexao:
-                raise RuntimeError("sem conexão")
-            try:
-                with conexao.cursor(cursor_factory=RealDictCursor) as cursor:
-                    ctx_u = _contexto_tributario(cursor)
-                    dados = carregar_unidade(cursor, None, mes_filtro)
-                    lairs[unidade.get("id")] = [_lair_mes(cursor, ctx_u, dados, c) for c in comps]
-                    if schema_u == matriz_schema:
-                        ajustes = ajustes_lucro_real(cursor, None, comps)
-                        saldo = saldo_prejuizo_anterior(cursor, None, comps[0])
-            finally:
-                conexao.close()
+            calculados = _savepoint(
+                cursor, "lucro_real_unidade",
+                lambda: _lair_unidade_rede(cursor, ctx, unidade, schema_u, faltam, mes_filtro),
+            ) if faltam else {}
         except Exception as e:
             erros.append(f"{unidade.get('nome')}: {e}")
-        finally:
-            limpar_banco_escola(token)
+            continue
+        meses_lair[uid] = {c: dict(congelados.get(c) or calculados[c], congelado=c in congelados) for c in comps}
+        lairs[uid] = [float(meses_lair[uid][c].get("lair") or 0) for c in comps]
+    schema_matriz_q = None if matriz_schema == schema else matriz_schema
+    ajustes = ajustes_lucro_real(cursor, schema_matriz_q, comps)
+    saldo = saldo_prejuizo_anterior(cursor, schema_matriz_q, comps[0])
     ordem = [u.get("id") for u in ctx["rede"] if u.get("id") in lairs]
     saldo = saldo or {"periodo": None, "prejuizo_fiscal": 0.0, "base_negativa_csll": 0.0}
     lair_empresa = [arred(sum(lairs[u][i] for u in ordem)) for i in range(len(comps))]
@@ -3999,25 +4084,10 @@ def _lucro_real_rede(mes_filtro):
             rateio.setdefault(uid, {})[tributo] = valor
     for uid in rateio:
         rateio[uid]["total"] = arred(sum(rateio[uid].values()))
-    fim_periodo = comps[-1] == (f"{mes_filtro[:4]}-12" if periodo == "anual_estimativa" else meses_do_trimestre(mes_filtro)[-1])
-    if fim_periodo and date.today().strftime("%Y-%m") > comps[-1] and not erros:
-        token = definir_banco_escola(matriz_schema)
-        try:
-            conexao = obter_conexao()
-            if conexao:
-                try:
-                    with conexao.cursor() as cursor:
-                        gravar_saldo_periodo(cursor, None, comps[-1], provisao["periodo"])
-                    conexao.commit()
-                finally:
-                    conexao.close()
-        except Exception as e:
-            erros.append(f"Saldo de prejuízo não gravado: {e}")
-        finally:
-            limpar_banco_escola(token)
     nomes = {u.get("id"): u for u in ctx["rede"]}
     resultado = {
         "competencias": comps,
+        "meses_unidades": meses_lair,
         "periodo_tipo": periodo,
         "lair_empresa": lair_empresa,
         "lair_unidades": {u: arred(v) for u, v in lair_unidades.items()},
