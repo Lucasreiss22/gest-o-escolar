@@ -133,6 +133,27 @@
             </tbody>
         </table>
     </div>
+    {% if det.periodo_tipo == 'trimestral' %}
+    {% if det.periodo_fechado %}
+    <p class="hint"><strong>Período fechado:</strong> o saldo de prejuízo após este trimestre vem do fechamento.</p>
+    {% else %}
+    <p class="hint">Período aberto: o saldo é recalculado a partir dos 3 trimestres anteriores{% if det.darf_vencimento %}; pode ser fechado depois do vencimento da DARF ({{ det.darf_vencimento.strftime('%d/%m/%Y') }}){% endif %}.</p>
+    {% endif %}
+    {% if pode_ajustar_real and (not rede_tributos or rede_tributos.papel != 'filial') %}
+    {% if det.periodo_fechado %}
+    <form method="post" action="{{ url_for('lucro_real_reabrir_periodo') }}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin:6px 0;">
+        <input type="hidden" name="mes" value="{{ mes_atual }}">
+        <label>Motivo da reabertura (mínimo 15 caracteres)<br><input type="text" name="motivo" minlength="15" maxlength="1000" required style="min-width:320px;"></label>
+        <button class="btn" type="submit" onclick="return confirm('Reabrir apaga o saldo deste período e dos seguintes. Continuar?');">Reabrir período do Lucro Real</button>
+    </form>
+    {% elif det.darf_vencimento and det.darf_vencimento < hoje_data %}
+    <form method="post" action="{{ url_for('lucro_real_fechar_periodo') }}" style="margin:6px 0;" onsubmit="return confirm('Fechar o período grava o saldo de prejuízo e congela os meses com folha fechada. Continuar?');">
+        <input type="hidden" name="mes" value="{{ mes_atual }}">
+        <button class="btn" type="submit">Fechar período do Lucro Real</button>
+    </form>
+    {% endif %}
+    {% endif %}
+    {% endif %}
     {% if det.unidades and det.unidades|length > 1 %}
     <div class="table-wrap">
         <table>
