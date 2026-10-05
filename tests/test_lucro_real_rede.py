@@ -33,10 +33,11 @@ class _CursorLucroReal:
         self._resultado = []
         meses = meses or ["2026-10"]
         receitas = receitas or {"esc_matriz": 100_000.0, "esc_filial": 50_000.0}
-        self.mensalidades = {
-            s: [{"tipo": "v", "comp": m, "receita": receitas[s]} for m in meses] + [{"tipo": "iv", "comp": meses[0], "receita": 0}]
-            for s in receitas
-        }
+        self.mensalidades = {}
+        for s, valor in receitas.items():
+            por_mes = valor if isinstance(valor, dict) else {m: valor for m in meses}
+            self.mensalidades[s] = [{"tipo": "v", "comp": m, "receita": v} for m, v in sorted(por_mes.items())]
+            self.mensalidades[s].append({"tipo": "iv", "comp": min(por_mes) if por_mes else None, "receita": 0})
         self.custos = custos or {"esc_matriz": [], "esc_filial": []}
         self.funcionarios = {"esc_matriz": _funcionarios(funcionarios[0], 100), "esc_filial": _funcionarios(funcionarios[1], 200)}
         self.snapshot = snapshot or []
@@ -165,10 +166,37 @@ class LucroRealRedeTest(unittest.TestCase):
             self.assertEqual(r["rateio"][2]["total"], round(4_287.78 + 858.52 + 2_572.67, 2))
             self.assertEqual(r["rateio"].get(1, {}).get("total", 0.0), 0.0)
 
-    def test_get_nao_grava_saldo(self):
+    def test_l2_terceiro_tri_nunca_aberto_entra_na_cadeia(self):
+        custos = {
+            "esc_matriz": [
+                {"tipo": "avista", "data_custo": date(2026, 7, 10), "valor": 30_000},
+                {"tipo": "avista", "data_custo": date(2026, 12, 10), "valor": 82_700},
+            ],
+            "esc_filial": [],
+        }
+        cur = _CursorLucroReal(receitas={"esc_matriz": {"2026-12": 200_000.0}, "esc_filial": {}}, custos=custos,
+                               funcionarios=(0, 0))
+        r, _conexoes = self._rede(cur, "2026-12")
+        self.assertEqual(r["saldo_anterior"]["prejuizo_fiscal"], 30_000.00)
+        per = r["provisao"]["periodo"]
+        self.assertEqual(per["compensacao_irpj"], 30_000.00)
+        self.assertEqual(per["base_irpj"], 70_000.00)
+        self.assertEqual((per["irpj"], per["adicional"], per["csll"]), (10_500.00, 1_000.00, 6_300.00))
+        self.assertEqual(per["novo_prejuizo"], 0.0)
+
+    def test_l4_get_nao_grava_saldo(self):
         cur = _CursorLucroReal(meses=["2026-07", "2026-08", "2026-09"])
-        self._rede(cur, "2026-09")
+        token = database.definir_banco_escola("esc_matriz")
+        try:
+            with mock.patch.multiple(self.app, garantir_tabelas_folha=mock.DEFAULT, _garantir_ponto=mock.DEFAULT,
+                                     _garantir_folha_ajustes=mock.DEFAULT), \
+                    mock.patch.object(self.app, "obter_conexao"), self.app.app.test_request_context("/"):
+                real = self.app._lucro_real_rede("2026-09", cur)
+                self.app._tributos_do_mes(cur, "2026-09", real_rede=real)
+        finally:
+            database.limpar_banco_escola(token)
         self.assertFalse([c for c in cur.consultas if "lucro_real_saldos" in c and c.upper().startswith(("INSERT", "UPDATE"))])
+        self.assertFalse([c for c in cur.consultas if "tributos_snapshot" in c and c.upper().startswith(("INSERT", "UPDATE", "DELETE"))])
 
 
 if __name__ == "__main__":

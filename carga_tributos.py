@@ -325,6 +325,20 @@ def garantir_tabelas_lucro_real(cursor):
         )
         """
     )
+    cursor.execute("ALTER TABLE lucro_real_saldos ADD COLUMN IF NOT EXISTS fechado BOOLEAN DEFAULT FALSE")
+    cursor.execute("ALTER TABLE lucro_real_saldos ADD COLUMN IF NOT EXISTS fechado_por VARCHAR(150)")
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lucro_real_fechamento_log (
+            id SERIAL PRIMARY KEY,
+            periodo VARCHAR(7) NOT NULL,
+            acao VARCHAR(10) NOT NULL,
+            usuario_nome VARCHAR(150),
+            motivo TEXT,
+            em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     garantir_tributos_snapshot(cursor)
 
 
@@ -396,12 +410,16 @@ def gravar_tributos_snapshot(cursor, schema, competencia, unidade_id, regime, da
     )
 
 
-def apagar_tributos_snapshot(cursor, schema, competencias):
+def apagar_tributos_snapshot(cursor, schema, competencias=None, desde=None):
+    """Apaga o snapshot das competências pedidas ou de `desde` em diante."""
     def _apagar():
-        cursor.execute(
-            f"DELETE FROM {tabela(schema, 'tributos_snapshot')} WHERE competencia = ANY(%s)",
-            (list(competencias),),
-        )
+        if desde:
+            cursor.execute(f"DELETE FROM {tabela(schema, 'tributos_snapshot')} WHERE competencia >= %s", (desde,))
+        else:
+            cursor.execute(
+                f"DELETE FROM {tabela(schema, 'tributos_snapshot')} WHERE competencia = ANY(%s)",
+                (list(competencias or []),),
+            )
 
     try:
         _savepoint(cursor, "apaga_trib_snap", _apagar)
@@ -589,17 +607,46 @@ def saldo_prejuizo_anterior(cursor, schema, periodo):
     }
 
 
-def gravar_saldo_periodo(cursor, schema, periodo, apuracao):
+def ler_saldos_lucro_real(cursor, schema):
+    """{periodo: {"prejuizo_fiscal", "base_negativa_csll", "fechado"}} de todos os saldos gravados. Uma consulta."""
+    def _ler(com_fechado):
+        coluna = ", COALESCE(fechado, FALSE) AS fechado" if com_fechado else ""
+        cursor.execute(
+            f"SELECT periodo, prejuizo_fiscal, base_negativa_csll{coluna} FROM {tabela(schema, 'lucro_real_saldos')}"
+        )
+        return _linhas(cursor)
+
+    try:
+        linhas = _savepoint(cursor, "carga_saldos", lambda: _ler(True))
+    except Exception:
+        try:
+            linhas = _savepoint(cursor, "carga_saldos", lambda: _ler(False))
+        except Exception:
+            linhas = []
+    return {
+        l["periodo"]: {
+            "prejuizo_fiscal": _f(l.get("prejuizo_fiscal")),
+            "base_negativa_csll": _f(l.get("base_negativa_csll")),
+            "fechado": bool(l.get("fechado")) and l["periodo"] != SALDO_INICIAL,
+        }
+        for l in linhas if l.get("periodo")
+    }
+
+
+def gravar_saldo_periodo(cursor, schema, periodo, apuracao, fechado_por=None):
+    """Grava o saldo do período no fechamento explícito (nunca num GET)."""
     cursor.execute(
         f"""
         INSERT INTO {tabela(schema, 'lucro_real_saldos')}
-            (periodo, prejuizo_fiscal, base_negativa_csll, compensado_irpj, compensado_csll, atualizado_em)
-        VALUES (%s, %s, %s, %s, %s, NOW())
+            (periodo, prejuizo_fiscal, base_negativa_csll, compensado_irpj, compensado_csll, fechado, fechado_por, atualizado_em)
+        VALUES (%s, %s, %s, %s, %s, TRUE, %s, NOW())
         ON CONFLICT (periodo) DO UPDATE SET
             prejuizo_fiscal = EXCLUDED.prejuizo_fiscal,
             base_negativa_csll = EXCLUDED.base_negativa_csll,
             compensado_irpj = EXCLUDED.compensado_irpj,
             compensado_csll = EXCLUDED.compensado_csll,
+            fechado = TRUE,
+            fechado_por = EXCLUDED.fechado_por,
             atualizado_em = NOW()
         """,
         (
@@ -608,8 +655,40 @@ def gravar_saldo_periodo(cursor, schema, periodo, apuracao):
             apuracao.get("nova_base_negativa") or 0,
             apuracao.get("compensacao_irpj") or 0,
             apuracao.get("compensacao_csll") or 0,
+            (fechado_por or "")[:150] or None,
         ),
     )
+
+
+def apagar_saldos_desde(cursor, schema, periodo):
+    """Reabrir: apaga o saldo do período e dos seguintes (o saldo inicial fica)."""
+    cursor.execute(
+        f"DELETE FROM {tabela(schema, 'lucro_real_saldos')} WHERE periodo >= %s AND periodo <> %s",
+        (periodo, SALDO_INICIAL),
+    )
+
+
+def registrar_fechamento_lucro_real(cursor, schema, periodo, acao, usuario_nome=None, motivo=None):
+    cursor.execute(
+        f"INSERT INTO {tabela(schema, 'lucro_real_fechamento_log')} (periodo, acao, usuario_nome, motivo) "
+        "VALUES (%s, %s, %s, %s)",
+        (periodo, acao, (usuario_nome or "")[:150] or None, (motivo or "")[:1000] or None),
+    )
+
+
+def historico_fechamento_lucro_real(cursor, schema, limite=10):
+    def _ler():
+        cursor.execute(
+            f"SELECT periodo, acao, usuario_nome, motivo, em FROM {tabela(schema, 'lucro_real_fechamento_log')} "
+            "ORDER BY em DESC, id DESC LIMIT %s",
+            (limite,),
+        )
+        return _linhas(cursor)
+
+    try:
+        return _savepoint(cursor, "carga_log_real", _ler)
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------- montagem (pura)

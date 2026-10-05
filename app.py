@@ -288,6 +288,7 @@ from carga_tributos import (
     efeito_caixa_custo as _efeito_caixa_custo,
     gravar_saldo_periodo,
     lair_do_mes,
+    ler_saldos_lucro_real,
     ler_tributos_snapshot,
     resumir_custos as resumir_custos_operacionais,
     tabela,
@@ -316,6 +317,7 @@ from tributos_rede import (
     ratear,
     ratear_por_lucro,
     regime_apuracao_efetivo,
+    saldo_antes_do_periodo,
     validar_percentual,
 )
 from simples_nacional import _rotulo_comp, competencia_add
@@ -3975,7 +3977,7 @@ def carregar_lair_unidade(cursor, schema, competencias, dados, cfg, cfg_unidade=
     custos = carregar_custos_meses(cursor, schema, faltam)
     for comp in faltam:
         folha = fechadas[comp] if comp in fechadas else folhas.get(comp, 0.0)
-        saida[comp] = lair_do_mes(dados, comp, cfg, folha, custos.get(comp))
+        saida[comp] = dict(lair_do_mes(dados, comp, cfg, folha, custos.get(comp)), folha_fechada=comp in fechadas)
         if schema_cache:
             cache_guardar(schema_cache, saida[comp], "lair", comp, versao_cfg)
     return saida
@@ -3985,6 +3987,28 @@ def _competencias_lucro_real(mes_filtro, periodo):
     if periodo == "anual_estimativa":
         return [f"{mes_filtro[:4]}-{m:02d}" for m in range(1, int(mes_filtro[5:7]) + 1)]
     return [c for c in meses_do_trimestre(mes_filtro) if c <= mes_filtro]
+
+
+def _fim_periodo_lucro_real(mes_filtro, periodo):
+    return f"{mes_filtro[:4]}-12" if periodo == "anual_estimativa" else meses_do_trimestre(mes_filtro)[-1]
+
+
+def _periodos_anteriores_lucro_real(mes_filtro, periodo):
+    """Os 3 trimestres antes do atual, que cabem na janela de 12 meses já carregada de cada unidade.
+    Antes deles vale o último saldo gravado (fechamento) ou o saldo inicial. No anual, só o saldo gravado."""
+    if periodo == "anual_estimativa":
+        return []
+    inicio = meses_do_trimestre(mes_filtro)[0]
+    saida = []
+    for k in (3, 2, 1):
+        meses = [competencia_add(inicio, -3 * k + i) for i in range(3)]
+        saida.append({"periodo": meses[-1], "competencias": meses})
+    return saida
+
+
+def _somar_ajustes_lucro_real(lista):
+    chaves = ("adicoes_irpj", "exclusoes_irpj", "adicoes_csll", "exclusoes_csll")
+    return {k: round(sum(float((a or {}).get(k) or 0) for a in lista), 2) for k in chaves}
 
 
 def _cfg_da_unidade(cursor, ctx, schema_u):
@@ -4041,7 +4065,7 @@ def _lucro_real_rede(mes_filtro, cursor=None):
     salvo = cache_buscar(schema, "real_rede", mes_filtro, versoes)
     if salvo is not None:
         return salvo
-    lairs, meses_lair, erros = {}, {}, []
+    meses_lair, erros = {}, []
     matriz_schema = ctx["matriz"].get("db_nome") or schema
     unidades = []
     for unidade in ctx["rede"]:
@@ -4050,11 +4074,13 @@ def _lucro_real_rede(mes_filtro, cursor=None):
             erros.append(f"{unidade.get('nome')}: unidade sem banco definido.")
             continue
         unidades.append((unidade, schema_u))
-    snapshots = ler_tributos_snapshot(cursor, [(u.get("id"), s) for u, s in unidades], comps)
+    anteriores = _periodos_anteriores_lucro_real(mes_filtro, periodo)
+    todas = sorted({c for p in anteriores for c in p["competencias"]} | set(comps))
+    snapshots = ler_tributos_snapshot(cursor, [(u.get("id"), s) for u, s in unidades], todas)
     for unidade, schema_u in unidades:
         uid = unidade.get("id")
-        congelados = {c: snapshots[(uid, c)] for c in comps if (uid, c) in snapshots and "lair" in snapshots[(uid, c)]}
-        faltam = [c for c in comps if c not in congelados]
+        congelados = {c: snapshots[(uid, c)] for c in todas if (uid, c) in snapshots and "lair" in snapshots[(uid, c)]}
+        faltam = [c for c in todas if c not in congelados]
         try:
             calculados = _savepoint(
                 cursor, "lucro_real_unidade",
@@ -4063,14 +4089,24 @@ def _lucro_real_rede(mes_filtro, cursor=None):
         except Exception as e:
             erros.append(f"{unidade.get('nome')}: {e}")
             continue
-        meses_lair[uid] = {c: dict(congelados.get(c) or calculados[c], congelado=c in congelados) for c in comps}
-        lairs[uid] = [float(meses_lair[uid][c].get("lair") or 0) for c in comps]
+        meses_lair[uid] = {c: dict(congelados.get(c) or calculados[c], congelado=c in congelados) for c in todas}
     schema_matriz_q = None if matriz_schema == schema else matriz_schema
-    ajustes = ajustes_lucro_real(cursor, schema_matriz_q, comps)
-    saldo = saldo_prejuizo_anterior(cursor, schema_matriz_q, comps[0])
-    ordem = [u.get("id") for u in ctx["rede"] if u.get("id") in lairs]
-    saldo = saldo or {"periodo": None, "prejuizo_fiscal": 0.0, "base_negativa_csll": 0.0}
-    lair_empresa = [arred(sum(lairs[u][i] for u in ordem)) for i in range(len(comps))]
+    ajustes_todos = ajustes_lucro_real(cursor, schema_matriz_q, todas)
+    ajustes = {c: ajustes_todos.get(c) for c in comps}
+    ordem = [u.get("id") for u in ctx["rede"] if u.get("id") in meses_lair]
+    lair_por_comp = {c: arred(sum(float(meses_lair[u][c].get("lair") or 0) for u in ordem)) for c in todas}
+    saldo = saldo_antes_do_periodo(
+        ler_saldos_lucro_real(cursor, schema_matriz_q),
+        [
+            {"periodo": p["periodo"], "inicio": p["competencias"][0], "meses": len(p["competencias"]),
+             "lair": arred(sum(lair_por_comp[c] for c in p["competencias"])),
+             "ajustes": _somar_ajustes_lucro_real([ajustes_todos.get(c) for c in p["competencias"]])}
+            for p in anteriores
+        ],
+        comps[0],
+    )
+    lairs = {u: [float(meses_lair[u][c].get("lair") or 0) for c in comps] for u in ordem}
+    lair_empresa = [lair_por_comp[c] for c in comps]
     provisao = provisao_lucro_real(
         lair_empresa,
         [ajustes.get(c) or {} for c in comps],
@@ -4087,7 +4123,8 @@ def _lucro_real_rede(mes_filtro, cursor=None):
     nomes = {u.get("id"): u for u in ctx["rede"]}
     resultado = {
         "competencias": comps,
-        "meses_unidades": meses_lair,
+        "meses_unidades": {u: {c: meses_lair[u][c] for c in comps} for u in ordem},
+        "fim_periodo": _fim_periodo_lucro_real(mes_filtro, periodo),
         "periodo_tipo": periodo,
         "lair_empresa": lair_empresa,
         "lair_unidades": {u: arred(v) for u, v in lair_unidades.items()},
